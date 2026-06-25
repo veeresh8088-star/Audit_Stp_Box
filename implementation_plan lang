@@ -1,0 +1,102 @@
+# Refactor to LangChain, LangGraph, & Pydantic Implementation Plan
+
+This plan details the transition of the offline auditing pipeline to LangChain and LangGraph, using ChatOllama and Pydantic validation. The architecture runs completely offline on local CPU resources (Qwen2.5:7B) while preserving your custom retrieval and Jaccard deduplication logic.
+
+---
+
+## User Review Required
+
+> [!IMPORTANT]
+> **Circular Dependency Prevention**: Because `_retrieve_rag_context` is currently defined inside [app.py](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/src/ui/app.py) (which imports database models and UI states), importing it directly into a standalone `src/ai/audit_graph.py` would cause circular imports. We will import `_retrieve_rag_context` dynamically (lazy import) inside the graph's `retrieve_node` execution or pass it as an input function/handler to keep components clean.
+
+> [!WARNING]
+> **CPU Latency & Batching**: Running Qwen2.5:7B on CPU only (16GB RAM) means parallel execution must be bounded to avoid freezing the system. We will preserve your current batch size controls (e.g. 5 controls per batch) and map them to parallel thread execution in Python (`ThreadPoolExecutor`), utilizing LangChain's native async/threading invocation.
+
+---
+
+## Proposed Changes
+
+### Dependency & Models Configuration
+
+#### [MODIFY] [requirements.txt](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/requirements.txt)
+- Add:
+  ```text
+  langchain>=0.1.0
+  langgraph>=0.0.10
+  langchain-ollama>=0.1.0
+  pydantic>=2.0
+  ```
+
+#### [NEW] [audit_models.py](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/src/ai/audit_models.py)
+Define the Pydantic schema for the structured LLM output:
+- Create `AuditFinding` model matching all target fields and `Literal` restrictions (`status`, `severity`, `evidence_state`).
+- Add root validator rules ensuring audit logic conformity:
+  - If `status == "COMPLIANT"`, then `severity == "NONE"`, `gap == ""`, and `recommendation == ""`.
+  - If `status` is `"PARTIAL"`, then `severity` must be `"LOW"` or `"MEDIUM"`, and evidence, gap, and recommendation must be present.
+  - If `status` is `"NON_COMPLIANT"`, then `severity` is any non-none value, and gap/recommendation are required.
+
+---
+
+### LangChain Chains
+
+#### [NEW] [audit_chains.py](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/src/ai/audit_chains.py)
+Create modular chains using `ChatOllama` and structured output:
+- **`audit_generator_chain`**: Takes prompt template + context + control target, returns structured `AuditFinding` output using `ChatOllama.with_structured_output(AuditFinding)`.
+- **`audit_reflection_chain`**: Critic chain that takes draft `AuditFinding` + context, critiques grounding, flags hallucinations/issues, and returns refined `AuditFinding`.
+
+---
+
+### LangGraph Agentic Workflow
+
+#### [NEW] [audit_graph.py](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/src/ai/audit_graph.py)
+Implement the state graph:
+1. **AuditState**:
+   - `selected_controls`: list
+   - `retrieved_context`: str
+   - `draft_findings`: list of `AuditFinding` dicts
+   - `validated_findings`: list of `AuditFinding` dicts
+   - `iteration_count`: int
+   - `requires_review`: bool
+   - `error`: str
+2. **Nodes**:
+   - `retrieve_node`: Dynamically runs `_retrieve_rag_context()` to preserve BM25, Cosine similarity, and Jaccard deduplication logic.
+   - `generate_node`: Invokes `audit_generator_chain` for the current batch.
+   - `validation_node`: Verifies findings schema, checks that evidence locations are not empty, and validates custom alignment rules (e.g. COMPLIANT -> severity NONE).
+   - `risk_classification_node`: Double-checks compliance status/risk alignments and populates `validated_findings`.
+   - `reflection_node`: Triggers a single correction pass if `status == "PARTIAL"`, `"NON_COMPLIANT"`, or `confidence_score < 75`.
+3. **Edges**:
+   - Sequential traversal with conditional routing to `reflection_node` or `END`.
+
+---
+
+### Application Integration
+
+#### [MODIFY] [app.py](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/src/ui/app.py)
+- Import compiled graph engine `audit_graph` and execution state dictionary helper.
+- Replace background loops `_audit_batch` and `_reflect_batch` inside `_run_ollama_bg` with the compiled LangGraph execution flow.
+- Maintain target audit batch execution by mapping batches to the graph stream worker.
+
+---
+
+### Documentation & Verification Scripts
+
+#### [NEW] [test_langchain_schema.py](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/scratch/test_langchain_schema.py)
+Standalone verification script to ensure local Qwen2.5:7B correctly obeys `ChatOllama` structured schemas.
+
+#### [NEW] [test_langgraph_flow.py](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/scratch/test_langgraph_flow.py)
+Verification script that executes the complete graph node progression offline with mocked/sample context.
+
+#### [NEW] [migration_guide.md](file:///c:/Users/HP/Desktop/New%20folder%20%282%29/docs/migration_guide.md)
+A markdown guide detailing class definitions, node diagrams, validation rules, and debugging instructions.
+
+---
+
+## Verification Plan
+
+### Automated Tests
+1. Run standalone schema test:
+   `python scratch/test_langchain_schema.py`
+2. Run graph execution flow test:
+   `python scratch/test_langgraph_flow.py`
+3. Compile validation check:
+   `python -m py_compile src/ui/app.py`

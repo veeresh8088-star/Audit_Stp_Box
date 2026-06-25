@@ -1,0 +1,99 @@
+{
+    "8.5 Secure Authentication": {
+        "status": "PARTIAL",
+        "severity": "P3 Medium",
+        "evidence_strength": "Weak",
+        "control_coverage": 30,
+        "evidence_count": 2,
+        "business_impact": "Potential security exposure or compliance gap due to missing controls.",
+        "remediation_priority": "High",
+        "justification": "The provided evidence demonstrates that MFA is configured for the AWS account, which partially satisfies the control objective. However, there is no explicit mention of a password policy configuration setting, and the screenshots do not provide detailed information on how the MFA device works or if it is enforced consistently across all users.",
+        "missing_requirements": [
+            "Detailed documentation of the password policy configuration settings",
+            "Explicit evidence that MFA is enforced for all IAM users"
+        ],
+        "recommendation": "Document and enforce a comprehensive password policy, and ensure that MFA is configured and enforced for all IAM users. Provide detailed documentation on how MFA works and its implementation.",
+        "evidence": [
+            {
+                "source": "Embedded Image OCR (image2.png)",
+                "page": "",
+                "excerpt": "Additional verification required Your account is protected with multi-factor authentication (MFA)"
+            },
+            {
+                "source": "Document text",
+                "page": "",
+                "excerpt": "enter the code from your Lightsail MFA device below:"
+            }
+        ],
+        "control_id": "8.5 Secure Authentication",
+        "evidence_location": "Embedded Image OCR (image2.png) | Page/Sec ",
+        "evidence_quote": "Additional verification required Your account is protected with multi-factor authentication (MFA)",
+        "evidence_snippet": "Additional verification required Your account is protected with multi-factor authentication (MFA)",
+        "gap_description": "Business Impact: Potential security exposure or compliance gap due to missing controls. | Missing Requirements: Detailed documentation of the password policy configuration settings, Explicit evidence that MFA is enforced for all IAM users",
+        "finding": "Business Impact: Potential security exposure or compliance gap due to missing controls. | Missing Requirements: Detailed documentation of the password policy configuration settings, Explicit evidence that MFA is enforced for all IAM users",
+        "description": "Business Impact: Potential security exposure or compliance gap due to missing controls. | Missing Requirements: Detailed documentation of the password policy configuration settings, Explicit evidence that MFA is enforced for all IAM users",
+        "reasoning": "The provided evidence demonstrates that MFA is configured for the AWS account, which partially satisfies the control objective. However, there is no explicit mention of a password policy configuration setting, and the screenshots do not provide detailed information on how the MFA device works or if it is enforced consistently across all users.",
+        "confidence": 4,
+        "chunk_id": 126,
+        "evidence_source_file": "10 -Multi-factor authentication operator.docx",
+        "source_files": "10 -Multi-factor authentication operator.docx",
+        "evidence_source_type": "docx",
+        "hallucination_check": "GROUNDED",
+        "validator_note": null
+    },
+    "8.2 Privileged Access Rights": {
+        "status": "NON_COMPLIANT",
+        "severity": "P3 Medium",
+        "evidence_strength": "None",
+        "control_coverage": 0,
+        "evidence_count": 0,
+        "business_impact": "Potential security exposure or compliance gap due to missing controls.",
+        "remediation_priority": "Immediate",
+        "justification": "The provided evidence does not address any of the expected requirements for control 8.2 Privileged Access Rights, which include privileged access review and PAM logs. There is no documentation or evidence of these processes being conducted.",
+        "missing_requirements": [
+            "Privileged access review process",
+            "PAM (Privileged Access Management) system log records"
+        ],
+        "recommendation": "Implement a privileged access review process and ensure that all privileged access activities are logged using a PAM system.",
+        "evidence": [],
+        "control_id": "8.2 Privileged Access Rights",
+        "evidence_quote": "NOT_FOUND",
+        "evidence_snippet": "",
+        "gap_description": "Business Impact: Potential security exposure or compliance gap due to missing controls. | Missing Requirements: Privileged access review process, PAM (Privileged Access Management) system log records",
+        "finding": "Control requirements for 8.2 Privileged Access Rights are completely missing from the policy document.",
+        "description": "Business Impact: Potential security exposure or compliance gap due to missing controls. | Missing Requirements: Privileged access review process, PAM (Privileged Access Management) system log records",
+        "reasoning": "The provided evidence does not address any of the expected requirements for control 8.2 Privileged Access Rights, which include privileged access review and PAM logs. There is no documentation or evidence of these processes being conducted.",
+        "confidence": 1,
+        "chunk_id": null,
+        "hallucination_check": "NOT_FOUND",
+        "validator_note": "No evidence provided."
+    },
+    "8.15 Logging": {
+        "status": "NON_COMPLIANT",
+        "severity": "P3 Medium",
+        "evidence_strength": "None",
+        "control_coverage": 0,
+        "evidence_count": 0,
+        "business_impact": "Potential security exposure or compliance gap due to missing controls.",
+        "remediation_priority": "Immediate",
+        "justification": "The provided evidence does not address any of the expected requirements for logging as outlined in ISO 27001 control 8.15, which includes SIEM configuration, system logs, and log retention policies. There is no documentation or evidence that these elements are implemented.",
+        "missing_requirements": [
+            "SIEM configuration",
+            "System logs",
+            "Log retention policy"
+        ],
+        "recommendation": "Implement a SIEM solution to monitor and correlate events across the organization's systems. Establish a system log collection process and define a log retention policy that complies with organizational needs and regulatory requirements.",
+        "evidence": [],
+        "control_id": "8.15 Logging",
+        "evidence_quote": "NOT_FOUND",
+        "evidence_snippet": "",
+        "gap_description": "Business Impact: Potential security exposure or compliance gap due to missing controls. | Missing Requirements: SIEM configuration, System logs, Log retention policy",
+        "finding": "Control requirements for 8.15 Logging are completely missing from the policy document.",
+        "description": "Business Impact: Potential security exposure or compliance gap due to missing controls. | Missing Requirements: SIEM configuration, System logs, Log retention policy",
+        "reasoning": "The provided evidence does not address any of the expected requirements for logging as outlined in ISO 27001 control 8.15, which includes SIEM configuration, system logs, and log retention policies. There is no documentation or evidence that these elements are implemented.",
+        "confidence": 1,
+        "chunk_id": null,
+        "hallucination_check": "NOT_FOUND",
+        "validator_note": "No evidence provided."
+    }
+}

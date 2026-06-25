@@ -1,0 +1,21 @@
+Company Access Control Policy
+Version: 1.0
+Scope: All employees and systems
+
+1. Access Control:
+- Access to company systems is restricted to authorized personnel only.
+- Access rights must be granted based on the principle of least privilege and Role-Based Access Control (RBAC).
+- Periodic access reviews must be conducted every quarter to ensure authorization validity and remove orphaned accounts.
+- Access must be revoked immediately upon termination of employment.
+
+2. Authentication and MFA:
+- Multi-Factor Authentication (MFA) must be enforced for all external access via VPN and cloud environments.
+- Strong password complexity and rotation policies are enforced: minimum 12 characters, including upper, lower, numbers, and symbols. Passwords must be rotated every 90 days.
+
+3. Incident Management:
+- All employees must report security incidents and suspicious events immediately to the security team.
+- The incident response team will assess and triage all events to contain and remediate them.
+
+4. Backups and Business Continuity:
+- Automated daily backups must be taken and stored securely.
+- Disaster Recovery (DR) and backup restoration testing must be performed annually to verify RTO and RPO.

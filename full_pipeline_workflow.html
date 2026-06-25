@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AICyberAuditBox — Full Pipeline: Doc Upload → Final Report</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #050810;
+  --card: rgba(13,18,30,0.85);
+  --border: rgba(255,255,255,0.07);
+  --blue: #3b82f6; --blue-g: rgba(59,130,246,0.25);
+  --purple: #8b5cf6; --purple-g: rgba(139,92,246,0.25);
+  --teal: #0d9488; --teal-g: rgba(13,148,136,0.25);
+  --pink: #ec4899; --pink-g: rgba(236,72,153,0.25);
+  --emerald: #10b981; --emerald-g: rgba(16,185,129,0.25);
+  --amber: #f59e0b; --amber-g: rgba(245,158,11,0.25);
+  --red: #ef4444; --red-g: rgba(239,68,68,0.25);
+  --cyan: #06b6d4; --cyan-g: rgba(6,182,212,0.25);
+  --t1: #f1f5f9; --t2: #94a3b8; --t3: #475569;
+}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'Outfit',sans-serif;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);background-image:radial-gradient(at 0% 0%,rgba(59,130,246,.12) 0,transparent 55%),radial-gradient(at 100% 0%,rgba(139,92,246,.1) 0,transparent 55%),radial-gradient(at 50% 100%,rgba(13,148,136,.08) 0,transparent 55%);color:var(--t1);min-height:100vh;padding:20px;overflow-x:hidden}
+
+/* HEADER */
+header{max-width:1500px;margin:0 auto 20px;display:flex;justify-content:space-between;align-items:center;padding:16px 24px;background:var(--card);border:1px solid var(--border);border-radius:16px;backdrop-filter:blur(16px);box-shadow:0 8px 32px rgba(0,0,0,.6)}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-icon{font-size:2rem;animation:pulse 3s infinite ease-in-out}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+.logo h1{font-size:1.5rem;font-weight:900;background:linear-gradient(90deg,#60a5fa,#a78bfa,#2dd4bf);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.logo p{font-size:.78rem;color:var(--t2);margin-top:2px}
+.header-btns{display:flex;gap:10px}
+.btn{padding:9px 16px;border-radius:9px;font-weight:700;font-size:.82rem;cursor:pointer;border:1px solid var(--border);background:rgba(255,255,255,.03);color:var(--t1);transition:.2s;display:flex;align-items:center;gap:6px}
+.btn:hover{background:rgba(255,255,255,.08);transform:translateY(-1px)}
+.btn-play{background:linear-gradient(135deg,var(--teal),#0f766e);border:none;box-shadow:0 4px 14px var(--teal-g)}
+.btn-play:hover{box-shadow:0 6px 20px rgba(13,148,136,.5)}
+.btn-play.playing{background:linear-gradient(135deg,#dc2626,#b91c1c);box-shadow:0 4px 14px var(--red-g)}
+
+/* LAYOUT */
+.layout{max-width:1500px;margin:0 auto;display:grid;grid-template-columns:300px 1fr 360px;gap:16px;height:calc(100vh - 110px);min-height:700px}
+
+/* LEFT PANEL */
+.left-panel{display:flex;flex-direction:column;gap:14px;overflow-y:auto}
+.panel-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;backdrop-filter:blur(12px)}
+.panel-title{font-size:.75rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--t2);margin-bottom:12px;display:flex;align-items:center;gap:7px}
+.config-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.03);font-size:.8rem}
+.config-row:last-child{border-bottom:none}
+.config-label{color:var(--t2)}
+.config-val{font-weight:700;text-align:right}
+.detail-box{background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:10px;padding:14px;flex:1;overflow-y:auto}
+.detail-title{font-size:.95rem;font-weight:800;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.detail-body{font-size:.8rem;line-height:1.6;color:var(--t2)}
+.code-box{font-family:'Fira Code',monospace;font-size:.7rem;background:rgba(0,0,0,.5);border:1px solid rgba(255,255,255,.04);border-radius:8px;padding:10px;color:#86efac;margin-top:10px;white-space:pre-wrap;overflow-x:auto}
+
+/* MIDDLE PIPELINE */
+.pipeline{overflow-y:auto;padding:4px 10px;display:flex;flex-direction:column;gap:0;scroll-behavior:smooth}
+
+/* STAGE */
+.stage{border-radius:16px;padding:16px;margin-bottom:8px;border:1px solid var(--border);background:rgba(13,18,30,.6);transition:.3s;position:relative}
+.stage.active{border-color:var(--sc);box-shadow:0 0 25px var(--sg)}
+.stage-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.stage-label{font-size:.78rem;font-weight:800;text-transform:uppercase;letter-spacing:1px;color:var(--sc)}
+.stage-badge{font-size:.68rem;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:12px;padding:2px 10px;color:var(--t2)}
+.nodes{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+
+/* NODE */
+.node{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:11px;padding:12px;cursor:pointer;transition:.25s;position:relative}
+.node:hover{background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.15);transform:translateY(-2px)}
+.node.active{border-color:var(--nc) !important;box-shadow:0 0 16px var(--ng) !important;background:rgba(255,255,255,.06) !important;transform:scale(1.02)}
+.node-num{font-size:.62rem;font-weight:800;color:var(--nc);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
+.node-title{font-size:.83rem;font-weight:700;color:var(--t1)}
+.node-sub{font-size:.7rem;color:var(--t2);margin-top:2px;line-height:1.3}
+
+/* CONNECTOR */
+.connector{display:flex;justify-content:center;height:18px;position:relative}
+.connector svg{width:160px;height:18px}
+.c-base{fill:none;stroke:rgba(255,255,255,.05);stroke-width:1.5}
+.c-pulse{fill:none;stroke-width:2;stroke-dasharray:5 15;animation:dash 1.4s linear infinite;opacity:0}
+.connector.active .c-pulse{opacity:1}
+@keyframes dash{to{stroke-dashoffset:-20}}
+
+/* RIGHT PANEL */
+.right-panel{display:flex;flex-direction:column;gap:14px;overflow-y:auto}
+.console{background:#04070f;border:1px solid var(--border);border-radius:14px;flex:1;display:flex;flex-direction:column;overflow:hidden}
+.console-header{background:rgba(255,255,255,.02);border-bottom:1px solid var(--border);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;font-size:.72rem;font-weight:700;color:var(--t2);text-transform:uppercase}
+.console-status{font-size:.68rem;font-weight:700;padding:2px 8px;border-radius:8px;transition:.3s}
+.console-body{padding:14px;flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.log-line{font-family:'Fira Code',monospace;font-size:.72rem;color:#a7f3d0;line-height:1.5;white-space:pre-wrap}
+.sandbox-card{background:rgba(255,255,255,.01);border:1px solid var(--border);border-radius:9px;padding:10px;font-size:.75rem;line-height:1.4}
+.sc-header{font-weight:800;font-size:.68rem;text-transform:uppercase;display:flex;justify-content:space-between;margin-bottom:6px}
+.progress-section{padding:14px;border-top:1px solid var(--border)}
+.progress-label{display:flex;justify-content:space-between;font-size:.72rem;font-weight:700;color:var(--t2);margin-bottom:6px}
+.progress-bar{height:7px;background:rgba(0,0,0,.5);border-radius:4px;overflow:hidden}
+.progress-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--blue),var(--purple),var(--pink));border-radius:4px;transition:width .4s ease}
+
+/* REPORT STAGE bottom */
+.report-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px}
+.report-card{background:rgba(255,255,255,.02);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
+.report-num{font-size:1.4rem;font-weight:900}
+.report-lbl{font-size:.68rem;color:var(--t2);margin-top:2px}
+
+/* STAGE COLORS */
+.s-blue{--sc:var(--blue);--sg:var(--blue-g)}
+.s-purple{--sc:var(--purple);--sg:var(--purple-g)}
+.s-teal{--sc:var(--teal);--sg:var(--teal-g)}
+.s-pink{--sc:var(--pink);--sg:var(--pink-g)}
+.s-emerald{--sc:var(--emerald);--sg:var(--emerald-g)}
+.s-amber{--sc:var(--amber);--sg:var(--amber-g)}
+
+/* NODE COLORS */
+.n-blue{--nc:var(--blue);--ng:var(--blue-g)}
+.n-purple{--nc:var(--purple);--ng:var(--purple-g)}
+.n-teal{--nc:var(--teal);--ng:var(--teal-g)}
+.n-pink{--nc:var(--pink);--ng:var(--pink-g)}
+.n-emerald{--nc:var(--emerald);--ng:var(--emerald-g)}
+.n-amber{--nc:var(--amber);--ng:var(--amber-g)}
+.n-cyan{--nc:var(--cyan);--ng:var(--cyan-g)}
+
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.07);border-radius:8px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🛡️</div>
+    <div>
+      <h1>AICyberAuditBox — Full RAG Pipeline</h1>
+      <p>End-to-End: Document Upload → Hybrid RAG → LLM Analysis → Compliance Report</p>
+    </div>
+  </div>
+  <div class="header-btns">
+    <button class="btn btn-play" id="play-btn" onclick="togglePlay()">▶ Play Simulation</button>
+    <button class="btn" onclick="resetAll()">↺ Reset</button>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT: CONFIG + DETAIL -->
+  <div class="left-panel">
+    <div class="panel-card">
+      <div class="panel-title">⚙️ Pipeline Config</div>
+      <div class="config-row"><span class="config-label">Chunk Size</span><span class="config-val" style="color:var(--blue)">1000 chars / 200 overlap</span></div>
+      <div class="config-row"><span class="config-label">Excel Chunking</span><span class="config-val" style="color:var(--blue)">15 rows / sheet</span></div>
+      <div class="config-row"><span class="config-label">Embedding Model</span><span class="config-val" style="color:var(--purple)">nomic-embed-text</span></div>
+      <div class="config-row"><span class="config-label">Keyword Weight</span><span class="config-val" style="color:var(--amber)">40%</span></div>
+      <div class="config-row"><span class="config-label">Vector Weight</span><span class="config-val" style="color:var(--teal)">60%</span></div>
+      <div class="config-row"><span class="config-label">Token Target</span><span class="config-val" style="color:var(--emerald)">1500 / 2000 max</span></div>
+      <div class="config-row"><span class="config-label">Jaccard Threshold</span><span class="config-val" style="color:var(--pink)">≥ 0.97 dedupe</span></div>
+      <div class="config-row"><span class="config-label">Batch Size</span><span class="config-val">~10 controls</span></div>
+      <div class="config-row"><span class="config-label">LLM</span><span class="config-val" style="color:var(--purple)">Qwen2.5-7B (Ollama)</span></div>
+      <div class="config-row"><span class="config-label">DB</span><span class="config-val" style="color:var(--teal)">ShaktiDB Master+2 Slave</span></div>
+    </div>
+
+    <div class="panel-card" style="flex:1;display:flex;flex-direction:column;gap:10px">
+      <div class="panel-title">📖 Step Inspector</div>
+      <div class="detail-box" id="detail-box">
+        <div class="detail-title" id="detail-title" style="color:var(--blue)">
+          💡 Click any node or press Play
+        </div>
+        <div class="detail-body" id="detail-body">
+          This interactive diagram shows every step of the AICyberAuditBox pipeline — from raw document upload through hybrid RAG retrieval, local LLM analysis, and final compliance report generation with ShaktiDB persistence.
+        </div>
+        <div class="code-box" id="detail-code"># Select a node to see real code...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MIDDLE: PIPELINE STAGES -->
+  <div class="pipeline" id="pipeline">
+
+    <!-- ══ STAGE 1: DOCUMENT INGESTION ══ -->
+    <div class="stage s-blue" id="s0">
+      <div class="stage-header">
+        <span class="stage-label">① Document Ingestion</span>
+        <span class="stage-badge">Entry Point</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-blue" onclick="showNode(0)">
+          <div class="node-num">1.1</div>
+          <div class="node-title">📁 File Upload</div>
+          <div class="node-sub">PDF · DOCX · XLSX · PPTX · PNG · ZIP (recursive)</div>
+        </div>
+        <div class="node n-blue" onclick="showNode(1)">
+          <div class="node-num">1.2</div>
+          <div class="node-title">🔒 Security Scan</div>
+          <div class="node-sub">MD5 hash · file-sig · 200MB limit · malware check</div>
+        </div>
+        <div class="node n-blue" onclick="showNode(2)">
+          <div class="node-num">1.3</div>
+          <div class="node-title">🗂️ File Type Router</div>
+          <div class="node-sub">Routes to correct parser by extension</div>
+        </div>
+        <div class="node n-blue" onclick="showNode(3)">
+          <div class="node-num">1.4</div>
+          <div class="node-title">📦 ZIP Extractor</div>
+          <div class="node-sub">Recursively unpacks all supported files inside ZIP</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="c0"><svg viewBox="0 0 160 18"><path class="c-base" d="M80,0 L80,18"/><path class="c-pulse" d="M80,0 L80,18" stroke="var(--blue)"/></svg></div>
+
+    <!-- ══ STAGE 2: TEXT EXTRACTION ══ -->
+    <div class="stage s-purple" id="s1">
+      <div class="stage-header">
+        <span class="stage-label">② Text Extraction</span>
+        <span class="stage-badge">Multi-Format Parser</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-purple" onclick="showNode(4)">
+          <div class="node-num">2.1</div>
+          <div class="node-title">📄 pdfplumber</div>
+          <div class="node-sub">Native PDF text extraction, page by page</div>
+        </div>
+        <div class="node n-purple" onclick="showNode(5)">
+          <div class="node-num">2.2</div>
+          <div class="node-title">👁️ EasyOCR</div>
+          <div class="node-sub">CPU fallback — scanned PDFs & images (PNG/JPG)</div>
+        </div>
+        <div class="node n-purple" onclick="showNode(6)">
+          <div class="node-num">2.3</div>
+          <div class="node-title">📊 Excel / CSV</div>
+          <div class="node-sub">All sheets → row-by-row text serialization</div>
+        </div>
+        <div class="node n-purple" onclick="showNode(7)">
+          <div class="node-num">2.4</div>
+          <div class="node-title">📝 Word / PPTX</div>
+          <div class="node-sub">python-docx · python-pptx all slides/paragraphs</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="c1"><svg viewBox="0 0 160 18"><path class="c-base" d="M80,0 L80,18"/><path class="c-pulse" d="M80,0 L80,18" stroke="var(--purple)"/></svg></div>
+
+    <!-- ══ STAGE 3: CHUNKING & STORAGE ══ -->
+    <div class="stage s-teal" id="s2">
+      <div class="stage-header">
+        <span class="stage-label">③ Chunking & ShaktiDB Storage</span>
+        <span class="stage-badge">Indexing Phase</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-teal" onclick="showNode(8)">
+          <div class="node-num">3.1</div>
+          <div class="node-title">✂️ Text Chunker</div>
+          <div class="node-sub">1000 chars, 200 overlap, sentence-boundary aware</div>
+        </div>
+        <div class="node n-teal" onclick="showNode(9)">
+          <div class="node-num">3.2</div>
+          <div class="node-title">📋 Excel Chunker</div>
+          <div class="node-sub">15 rows per chunk, preserves headers per sheet</div>
+        </div>
+        <div class="node n-teal" onclick="showNode(10)">
+          <div class="node-num">3.3</div>
+          <div class="node-title">🗄️ ShaktiDB Write</div>
+          <div class="node-sub">DocumentChunk table → Master + 2 Slave replicas</div>
+        </div>
+        <div class="node n-teal" onclick="showNode(11)">
+          <div class="node-num">3.4</div>
+          <div class="node-title">🏷️ Metadata Tag</div>
+          <div class="node-sub">source_file · chunk_index · page · sheet stored as JSON</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="c2"><svg viewBox="0 0 160 18"><path class="c-base" d="M80,0 L80,18"/><path class="c-pulse" d="M80,0 L80,18" stroke="var(--teal)"/></svg></div>
+
+    <!-- ══ STAGE 4: SCOPE DETECTION ══ -->
+    <div class="stage s-amber" id="s3">
+      <div class="stage-header">
+        <span class="stage-label">④ AI Scope Detection</span>
+        <span class="stage-badge">Auto-Scoping</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-amber" onclick="showNode(12)">
+          <div class="node-num">4.1</div>
+          <div class="node-title">🧠 Doc Type LLM</div>
+          <div class="node-sub">LLM classifies document type from content signals</div>
+        </div>
+        <div class="node n-amber" onclick="showNode(13)">
+          <div class="node-num">4.2</div>
+          <div class="node-title">🗺️ Control Mapper</div>
+          <div class="node-sub">Maps doc types → relevant ISO 27001 control subset</div>
+        </div>
+        <div class="node n-amber" onclick="showNode(14)">
+          <div class="node-num">4.3</div>
+          <div class="node-title">✅ Control Selector</div>
+          <div class="node-sub">93 controls across 5 frameworks (ISO/SOC2/GDPR/BCMS/XBOM)</div>
+        </div>
+        <div class="node n-amber" onclick="showNode(15)">
+          <div class="node-num">4.4</div>
+          <div class="node-title">⚠️ Scope Warning</div>
+          <div class="node-sub">Flags if &lt;15 controls or missed keyword signals</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="c3"><svg viewBox="0 0 160 18"><path class="c-base" d="M80,0 L80,18"/><path class="c-pulse" d="M80,0 L80,18" stroke="var(--amber)"/></svg></div>
+
+    <!-- ══ STAGE 5: RETRIEVAL - EMBEDDING ══ -->
+    <div class="stage s-purple" id="s4">
+      <div class="stage-header">
+        <span class="stage-label">⑤ Hybrid Retrieval — RAG (R)</span>
+        <span class="stage-badge">40% Keyword + 60% Vector</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-purple" onclick="showNode(16)">
+          <div class="node-num">5.1</div>
+          <div class="node-title">🔑 Keyword Scoring</div>
+          <div class="node-sub">Synonym density matrix — weight 3x main / 2x hint / 1.5x synonym</div>
+        </div>
+        <div class="node n-purple" onclick="showNode(17)">
+          <div class="node-num">5.2</div>
+          <div class="node-title">🔢 Query Embedding</div>
+          <div class="node-sub">nomic-embed-text via Ollama → control query vector</div>
+        </div>
+        <div class="node n-purple" onclick="showNode(18)">
+          <div class="node-num">5.3</div>
+          <div class="node-title">📐 Chunk Embedding</div>
+          <div class="node-sub">ThreadPoolExecutor (8 workers) — parallel chunk vectors, cached in session</div>
+        </div>
+        <div class="node n-purple" onclick="showNode(19)">
+          <div class="node-num">5.4</div>
+          <div class="node-title">📊 Cosine Similarity</div>
+          <div class="node-sub">dot(q,c) / (‖q‖·‖c‖) — per chunk vector score</div>
+        </div>
+        <div class="node n-purple" onclick="showNode(20)">
+          <div class="node-num">5.5</div>
+          <div class="node-title">⚖️ Hybrid Merge</div>
+          <div class="node-sub">Score = 0.4 × norm_kw + 0.6 × vec_sim</div>
+        </div>
+        <div class="node n-purple" onclick="showNode(21)">
+          <div class="node-num">5.6</div>
+          <div class="node-title">🧹 Jaccard Dedup</div>
+          <div class="node-sub">Removes near-duplicates with token overlap ≥ 0.97</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="c4"><svg viewBox="0 0 160 18"><path class="c-base" d="M80,0 L80,18"/><path class="c-pulse" d="M80,0 L80,18" stroke="var(--purple)"/></svg></div>
+
+    <!-- ══ STAGE 6: AUGMENTATION ══ -->
+    <div class="stage s-teal" id="s5">
+      <div class="stage-header">
+        <span class="stage-label">⑥ Context Augmentation — (A)</span>
+        <span class="stage-badge">Context Packing</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-teal" onclick="showNode(22)">
+          <div class="node-num">6.1</div>
+          <div class="node-title">🌐 Multi-Doc Diversity</div>
+          <div class="node-sub">Injects best chunk from each under-represented file if &gt;80% from one source</div>
+        </div>
+        <div class="node n-teal" onclick="showNode(23)">
+          <div class="node-num">6.2</div>
+          <div class="node-title">💰 Token Budget</div>
+          <div class="node-sub">Accumulates chunks: 1500 target / 2000 hard-max per control batch</div>
+        </div>
+        <div class="node n-teal" onclick="showNode(24)">
+          <div class="node-num">6.3</div>
+          <div class="node-title">🔢 Chronological Sort</div>
+          <div class="node-sub">Orders by file index + chunk_index for readability</div>
+        </div>
+        <div class="node n-teal" onclick="showNode(25)">
+          <div class="node-num">6.4</div>
+          <div class="node-title">🏷️ Source Provenance</div>
+          <div class="node-sub">metadata_json → source_file, page, slide, row per chunk</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="c5"><svg viewBox="0 0 160 18"><path class="c-base" d="M80,0 L80,18"/><path class="c-pulse" d="M80,0 L80,18" stroke="var(--teal)"/></svg></div>
+
+    <!-- ══ STAGE 7: LLM GENERATION ══ -->
+    <div class="stage s-pink" id="s6">
+      <div class="stage-header">
+        <span class="stage-label">⑦ LLM Generation — (G)</span>
+        <span class="stage-badge">Senior Lead Auditor Prompt</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-pink" onclick="showNode(26)">
+          <div class="node-num">7.1</div>
+          <div class="node-title">🦙 Ollama Local LLM</div>
+          <div class="node-sub">Qwen2.5-7B / Llama3.1-8B / Gemma2-9B — zero temp, offline</div>
+        </div>
+        <div class="node n-pink" onclick="showNode(27)">
+          <div class="node-num">7.2</div>
+          <div class="node-title">📜 Auditor Prompt</div>
+          <div class="node-sub">ISO 27001 senior auditor role — evidence → clause verdict</div>
+        </div>
+        <div class="node n-pink" onclick="showNode(28)">
+          <div class="node-num">7.3</div>
+          <div class="node-title">📤 JSON Output</div>
+          <div class="node-sub">Structured: status · severity · evidence_quote · gap · recommendation</div>
+        </div>
+        <div class="node n-pink" onclick="showNode(29)">
+          <div class="node-num">7.4</div>
+          <div class="node-title">🔺 Escalation Mode</div>
+          <div class="node-sub">3B → 7B fallback if confidence &lt; threshold</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="c6"><svg viewBox="0 0 160 18"><path class="c-base" d="M80,0 L80,18"/><path class="c-pulse" d="M80,0 L80,18" stroke="var(--pink)"/></svg></div>
+
+    <!-- ══ STAGE 8: POST-PROCESSING ══ -->
+    <div class="stage s-amber" id="s7">
+      <div class="stage-header">
+        <span class="stage-label">⑧ Post-Processing & Validation</span>
+        <span class="stage-badge">Hallucination Guard</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-amber" onclick="showNode(30)">
+          <div class="node-num">8.1</div>
+          <div class="node-title">🛡️ Hallucination Check</div>
+          <div class="node-sub">Verifies evidence_quote exists in retrieved chunks</div>
+        </div>
+        <div class="node n-amber" onclick="showNode(31)">
+          <div class="node-num">8.2</div>
+          <div class="node-title">4️⃣ 4-State Verdict</div>
+          <div class="node-sub">Compliant · Partially · Non-Compliant · Out-of-Scope</div>
+        </div>
+        <div class="node n-amber" onclick="showNode(32)">
+          <div class="node-num">8.3</div>
+          <div class="node-title">🔴 P1–P4 Severity</div>
+          <div class="node-sub">Critical · High · Medium · Low — per control</div>
+        </div>
+        <div class="node n-amber" onclick="showNode(33)">
+          <div class="node-num">8.4</div>
+          <div class="node-title">💾 Batch Checkpoint</div>
+          <div class="node-sub">AuditCheckpoint saved after every ~10 controls to ShaktiDB</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector" id="c7"><svg viewBox="0 0 160 18"><path class="c-base" d="M80,0 L80,18"/><path class="c-pulse" d="M80,0 L80,18" stroke="var(--amber)"/></svg></div>
+
+    <!-- ══ STAGE 9: FINAL REPORT ══ -->
+    <div class="stage s-emerald" id="s8">
+      <div class="stage-header">
+        <span class="stage-label">⑨ Final Compliance Report</span>
+        <span class="stage-badge">Output & Persistence</span>
+      </div>
+      <div class="nodes">
+        <div class="node n-emerald" onclick="showNode(34)">
+          <div class="node-num">9.1</div>
+          <div class="node-title">📊 Finding Cards</div>
+          <div class="node-sub">Severity badge · evidence snippet · relevance score · auditor reasoning</div>
+        </div>
+        <div class="node n-emerald" onclick="showNode(35)">
+          <div class="node-num">9.2</div>
+          <div class="node-title">✏️ Auditor Review</div>
+          <div class="node-sub">Accept · Modify · Delete findings + add comments</div>
+        </div>
+        <div class="node n-emerald" onclick="showNode(36)">
+          <div class="node-num">9.3</div>
+          <div class="node-title">📥 CSV Export</div>
+          <div class="node-sub">Full control ID · evidence · status · severity · recommendation</div>
+        </div>
+        <div class="node n-emerald" onclick="showNode(37)">
+          <div class="node-num">9.4</div>
+          <div class="node-title">👤 Auditee View</div>
+          <div class="node-sub">Read-only dashboard — findings + compliance score + status lifecycle</div>
+        </div>
+        <div class="node n-emerald" onclick="showNode(38)">
+          <div class="node-num">9.5</div>
+          <div class="node-title">🗄️ DB Persist</div>
+          <div class="node-sub">AuditReport · Finding · EvidenceFile · ComplianceScore tables</div>
+        </div>
+        <div class="node n-emerald" onclick="showNode(39)">
+          <div class="node-num">9.6</div>
+          <div class="node-title">⚡ Resume Guard</div>
+          <div class="node-sub">Crash recovery — one-click resume from last checkpoint batch</div>
+        </div>
+      </div>
+      <div class="report-grid" style="margin-top:12px">
+        <div class="report-card"><div class="report-num" style="color:var(--red)">P1-P4</div><div class="report-lbl">Severity Scale</div></div>
+        <div class="report-card"><div class="report-num" style="color:var(--emerald)">93</div><div class="report-lbl">ISO Controls</div></div>
+        <div class="report-card"><div class="report-num" style="color:var(--blue)">4</div><div class="report-lbl">Compliance States</div></div>
+      </div>
+    </div>
+
+  </div><!-- /pipeline -->
+
+  <!-- RIGHT: CONSOLE -->
+  <div class="right-panel">
+    <div class="console" style="flex:1">
+      <div class="console-header">
+        <span id="console-title">Execution Console</span>
+        <span class="console-status" id="console-status" style="background:rgba(59,130,246,.15);color:var(--blue)">Idle</span>
+      </div>
+      <div class="console-body" id="console-body">
+        <div class="log-line">> AICyberAuditBox pipeline ready.
+> Press ▶ Play Simulation or click any node.</div>
+      </div>
+      <div class="progress-section">
+        <div class="progress-label">
+          <span>Pipeline Progress</span>
+          <span id="progress-lbl">0 / 9 stages</span>
+        </div>
+        <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      </div>
+    </div>
+
+    <div class="panel-card" style="min-height:180px">
+      <div class="panel-title">📋 Status Lifecycle</div>
+      <div style="display:flex;flex-direction:column;gap:6px" id="lifecycle">
+        <div class="lifecycle-step" data-step="0">⬜ Draft — Workspace ready</div>
+        <div class="lifecycle-step" data-step="1">⬜ Scanning — AI running analysis</div>
+        <div class="lifecycle-step" data-step="2">⬜ Pending Review — Report generated</div>
+        <div class="lifecycle-step" data-step="3">⬜ Reviewed — Auditee inspected</div>
+        <div class="lifecycle-step" data-step="4">⬜ Approved — Signed &amp; exported</div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /layout -->
+
+<script>
+const NODES = [
+  // Stage 1 — Ingestion
+  {title:'📁 File Upload & Ingestion',color:'var(--blue)',stage:0,
+   body:'Accepts PDF, DOCX, DOC, XLSX, XLS, CSV, PPTX, PPT, TXT, PNG, JPG, JPEG, and ZIP files up to 200MB each. The Streamlit file_uploader widget streams bytes into memory. ZIP files are detected by extension and forwarded to the ZIP extractor.',
+   code:'uploaded = st.file_uploader(\n  "Upload evidence",\n  type=["pdf","docx","xlsx","zip","png",...],\n  accept_multiple_files=True\n)'},
+  {title:'🔒 Security Scan',color:'var(--blue)',stage:0,
+   body:'Each file is hashed with MD5 to detect exact duplicates within the session. File signature bytes are checked against known formats. Files over 200MB are rejected. This prevents re-processing already scanned documents.',
+   code:'import hashlib\nbytes_data = uploaded_file.getvalue()\nhash = hashlib.md5(bytes_data).hexdigest()\nif hash in seen_hashes: skip()'},
+  {title:'🗂️ File Type Router',color:'var(--blue)',stage:0,
+   body:'The extract_text() dispatcher checks file.name extension and routes to the correct parsing engine: pdfplumber for PDFs, python-docx for Word, openpyxl for Excel, python-pptx for PowerPoint, and EasyOCR for images.',
+   code:'ext = file.name.split(".")[-1].lower()\nif ext == "pdf": parse_pdf(file)\nelif ext in ["docx","doc"]: parse_word(file)\nelif ext in ["xlsx","xls"]: parse_excel(file)\nelif ext == "zip": extract_zip(file)'},
+  {title:'📦 ZIP Recursive Extractor',color:'var(--blue)',stage:0,
+   body:'ZIP files are opened with Python\'s zipfile module. Every entry is iterated. If the entry\'s extension matches any supported type, it is extracted to memory and run through extract_text() — enabling entire folder uploads as a single ZIP.',
+   code:'zf = zipfile.ZipFile(io.BytesIO(bytes_data))\nfor entry in zf.namelist():\n  if any(entry.endswith(e) for e in EXTS):\n    buf = io.BytesIO(zf.read(entry))\n    text += extract_text(buf, name=entry)'},
+
+  // Stage 2 — Extraction
+  {title:'📄 pdfplumber Text Extraction',color:'var(--purple)',stage:1,
+   body:'PDFs are opened with pdfplumber. Each page is iterated and .extract_text() is called. If a page returns fewer than 50 characters of native text, it is flagged as scanned and EasyOCR is triggered as a fallback for that page.',
+   code:'with pdfplumber.open(file) as pdf:\n  for page in pdf.pages:\n    text = page.extract_text() or ""\n    if len(text.strip()) < 50:\n      text = ocr_page(page.to_image())'},
+  {title:'👁️ EasyOCR Fallback',color:'var(--purple)',stage:1,
+   body:'EasyOCR runs in CPU mode (gpu=False) using English neural weights. It processes page images converted from pdfplumber page renders or direct image uploads. OCR results are word-joined and appended to the extracted text buffer. Takes ~3–5s per page.',
+   code:'reader = easyocr.Reader(["en"], gpu=False)\nresult = reader.readtext(img_array, detail=0)\ntext = " ".join(result)'},
+  {title:'📊 Excel / CSV Parser',color:'var(--purple)',stage:1,
+   body:'Excel files are read with openpyxl. Every sheet is iterated. Each row is converted to a pipe-delimited string with header labels prepended. CSV files are read with csv.DictReader. This preserves tabular structure within the text chunks.',
+   code:'wb = openpyxl.load_workbook(file)\nfor sheet in wb.sheetnames:\n  ws = wb[sheet]\n  headers = [c.value for c in ws[1]]\n  for row in ws.iter_rows(min_row=2):\n    text += " | ".join(f"{h}={v}" ...)'},
+  {title:'📝 Word / PPTX Parser',color:'var(--purple)',stage:1,
+   body:'python-docx iterates doc.paragraphs and extracts .text. Tables within DOCX are also serialized. python-pptx iterates slide shapes and pulls text_frame.text, supporting all slide layouts including titles and bullet points.',
+   code:'doc = docx.Document(file)\ntext = "\\n".join(p.text for p in doc.paragraphs)\n# PPTX:\nprs = Presentation(file)\nfor slide in prs.slides:\n  for shape in slide.shapes:\n    if shape.has_text_frame: text += shape.text'},
+
+  // Stage 3 — Chunking
+  {title:'✂️ Text Chunker',color:'var(--teal)',stage:2,
+   body:'Raw text is split into 1000-character chunks with 200-character overlap. The splitter tries to break at sentence boundaries (". ") to avoid cutting mid-sentence. Each chunk gets a sequential chunk_index for ordering.',
+   code:'CHUNK_SIZE = 1000\nOVERLAP = 200\nchunks = []\nfor i in range(0, len(text), CHUNK_SIZE - OVERLAP):\n  chunks.append(text[i:i+CHUNK_SIZE])'},
+  {title:'📋 Excel Chunker',color:'var(--teal)',stage:2,
+   body:'Excel text is split into 15-row chunks per sheet rather than character chunks, because tabular data rows are semantically self-contained. Each chunk includes the header row to preserve column context for the LLM.',
+   code:'# Excel: 15-row chunks\nfor sheet_text in sheets:\n  rows = sheet_text.split("\\n")\n  header = rows[0]\n  for i in range(1,len(rows),15):\n    chunk = header + "\\n" + "\\n".join(rows[i:i+15])'},
+  {title:'🗄️ ShaktiDB Write',color:'var(--teal)',stage:2,
+   body:'Each chunk is written to the DocumentChunk table in ShaktiDB (PostgreSQL). The master node receives the write, which is synchronously replicated to Slave 1 and Slave 2. If PostgreSQL is unavailable, the app auto-switches to local SQLite.',
+   code:'db.add(DocumentChunk(\n  filename=fname,\n  chunk_index=idx,\n  content=chunk_text,\n  metadata_json=json.dumps(meta)\n))\ndb.commit()  # auto-replicated'},
+  {title:'🏷️ Metadata Tagging',color:'var(--teal)',stage:2,
+   body:'Each chunk carries a metadata_json blob storing: source_file (the actual inner file for ZIPs), chunk_index, file_type, and for PDFs the page_number, for XLSX the sheet_name and row range, for PPTX the slide_number.',
+   code:'meta = {\n  "source_file": actual_filename,\n  "chunk_index": idx,\n  "file_type": "pdf",\n  "page_number": page_num,  # pdf\n  "sheet_name": sheet,       # xlsx\n  "slide_number": slide_idx  # pptx\n}'},
+
+  // Stage 4 — Scope
+  {title:'🧠 Document Type LLM Classification',color:'var(--amber)',stage:3,
+   body:'The first ~2000 characters of the document are sent to the local LLM with a classification prompt. The LLM identifies the document type (e.g., "Access Control Policy", "Incident Response Plan", "Risk Register"). Content signals (keyword lists) are also used as fallback.',
+   code:'prompt = f"Classify this document type:\\n{context[:2000]}"\nresponse = ollama.generate(model=model, prompt=prompt)\ndoc_types = parse_types(response)'},
+  {title:'🗺️ Control Mapper',color:'var(--amber)',stage:3,
+   body:'The detected document types are mapped to relevant ISO 27001 control subsets using DOC_TYPE_MAPPINGS — a curated dictionary linking doc types to Annex A control IDs. This is how the system knows which of the 93 controls are actually testable with the given evidence.',
+   code:'# scoping_engine.py\nDOC_TYPE_MAPPINGS = {\n  "Access Control Policy": [\n    "5.15 Access Control",\n    "8.3 Information Access Restriction"\n  ],\n  "Incident Response Plan": [...]\n}'},
+  {title:'✅ Control Selection (93 Controls)',color:'var(--amber)',stage:3,
+   body:'The auditor sees 93 ISO 27001 Annex A controls grouped by category (Organisational, People, Physical, Technological). They can use All Standards, or filter to SOC 2 (30 controls), DPDP/GDPR (15), BCMS (4), or X-BOM (10) subsets. Each control has a checkbox.',
+   code:'# 5 frameworks, cross-walk mapping:\nSTANDARD_MAPPINGS = {\n  "ISO 27001": [all 93 controls],\n  "SOC 2":     [30 controls],\n  "DPDP/GDPR": [15 controls],\n  "BCMS":       [4 controls],\n  "X-BOM":      [10 controls]\n}'},
+  {title:'⚠️ Scope Warning System',color:'var(--amber)',stage:3,
+   body:'After auto-scoping, the system checks: (1) If fewer than 15 controls were selected — warns of overly restrictive classification. (2) If CONTENT_SIGNALS keywords for an unselected doc type appear ≥3 times — warns of a potentially missed scope.',
+   code:'if len(active_controls) < 15:\n  warn("Fewer than 15 controls in scope")\nfor dtype, kws in CONTENT_SIGNALS.items():\n  if dtype not in doc_types:\n    hits = sum(kw in ctx for kw in kws)\n    if hits >= 3: warn(f"Missed scope: {dtype}")'},
+
+  // Stage 5 — Retrieval
+  {title:'🔑 Keyword Synonym Scoring',color:'var(--purple)',stage:4,
+   body:'For each control batch, a keyword dictionary is built from: the control name (weight 3), prompt hints (weight 2), and synonym expansions (weight 1.5). A regex word-frequency scan then scores every chunk — high weight for primary terms, lower for synonyms.',
+   code:'for kw, weight in batch_keywords.items():\n  count = len(re.findall(\n    r"\\b" + re.escape(kw) + r"\\b",\n    chunk_lower\n  ))\n  score += count * weight'},
+  {title:'🔢 Query Embedding (nomic-embed-text)',color:'var(--purple)',stage:4,
+   body:'The combined control text (name + label + expected evidence hint) is sent to Ollama\'s nomic-embed-text model, returning a high-dimensional dense vector. This vector captures semantic meaning beyond exact keyword matches.',
+   code:'query_text = f"{control} {label} {expected}"\nresponse = ollama.embeddings(\n  model="nomic-embed-text",\n  prompt=query_text\n)\nquery_vector = response["embedding"]'},
+  {title:'📐 Chunk Embeddings (Parallel)',color:'var(--purple)',stage:4,
+   body:'All chunks are embedded in parallel using a ThreadPoolExecutor with 8 workers for speed. Each chunk\'s embedding vector is cached in st.session_state by (source_file, chunk_index) key — so re-running with same docs skips re-embedding.',
+   code:'with ThreadPoolExecutor(max_workers=8) as ex:\n  results = ex.map(embed_worker, chunks)\n# Cached:\nst.session_state.chunk_embeddings[\n  (src_file, chunk_idx)\n] = vector'},
+  {title:'📊 Cosine Similarity',color:'var(--purple)',stage:4,
+   body:'Cosine similarity is computed from scratch (no vector DB needed) as: dot(q, c) / (‖q‖ × ‖c‖). This gives a 0–1 similarity score between the query embedding and each chunk embedding.',
+   code:'def cosine(v1, v2):\n  dot = sum(x*y for x,y in zip(v1,v2))\n  n1 = sum(x*x for x in v1)**0.5\n  n2 = sum(x*x for x in v2)**0.5\n  return dot / (n1 * n2) if n1 and n2 else 0'},
+  {title:'⚖️ Hybrid Score Merge (40/60)',color:'var(--purple)',stage:4,
+   body:'The final chunk score = 0.4 × normalized_keyword_score + 0.6 × cosine_similarity. If Ollama embeddings are offline, it falls back to pure keyword scoring. This blend ensures both term-exact matches and semantic understanding are rewarded.',
+   code:'norm_kw = kw_score / max_kw_score\nhybrid_score = (\n  0.4 * norm_kw +\n  0.6 * vec_sim\n)\n# Fallback if embeddings offline:\nhybrid_score = kw_score'},
+  {title:'🧹 Jaccard Near-Dedup',color:'var(--purple)',stage:4,
+   body:'After exact deduplication, a Jaccard similarity pass removes near-duplicate chunks. Two chunks are considered duplicates if their token overlap ≥ 0.97 (|A∩B|/|A∪B|). This prevents the LLM from seeing the same evidence quoted multiple times.',
+   code:'def jaccard(t1, t2):\n  w1 = set(re.findall(r"\\b\\w+\\b", t1))\n  w2 = set(re.findall(r"\\b\\w+\\b", t2))\n  return len(w1&w2) / len(w1|w2)\nTHRESHOLD = 0.97'},
+
+  // Stage 6 — Augmentation
+  {title:'🌐 Multi-Document Diversity Enforcement',color:'var(--teal)',stage:5,
+   body:'If more than 80% of the top-K chunks are from a single file (when multiple files were uploaded), the system forcibly injects the best-scoring chunk from each under-represented file. This ensures evidence from all uploaded documents is considered.',
+   code:'files_in_top = {item[3] for item in top_window}\nmissing = set(all_files) - files_in_top\nfor fname in missing:\n  best = find_best_chunk(fname, scored)\n  deduplicated.insert(top_k, best)'},
+  {title:'💰 Token Budget Accumulation',color:'var(--teal)',stage:5,
+   body:'Chunks are added greedily until token budget is hit. Token count ≈ len(chunk) ÷ 4. Target: 1500 tokens (soft), 2000 tokens (hard-max). For multiple files, the budget scales: +400 target / +500 hard-max per additional file, up to 4000/5000.',
+   code:'TARGET = 1500 + (num_files * 400)  # multi-doc\nHARD_MAX = 2000 + (num_files * 500)\nfor chunk in deduplicated:\n  tokens = len(chunk) // 4\n  if current + tokens > HARD_MAX: break\n  selected.append(chunk)\n  current += tokens'},
+  {title:'🔢 Chronological Sort',color:'var(--teal)',stage:5,
+   body:'The final selected chunks are re-sorted by (file_index, chunk_index) so the LLM reads evidence in document order. This improves coherence of the generated reasoning — the LLM sees sections in the order they appear in the source documents.',
+   code:'file_order = {f:i for i,f in enumerate(file_names)}\nfinal = sorted(\n  selected,\n  key=lambda x: (\n    file_order.get(x[3], 999),\n    x[2]  # chunk_index\n  )\n)'},
+  {title:'🏷️ Source Provenance Metadata',color:'var(--teal)',stage:5,
+   body:'Each selected chunk\'s metadata_json is parsed to extract source provenance: source_file, page_number, sheet_name, slide_number, row_number. This data is stored as retrieved_chunk_metas and used to populate evidence_source_file and evidence_page_number in findings.',
+   code:'for _, content, idx, src, chunk_obj in final:\n  if chunk_obj and chunk_obj.metadata_json:\n    meta = json.loads(chunk_obj.metadata_json)\n    metas.append(meta)  # → Finding.evidence_source_file'},
+
+  // Stage 7 — Generation
+  {title:'🦙 Ollama Local LLM',color:'var(--pink)',stage:6,
+   body:'The LLM runs 100% offline via the Ollama server on localhost. Default: Qwen 2.5 7B (High Performance). Also supports: Qwen 2.5 3B (Light), Llama 3.1 8B, Gemma 2 9B. Zero temperature for deterministic audit verdicts. No data leaves the machine.',
+   code:'response = requests.post(\n  "http://localhost:11434/api/generate",\n  json={\n    "model": "qwen2.5:7b",\n    "prompt": audit_prompt,\n    "temperature": 0,\n    "stream": False\n  }\n)'},
+  {title:'📜 Senior Lead Auditor Prompt',color:'var(--pink)',stage:6,
+   body:'The prompt establishes the LLM as a Senior ISO 27001 Lead Auditor. It provides: (1) the ISO control definition, (2) expected evidence, (3) the retrieved evidence context. The LLM must output a structured JSON with status, severity, evidence_quote, gap, and recommendation.',
+   code:'prompt = f"""You are a Senior ISO 27001 Lead Auditor.\nControl: {control_id} {control_name}\nExpected: {expected_evidence}\n\nEvidence found:\n{condensed_context}\n\nOutput JSON: {{\n  status: Compliant|Partially Compliant|Non-Compliant|Out of Scope,\n  severity: P1|P2|P3|P4,\n  evidence_quote: "exact quote",\n  gap: "gap description",\n  recommendation: "action"\n}}"""'},
+  {title:'📤 Structured JSON Output',color:'var(--pink)',stage:6,
+   body:'The LLM response is parsed for a JSON block. Fields extracted: status, severity, evidence_found (boolean), evidence_quote, evidence_snippet, gap_description, recommendation, reasoning, confidence (0–1), hallucination_check, document_type_match.',
+   code:'import json, re\nm = re.search(r"\\{.*\\}", response, re.DOTALL)\nresult = json.loads(m.group())\nstatus = result.get("status")\nevidence_quote = result.get("evidence_quote")\nconfidence = result.get("confidence", 0.5)'},
+  {title:'🔺 Escalation Mode (3B → 7B)',color:'var(--pink)',stage:6,
+   body:'When Escalation Mode is selected, the system first runs Qwen 2.5 3B. If confidence < threshold or status is ambiguous, it escalates to Qwen 2.5 7B and re-runs the same control. This saves time on easy controls while ensuring accuracy on complex ones.',
+   code:'if mode == "Escalation":\n  result_3b = run_llm("qwen2.5:3b", prompt)\n  if result_3b["confidence"] < 0.7:\n    result = run_llm("qwen2.5:7b", prompt)\n  else:\n    result = result_3b'},
+
+  // Stage 8 — Post-processing
+  {title:'🛡️ Hallucination Check',color:'var(--amber)',stage:7,
+   body:'After LLM output, the system verifies that the evidence_quote field actually appears (or closely matches) text in the retrieved chunks. If the quote cannot be found, requires_human_review is set to True and the finding is flagged with a review_note.',
+   code:'if evidence_quote:\n  found = any(\n    evidence_quote[:50].lower()\n    in chunk.lower()\n    for chunk in retrieved_chunks\n  )\n  if not found:\n    finding["requires_human_review"] = True'},
+  {title:'4️⃣ 4-State Compliance Verdict',color:'var(--amber)',stage:7,
+   body:'Every control gets exactly one of 4 states: ✅ Compliant (evidence directly satisfies control), ⚠️ Partially Compliant (evidence exists but gaps remain), ❌ Non-Compliant (no valid evidence found), ➖ Out of Scope (control not applicable to this organization/doc set).',
+   code:'STATUS_MAP = {\n  "Compliant":          "✅ Control satisfied",\n  "Partially Compliant": "⚠️ Gaps remain",\n  "Non-Compliant":      "❌ No evidence",\n  "Out of Scope":       "➖ Not applicable"\n}'},
+  {title:'🔴 P1–P4 Severity Classification',color:'var(--amber)',stage:7,
+   body:'The LLM assigns a severity to each Non-Compliant or Partially Compliant finding: P1 Critical (immediate risk), P2 High (significant gap), P3 Medium (moderate gap), P4 Low (minor gap). Compliant controls are not assigned a severity.',
+   code:'SEVERITY = {\n  "P1 Critical": "Immediate risk — halt operations",\n  "P2 High":     "Significant gap — urgent action",\n  "P3 Medium":   "Moderate risk — plan remediation",\n  "P4 Low":      "Minor gap — schedule fix"\n}'},
+  {title:'💾 Batch Checkpoint (Crash-Resilient)',color:'var(--amber)',stage:7,
+   body:'Results are saved to AuditCheckpoint after every ~10 controls. The checkpoint stores: partial_results_json, completed_batches, total_controls, file_names_json, and context_text. On restart, a "Resume Interrupted Audit" banner appears with one-click resume.',
+   code:'db.add(AuditCheckpoint(\n  session_id=session_id,\n  partial_results_json=json.dumps(results),\n  completed_batches=batch_num,\n  total_controls=total,\n  status="in_progress"\n))\ndb.commit()'},
+
+  // Stage 9 — Report
+  {title:'📊 Interactive Finding Cards',color:'var(--emerald)',stage:8,
+   body:'The final report renders each finding as a card showing: Control ID + Name, Compliance Status badge, Severity badge (P1–P4 color-coded), Relevance Score, Evidence Found indicator, Evidence Snippet (exact quote from document), and full Auditor Reasoning from the LLM.',
+   code:'# Rendered in Streamlit:\nfor finding in findings:\n  render_card(\n    control=finding["control"],\n    status=finding["status"],\n    severity=finding["severity"],\n    evidence=finding["evidence_snippet"],\n    reasoning=finding["reasoning"]\n  )'},
+  {title:'✏️ Auditor Review Interface',color:'var(--emerald)',stage:8,
+   body:'The auditor can: Accept findings as-is, Modify the status/severity, Delete false positives, or Add written comments. Changes are immediately reflected in the compliance score recalculation. A Force Save option commits unreviewed controls.',
+   code:'col_accept, col_modify, col_delete = st.columns(3)\nif col_accept.button("✓ Accept"):\n  finding["status"] = "Accepted"\nelif col_modify.button("✏ Modify"):\n  show_edit_form(finding)\nelif col_delete.button("✕ Delete"):\n  findings.remove(finding)'},
+  {title:'📥 CSV Export',color:'var(--emerald)',stage:8,
+   body:'The full audit report can be exported as CSV containing: Control ID, Control Name, Relevance Score, Evidence Found (Y/N), Evidence Snippet, Compliance Status, Severity, Finding Description, Recommendation, and Auditor Reasoning — one row per control.',
+   code:'df = pd.DataFrame(findings)\ndf.to_csv(\n  "audit_report.csv",\n  columns=["control_id","status",\n    "severity","evidence_snippet",\n    "recommendation","reasoning"]\n)'},
+  {title:'👤 Auditee Read-Only View',color:'var(--emerald)',stage:8,
+   body:'Auditee users log in and see a read-only dashboard with all submitted reports. They can browse finding cards (no edit capability), view the compliance score percentage, and track the status lifecycle (Draft → Pending Review → Approved/Rejected).',
+   code:'if role == "auditee":\n  render_read_only_findings(\n    findings=report.findings,\n    resolved_list=report.resolved_list\n  )\n  # No upload/run/edit buttons shown'},
+  {title:'🗄️ ShaktiDB Full Persistence',color:'var(--emerald)',stage:8,
+   body:'The complete audit is persisted across 6 normalized tables: AuditReport (session metadata), Finding (all control results), EvidenceFile (uploaded file references), ComplianceScore (framework percentage), AuditorFeedback (learning memory), SystemEvent (privacy-safe audit log).',
+   code:'# 6 normalized tables:\n# AuditReport, Finding, EvidenceFile\n# ComplianceScore, AuditorFeedback\n# SystemEvent, DocumentChunk\n# + AuditCheckpoint, AuditRecord\n# Master → Slave1 + Slave2 replication'},
+  {title:'⚡ Crash-Resilient Resume Guard',color:'var(--emerald)',stage:8,
+   body:'On app restart after a crash, the system queries for AuditCheckpoint rows with status="in_progress". A recovery banner shows the percentage complete, number of controls saved, and the model used. One click resumes from the last saved batch without re-processing completed controls.',
+   code:'resumable = db.query(AuditCheckpoint)\n  .filter(status="in_progress").first()\nif resumable:\n  show_resume_banner(\n    saved=len(partial_results),\n    pct=done/total * 100\n  )'}
+];
+
+const STAGE_CONSOLE = [
+  {title:'Document Upload', status:'📁 INGESTING', color:'var(--blue)',
+   logs:`> Reading file stream buffer...
+> File: Incident_Response_Plan_v2.1.pdf (669KB)
+> Calculating MD5 hash for dedup check...
+> Hash: a3f9c2... (new file, proceeding)
+> File type: PDF — routing to pdfplumber`,
+   card:{header:'BUFFER STREAM',body:'File bytes read: 669,274\nExtension: .pdf\nMD5: a3f9c2d1...'}},
+  {title:'Text Extraction', status:'🔍 PARSING', color:'var(--purple)',
+   logs:`> pdfplumber: opening PDF pages...
+> Page 1: 847 chars extracted (native)
+> Page 2: 923 chars extracted (native)
+> Page 7: 12 chars — SCANNED PAGE detected
+> Triggering EasyOCR fallback on page 7...
+> [EasyOCR] CPU mode | Extracted 312 words in 4.2s`,
+   card:{header:'EXTRACTION LOG',body:'Pages: 18 total\nNative: 17 pages\nOCR fallback: 1 page\nTotal text: 14,832 chars'}},
+  {title:'Chunking & Storage', status:'✂️ CHUNKING', color:'var(--teal)',
+   logs:`> Chunking text: 1000 chars / 200 overlap
+> Created 18 chunks from PDF
+> Writing to ShaktiDB (Master node)...
+> ✓ 18 DocumentChunk rows committed
+> Replicated to Slave1 + Slave2
+> Metadata tagged: source_file, page_number`,
+   card:{header:'SHAKTIDB WRITE',body:'Chunks created: 18\nChunk size: ~1000 chars\nOverlap: 200 chars\nDB: Master + 2 Slaves ✓'}},
+  {title:'Scope Detection', status:'🧠 SCOPING', color:'var(--amber)',
+   logs:`> Running document type classification...
+> LLM: "Incident Response Plan detected"
+> Mapping to control subset...
+> 24 controls identified as in-scope
+> Scope warnings: none
+> Auto-selecting relevant checkboxes`,
+   card:{header:'SCOPE RESULT',body:'Doc type: Incident Response Plan\nControls in scope: 24 / 93\nFramework: ISO 27001\nWarnings: 0'}},
+  {title:'Hybrid Retrieval', status:'⚖️ RETRIEVING', color:'var(--purple)',
+   logs:`> Building keyword matrix for batch of 10 controls...
+> Scoring 18 chunks by keyword density...
+> Generating query embedding (nomic-embed-text)...
+> Embedding 18 chunks [8 threads parallel]...
+> Cosine similarity computed for all chunks
+> Hybrid merge: 0.4×kw + 0.6×vector
+> Jaccard dedup: 2 near-duplicates removed
+> Selected top 6 chunks (1,487 tokens)`,
+   card:{header:'HYBRID SCORES',body:'Keyword hits: 12/18 chunks\nVector sim avg: 0.73\nJaccard removed: 2\nFinal chunks: 6 (1,487 tokens)'}},
+  {title:'Context Augmentation', status:'📦 PACKING', color:'var(--teal)',
+   logs:`> Checking multi-doc diversity...
+> Single file — diversity OK
+> Token budget: 1,487 / 1,500 (target met)
+> Chronological sort applied
+> Source provenance tagged per chunk
+> Context window ready for LLM`,
+   card:{header:'CONTEXT WINDOW',body:'Chunks packed: 6\nTokens: 1,487 / 2,000 max\nSource file: 1\nProvenance: page numbers ✓'}},
+  {title:'LLM Generation', status:'🦙 GENERATING', color:'var(--pink)',
+   logs:`> Calling Ollama: qwen2.5:7b (local)
+> Temperature: 0 (deterministic)
+> Prompt: Senior ISO 27001 Lead Auditor
+> Control: 5.24 Incident Management Planning
+> Processing... (avg ~3.2s per control)
+> JSON response received
+> Status: Partially Compliant
+> Severity: P2 High | Confidence: 0.84`,
+   card:{header:'LLM OUTPUT',body:'Model: qwen2.5:7b\nControl: 5.24 IRP\nStatus: Partially Compliant\nSeverity: P2 High\nConfidence: 0.84'}},
+  {title:'Post-Processing', status:'🛡️ VALIDATING', color:'var(--amber)',
+   logs:`> Hallucination check: evidence_quote verified ✓
+> 4-state verdict: Partially Compliant
+> Severity: P2 High assigned
+> Saving batch checkpoint to ShaktiDB...
+> Checkpoint: batch 2/3 committed
+> 10 controls processed this batch
+> 20/24 controls complete`,
+   card:{header:'VALIDATION',body:'Quote verified: ✓\nVerdict: Partially Compliant\nSeverity: P2 High\nCheckpoint: 2/3 saved'}},
+  {title:'Final Report', status:'✅ COMPLETE', color:'var(--emerald)',
+   logs:`> ✅ All 24 controls processed!
+> Compliant: 8 controls
+> Partially Compliant: 11 controls
+> Non-Compliant: 4 controls
+> Out of Scope: 1 control
+> Compliance Score: 33%
+> Report saved to ShaktiDB
+> Status → Pending Review
+> CSV export ready`,
+   card:{header:'AUDIT COMPLETE',body:'Compliant: 8 ✅\nPartial: 11 ⚠️\nNon-Compliant: 4 ❌\nScore: 33% | Status: Pending Review'}}
+];
+
+let activeNode = -1;
+let isPlaying = false;
+let playTimer = null;
+let currentStage = -1;
+
+function showNode(idx) {
+  const n = NODES[idx];
+  if (!n) return;
+  activeNode = idx;
+  // clear all active nodes
+  document.querySelectorAll('.node').forEach(el => el.classList.remove('active'));
+  // activate this one
+  const allNodes = document.querySelectorAll('.node');
+  allNodes[idx] && allNodes[idx].classList.add('active');
+  // activate stage
+  document.querySelectorAll('.stage').forEach(el => el.classList.remove('active'));
+  document.getElementById('s' + n.stage).classList.add('active');
+  // update connector
+  if (n.stage > 0) activateConnector(n.stage - 1);
+
+  document.getElementById('detail-title').style.color = n.color;
+  document.getElementById('detail-title').textContent = n.title;
+  document.getElementById('detail-body').textContent = n.body;
+  document.getElementById('detail-code').textContent = n.code;
+}
+
+function activateConnector(idx) {
+  document.querySelectorAll('.connector').forEach(el => el.classList.remove('active'));
+  const c = document.getElementById('c' + idx);
+  if (c) c.classList.add('active');
+}
+
+function setConsole(stageIdx) {
+  const s = STAGE_CONSOLE[stageIdx];
+  if (!s) return;
+  document.getElementById('console-title').textContent = s.title;
+  const statusEl = document.getElementById('console-status');
+  statusEl.textContent = s.status;
+  statusEl.style.background = s.color.replace('var(--', 'rgba(').replace(')',',0.15)').replace('--','');
+  statusEl.style.color = s.color;
+
+  const body = document.getElementById('console-body');
+  body.innerHTML = `
+    <div class="log-line">${s.logs}</div>
+    <div class="sandbox-card">
+      <div class="sc-header"><span style="color:${s.color}">${s.card.header}</span><span style="color:var(--t2)">ACTIVE</span></div>
+      <div style="font-family:'Fira Code',monospace;font-size:.72rem;color:var(--t2);white-space:pre-wrap">${s.card.body}</div>
+    </div>`;
+
+  // progress
+  const pct = Math.round((stageIdx + 1) / 9 * 100);
+  document.getElementById('progress-fill').style.width = pct + '%';
+  document.getElementById('progress-lbl').textContent = `${stageIdx + 1} / 9 stages`;
+
+  // lifecycle
+  const lifecycleMap = {0:0,1:0,2:0,3:0,4:1,5:1,6:2,7:2,8:3};
+  const lStep = lifecycleMap[stageIdx] ?? 0;
+  document.querySelectorAll('.lifecycle-step').forEach((el, i) => {
+    const icons = ['✅','🔄','🟡','🔵','✅'];
+    const colors = ['var(--emerald)','var(--blue)','var(--amber)','var(--cyan)','var(--emerald)'];
+    if (i < lStep) {
+      el.style.color = 'var(--emerald)';
+      el.textContent = el.textContent.replace(/^[^ ]+ /, '✅ ');
+    } else if (i === lStep) {
+      el.style.color = colors[i] || 'var(--blue)';
+    } else {
+      el.style.color = 'var(--t3)';
+    }
+  });
+}
+
+function runStage(stageIdx) {
+  if (stageIdx >= 9) { stopPlay(); return; }
+  currentStage = stageIdx;
+
+  // activate stage visually
+  document.querySelectorAll('.stage').forEach(el => el.classList.remove('active'));
+  document.getElementById('s' + stageIdx).classList.add('active');
+  document.getElementById('s' + stageIdx).scrollIntoView({behavior:'smooth', block:'center'});
+
+  if (stageIdx > 0) activateConnector(stageIdx - 1);
+
+  // activate first node of stage
+  const stageNodes = document.querySelectorAll('.node');
+  let count = 0;
+  stageNodes.forEach((el, i) => {
+    const stageN = NODES[i];
+    if (stageN && stageN.stage === stageIdx) {
+      document.querySelectorAll('.node').forEach(n => n.classList.remove('active'));
+      el.classList.add('active');
+      showNode(i);
+      return;
+    }
+  });
+
+  setConsole(stageIdx);
+}
+
+function togglePlay() {
+  if (isPlaying) { stopPlay(); return; }
+  isPlaying = true;
+  const btn = document.getElementById('play-btn');
+  btn.textContent = '⏹ Stop';
+  btn.classList.add('playing');
+  currentStage = 0;
+  runStep();
+}
+
+function runStep() {
+  if (!isPlaying || currentStage >= 9) { stopPlay(); return; }
+  runStage(currentStage);
+  currentStage++;
+  playTimer = setTimeout(runStep, 2200);
+}
+
+function stopPlay() {
+  isPlaying = false;
+  clearTimeout(playTimer);
+  const btn = document.getElementById('play-btn');
+  btn.textContent = '▶ Play Simulation';
+  btn.classList.remove('playing');
+}
+
+function resetAll() {
+  stopPlay();
+  currentStage = -1;
+  document.querySelectorAll('.stage').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.node').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.connector').forEach(el => el.classList.remove('active'));
+  document.getElementById('detail-title').textContent = '💡 Click any node or press Play';
+  document.getElementById('detail-body').textContent = 'This interactive diagram shows every step of the AICyberAuditBox pipeline — from raw document upload through hybrid RAG retrieval, local LLM analysis, and final compliance report generation.';
+  document.getElementById('detail-code').textContent = '# Select a node to see real code...';
+  document.getElementById('console-body').innerHTML = '<div class="log-line">> Pipeline reset.\n> Press ▶ Play Simulation or click any node.</div>';
+  document.getElementById('progress-fill').style.width = '0%';
+  document.getElementById('progress-lbl').textContent = '0 / 9 stages';
+  document.getElementById('console-status').textContent = 'Idle';
+  document.getElementById('console-status').style.color = 'var(--blue)';
+  document.getElementById('console-title').textContent = 'Execution Console';
+  document.querySelectorAll('.lifecycle-step').forEach(el => { el.style.color = 'var(--t3)'; });
+}
+</script>
+</body>
+</html>

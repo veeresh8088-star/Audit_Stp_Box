@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AICyberAuditBox — Animated Workflow & Status Flow</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #07090f;
+            --card-bg: rgba(13, 17, 23, 0.75);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-blue: #2563eb;
+            --accent-blue-glow: rgba(37, 99, 235, 0.4);
+            
+            --admin-color: #3b82f6;
+            --admin-glow: rgba(59, 130, 246, 0.3);
+            --auditee-color: #14b8a6;
+            --auditee-glow: rgba(20, 184, 166, 0.3);
+            --auditor-color: #8b5cf6;
+            --auditor-glow: rgba(139, 92, 246, 0.3);
+
+            --status-draft: #64748b;
+            --status-submitted: #3b82f6;
+            --status-pending: #fb923c;
+            --status-reviewed: #06b6d4;
+            --status-approved: #22c55e;
+            --status-rejected: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(37, 99, 235, 0.1) 0px, transparent 50%),
+                radial-gradient(at 50% 0%, rgba(139, 92, 246, 0.08) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(20, 184, 166, 0.06) 0px, transparent 50%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 30px;
+            overflow-x: hidden;
+        }
+
+        /* ── HEADER ── */
+        header {
+            max-width: 1400px;
+            margin: 0 auto 30px auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .logo-icon {
+            font-size: 2.2rem;
+            filter: drop-shadow(0 0 10px var(--accent-blue-glow));
+        }
+
+        .logo-text h1 {
+            font-size: 1.6rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa, #22d3ee);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-text p {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .controls-area {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .btn-active-admin {
+            border-color: var(--admin-color);
+            background: rgba(59, 130, 246, 0.1);
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.15);
+        }
+
+        .btn-active-auditee {
+            border-color: var(--auditee-color);
+            background: rgba(20, 184, 166, 0.1);
+            box-shadow: 0 0 15px rgba(20, 184, 166, 0.15);
+        }
+
+        .btn-active-auditor {
+            border-color: var(--auditor-color);
+            background: rgba(139, 92, 246, 0.1);
+            box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #2563eb, #1d4ed8);
+            border: none;
+            box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+        }
+
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5);
+        }
+
+        /* ── WORKFLOW CONTAINER ── */
+        .workspace {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 30px;
+        }
+
+        /* ── SIDEBAR PANEL ── */
+        .info-panel {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+            height: fit-content;
+        }
+
+        .info-panel h3 {
+            font-size: 1.15rem;
+            font-weight: 700;
+            border-bottom: 1px dashed var(--border-color);
+            padding-bottom: 10px;
+            color: #f8fafc;
+        }
+
+        .simulator-box {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 15px;
+        }
+
+        .sim-title {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 5px;
+        }
+
+        .sim-body {
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: #cbd5e1;
+        }
+
+        .legend {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .dot-admin { background-color: var(--admin-color); box-shadow: 0 0 8px var(--admin-glow); }
+        .dot-auditee { background-color: var(--auditee-color); box-shadow: 0 0 8px var(--auditee-glow); }
+        .dot-auditor { background-color: var(--auditor-color); box-shadow: 0 0 8px var(--auditor-glow); }
+
+        /* ── SWIMLANES DIAGRAM GRID ── */
+        .diagram-container {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            position: relative;
+        }
+
+        .swimlane {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+            position: relative;
+            transition: all 0.4s ease;
+        }
+
+        .swimlane-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 12px;
+        }
+
+        .lane-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.15rem;
+            font-weight: 700;
+        }
+
+        .lane-tag {
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Custom colors for swimlanes */
+        .lane-admin { border-left: 4px solid var(--admin-color); }
+        .lane-admin .lane-title { color: var(--admin-color); }
+        .lane-admin .lane-tag { background: rgba(59, 130, 246, 0.1); border: 1px solid var(--admin-color); color: var(--admin-color); }
+
+        .lane-auditee { border-left: 4px solid var(--auditee-color); }
+        .lane-auditee .lane-title { color: var(--auditee-color); }
+        .lane-auditee .lane-tag { background: rgba(20, 184, 166, 0.1); border: 1px solid var(--auditee-color); color: var(--auditee-color); }
+
+        .lane-auditor { border-left: 4px solid var(--auditor-color); }
+        .lane-auditor .lane-title { color: var(--auditor-color); }
+        .lane-auditor .lane-tag { background: rgba(139, 92, 246, 0.1); border: 1px solid var(--auditor-color); color: var(--auditor-color); }
+
+        /* Dimming effect when focusing role */
+        .dimmed {
+            opacity: 0.25;
+            filter: blur(2px) grayscale(50%);
+            pointer-events: none;
+        }
+
+        /* Nodes Grid inside lanes */
+        .nodes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        .node {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            cursor: pointer;
+            opacity: 0;
+            animation: fadeInUp 0.6s ease forwards;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .node:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .node-active {
+            background: rgba(255, 255, 255, 0.06) !important;
+            border-color: var(--active-node-border) !important;
+            box-shadow: 0 0 20px var(--active-node-shadow) !important;
+            transform: scale(1.02) translateY(-2px);
+        }
+
+        .node-admin-style { --active-node-border: var(--admin-color); --active-node-shadow: rgba(59, 130, 246, 0.2); }
+        .node-auditee-style { --active-node-border: var(--auditee-color); --active-node-shadow: rgba(20, 184, 166, 0.2); }
+        .node-auditor-style { --active-node-border: var(--auditor-color); --active-node-shadow: rgba(139, 92, 246, 0.2); }
+
+        .node-step-badge {
+            position: absolute;
+            top: -10px;
+            left: 15px;
+            background: #1e293b;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 2px 10px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+        }
+
+        .node-active .node-step-badge {
+            color: var(--text-primary);
+            border-color: var(--active-node-border);
+        }
+
+        .node-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: var(--text-primary);
+        }
+
+        .node-header svg {
+            width: 18px;
+            height: 18px;
+            color: var(--node-icon-color);
+        }
+
+        .node-admin-style .node-header svg { var(--node-icon-color): var(--admin-color); }
+        .node-auditee-style .node-header svg { var(--node-icon-color): var(--auditee-color); }
+        .node-auditor-style .node-header svg { var(--node-icon-color): var(--auditor-color); }
+
+        .node-desc {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        /* ── CONNECTION LINES OVERLAY ── */
+        .svg-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* ── TIMELINE STATUS FLOW ── */
+        .status-timeline-container {
+            max-width: 1400px;
+            margin: 30px auto 0 auto;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            backdrop-filter: blur(12px);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        .status-timeline-container h3 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .timeline-flow {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .timeline-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            z-index: 2;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .timeline-step:hover {
+            transform: translateY(-2px);
+        }
+
+        .status-pill {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-secondary);
+            transition: all 0.3s ease;
+        }
+
+        .timeline-step:hover .status-pill {
+            border-color: rgba(255, 255, 255, 0.2);
+            color: var(--text-primary);
+        }
+
+        /* Timeline active status coloring */
+        .timeline-active .status-pill {
+            box-shadow: 0 0 15px var(--pill-glow);
+            border-color: var(--pill-color) !important;
+            background: var(--pill-bg) !important;
+            color: var(--pill-text) !important;
+        }
+
+        .pill-draft { --pill-color: var(--status-draft); --pill-glow: rgba(100, 116, 139, 0.3); --pill-bg: rgba(100, 116, 139, 0.1); --pill-text: #cbd5e1; }
+        .pill-submitted { --pill-color: var(--status-submitted); --pill-glow: rgba(59, 130, 246, 0.3); --pill-bg: rgba(59, 130, 246, 0.1); --pill-text: #93c5fd; }
+        .pill-pending { --pill-color: var(--status-pending); --pill-glow: rgba(251, 146, 60, 0.4); --pill-bg: rgba(251, 146, 60, 0.15); --pill-text: #fdba74; }
+        .pill-reviewed { --pill-color: var(--status-reviewed); --pill-glow: rgba(6, 182, 212, 0.3); --pill-bg: rgba(6, 182, 212, 0.1); --pill-text: #67e8f9; }
+        .pill-approved { --pill-color: var(--status-approved); --pill-glow: rgba(34, 197, 94, 0.4); --pill-bg: rgba(34, 197, 94, 0.15); --pill-text: #86efac; }
+        .pill-rejected { --pill-color: var(--status-rejected); --pill-glow: rgba(239, 68, 68, 0.4); --pill-bg: rgba(239, 68, 68, 0.15); --pill-text: #fca5a5; }
+
+        .timeline-desc {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            margin-top: 6px;
+            font-weight: 500;
+            text-align: center;
+            max-width: 120px;
+        }
+
+        .timeline-active .timeline-desc {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .timeline-line-connector {
+            position: absolute;
+            top: 18px;
+            left: 5%;
+            width: 90%;
+            height: 2px;
+            background: var(--border-color);
+            z-index: 1;
+        }
+
+        .timeline-line-progress {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #64748b, #3b82f6, #fb923c, #06b6d4, #22c55e);
+            transition: width 0.5s ease;
+        }
+
+        /* ── RESPONSIVE ── */
+        @media (max-width: 1024px) {
+            .workspace {
+                grid-template-columns: 1fr;
+            }
+            .timeline-line-connector {
+                display: none;
+            }
+            .timeline-flow {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .timeline-step {
+                flex-direction: row;
+                gap: 15px;
+            }
+            .timeline-desc {
+                text-align: left;
+                max-width: 100%;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ── HEADER ── -->
+    <header>
+        <div class="logo-area">
+            <div class="logo-icon">🛡️</div>
+            <div class="logo-text">
+                <h1>AICyberAuditBox</h1>
+                <p>Offline Agentic RAG Cyber Security Audit Intelligence Workflow</p>
+            </div>
+        </div>
+        <div class="controls-area">
+            <button class="btn" id="filter-all" onclick="filterRole('all')">Show All Flow</button>
+            <button class="btn" id="filter-admin" onclick="filterRole('admin')">Admin View</button>
+            <button class="btn" id="filter-auditee" onclick="filterRole('auditee')">Auditee View</button>
+            <button class="btn" id="filter-auditor" onclick="filterRole('auditor')">Auditor View</button>
+            <button class="btn btn-primary" onclick="startSimulation()">▶ Play Simulation</button>
+        </div>
+    </header>
+
+    <!-- ── WORKSPACE ── -->
+    <div class="workspace">
+        
+        <!-- SIDEBAR DETAILS PANEL -->
+        <div class="info-panel">
+            <h3>📖 System Simulator</h3>
+            <div class="simulator-box">
+                <div class="sim-title" id="sim-step-title">Simulation Standby</div>
+                <div class="sim-body" id="sim-step-desc">
+                    Click <b>Play Simulation</b> to trigger the animated multi-role data flow or select individual steps in the swimlanes to inspect.
+                </div>
+            </div>
+            
+            <div class="legend">
+                <h4 style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase;">Role Lanes</h4>
+                <div class="legend-item">
+                    <span class="legend-dot dot-admin"></span>
+                    <span>Admin (Full Settings)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot dot-auditee"></span>
+                    <span>Auditor (Analysis & Submission)</span>
+                </div>
+                <div class="legend-item">
+                    <span class="legend-dot dot-auditor"></span>
+                    <span>Auditee (Client Being Audited)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- DIAGRAM SWIMLANES -->
+        <div class="diagram-container" id="diagram-container">
+            
+            <!-- SVG Connection Lines -->
+            <svg class="svg-overlay" id="svg-overlay" width="100%" height="100%">
+                <!-- Base Flow Connections (SVG paths added dynamically or statically using percentage nodes) -->
+                <defs>
+                    <linearGradient id="grad-teal-purple" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#14b8a6" />
+                        <stop offset="100%" stop-color="#8b5cf6" />
+                    </linearGradient>
+                    <linearGradient id="grad-purple-teal" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#8b5cf6" />
+                        <stop offset="100%" stop-color="#14b8a6" />
+                    </linearGradient>
+                </defs>
+            </svg>
+
+            <!-- 1. ADMIN SWIMLANE -->
+            <div class="swimlane lane-admin" id="lane-admin">
+                <div class="swimlane-header">
+                    <div class="lane-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" />
+                        </svg>
+                        Admin Command
+                    </div>
+                    <span class="lane-tag">Full Access</span>
+                </div>
+                <div class="nodes-grid">
+                    <div class="node node-admin-style" id="node-admin-users" onclick="showNode('admin-users')" style="animation-delay: 0.1s;">
+                        <span class="node-step-badge">SYSTEM</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.109A11.386 11.386 0 0 1 10.089 20c-2.207 0-4.276-.626-6.02-1.706L3 20.25a.75.75 0 0 1-1.077-.891l.83-2.903a8.934 8.934 0 0 1-.894-3.128c0-4.437 3.21-8.124 7.47-8.831m9.273 17.77a11.39 11.39 0 0 0 2.625-.372 10.437 10.437 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M10.089 20a11.385 11.385 0 0 1-5.011-1.109A8.934 8.934 0 0 1 3 17.185V17c0-2.613 2.112-4.73 4.73-4.73h4.63c2.613 0 4.73 2.112 4.73 4.73v.185a8.934 8.934 0 0 1-2.27 4.106Z" />
+                            </svg>
+                            User Management
+                        </div>
+                        <div class="node-desc">Create and manage accounts and user roles (Auditee / Auditor / Admin).</div>
+                    </div>
+                    <div class="node node-admin-style" id="node-admin-reports" onclick="showNode('admin-reports')" style="animation-delay: 0.2s;">
+                        <span class="node-step-badge">MONITOR</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                            </svg>
+                            Global Audit Reports
+                        </div>
+                        <div class="node-desc">Full central dashboard viewing all audit runs and reports across auditees.</div>
+                    </div>
+                    <div class="node node-admin-style" id="node-admin-settings" onclick="showNode('admin-settings')" style="animation-delay: 0.3s;">
+                        <span class="node-step-badge">SETTINGS</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.43l-1.003.828c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.43l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                            </svg>
+                            Configuration
+                        </div>
+                        <div class="node-desc">Manage system parameters, database links, and local LLM models list.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. AUDITEE SWIMLANE -->
+            <div class="swimlane lane-auditee" id="lane-auditee">
+                <div class="swimlane-header">
+                    <div class="lane-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25" />
+                        </svg>
+                        Auditor Workspace
+                    </div>
+                    <span class="lane-tag">Analysis & Submission</span>
+                </div>
+                <div class="nodes-grid">
+                    <div class="node node-auditee-style" id="node-auditee-scope" onclick="showNode('auditee-scope')" style="animation-delay: 0.1s;">
+                        <span class="node-step-badge">STEP 1</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.03 0 1.9.693 2.166 1.638m-7.377 12.408-.621 1.867A.75.75 0 0 1 8.08 18H5.92a.75.75 0 0 1-.716-.547l-.621-1.867a1.5 1.5 0 0 1 1.433-1.978h3.1a1.5 1.5 0 0 1 1.433 1.978ZM5.92 18H8.08a.75.75 0 0 1 .716.547l.621 1.867A1.5 1.5 0 0 1 7.984 22H6.016a1.5 1.5 0 0 1-1.433-1.585l.621-1.867a.75.75 0 0 1 .716-.548Z" />
+                            </svg>
+                            Framework Scope
+                        </div>
+                        <div class="node-desc">Select framework (ISO 27001 / SOC 2 / NIST) and check specific target controls to audit for the client (auditee).</div>
+                    </div>
+                    <div class="node node-auditee-style" id="node-auditee-upload" onclick="showNode('auditee-upload')" style="animation-delay: 0.2s;">
+                        <span class="node-step-badge">STEP 2</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Z" />
+                            </svg>
+                            Evidence Upload
+                        </div>
+                        <div class="node-desc">Upload documents (PDF, Word, Excel) or ZIP. Scans preambles & parses file text.</div>
+                    </div>
+                    <div class="node node-auditee-style" id="node-auditee-run" onclick="showNode('auditee-run')" style="animation-delay: 0.3s;">
+                        <span class="node-step-badge">STEP 3</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" />
+                            </svg>
+                            Run AI Analysis
+                        </div>
+                        <div class="node-desc">Local LLM (Qwen2.5/Llama3) maps context to controls using dynamic semantic keyword synonym RAG.</div>
+                    </div>
+                    <div class="node node-auditee-style" id="node-auditee-report" onclick="showNode('auditee-report')" style="animation-delay: 0.4s;">
+                        <span class="node-step-badge">STEP 4</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M10.125 2.25h3.75a2.25 2.25 0 0 1 2.25 2.25v15a2.25 2.25 0 0 1-2.25 2.25h-3.75a2.25 2.25 0 0 1-2.25-2.25v-15a2.25 2.25 0 0 1 2.25-2.25Z" />
+                            </svg>
+                            Report Submitted
+                        </div>
+                        <div class="node-desc">Initial report generated. Snapshot saved to DB. Status is set to "Pending Review".</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. AUDITOR SWIMLANE -->
+            <div class="swimlane lane-auditor" id="lane-auditor">
+                <div class="swimlane-header">
+                    <div class="lane-title">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width: 20px; height: 20px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M11.35 11.65a3.75 3.75 0 1 0-5.3 0m5.3 0a5 5 0 0 0-5.3 0m5.3 0c.3-.35.53-.74.67-1.15M6.05 11.65a5 5 0 0 1 5.3 0m-5.3 0a3.75 3.75 0 1 1 5.3 0m0 0c-.3-.35-.53-.74-.67-1.15m0 0a3.75 3.75 0 1 0-3 0M2.25 12h1.5m16.5 0h1.5m-18-6h1.5m16.5 0H18m-15.75 12h1.5m16.5 0H18M11.25 2.25v1.5m0 16.5v1.5" />
+                        </svg>
+                        Auditee Desk
+                    </div>
+                    <span class="lane-tag">Auditee Review Desk (Read-Only)</span>
+                </div>
+                <div class="nodes-grid">
+                    <div class="node node-auditor-style" id="node-auditor-queue" onclick="showNode('auditor-queue')" style="animation-delay: 0.1s;">
+                        <span class="node-step-badge">QUEUE</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6H18a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H3.75a2.25 2.25 0 0 1-2.25-2.25V8.25A2.25 2.25 0 0 1 3.75 6ZM3.75 9h16.5M7.5 13.5h9" />
+                            </svg>
+                            Submitted Queue
+                        </div>
+                        <div class="node-desc">Auditee sees read-only dashboard listing all submitted audit reports and their compliance status.</div>
+                    </div>
+                    <div class="node node-auditor-style" id="node-auditor-review" onclick="showNode('auditor-review')" style="animation-delay: 0.2s;">
+                        <span class="node-step-badge">AUDIT</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                            </svg>
+                            Review Findings
+                        </div>
+                        <div class="node-desc">Opens report, views gaps, compliant checks, expected evidence, and relevance scores.</div>
+                    </div>
+                    <div class="node node-auditor-style" id="node-auditor-decision" onclick="showNode('auditor-decision')" style="animation-delay: 0.3s;">
+                        <span class="node-step-badge">DECISION</span>
+                        <div class="node-header">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 0 1-1.043 3.296 3.745 3.745 0 0 1-3.296 1.043A3.745 3.745 0 0 1 12 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 0 1-3.296-1.043 3.745 3.745 0 0 1-1.043-3.296A3.745 3.745 0 0 1 3 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 0 1 1.043-3.296 3.746 3.746 0 0 1 3.296-1.043A3.746 3.746 0 0 1 12 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 0 1 3.296 1.043 3.746 3.746 0 0 1 1.043 3.296A3.745 3.745 0 0 1 21 12Z" />
+                            </svg>
+                            Submit Decision
+                        </div>
+                        <div class="node-desc">Approves or Rejects the report run, inserting global review notes/comments.</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- ── TIMELINE STATUS FLOW ── -->
+    <div class="status-timeline-container">
+        <h3>
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" style="width: 20px; height: 20px; color: var(--accent-blue);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 7.5 7.5 3m0 0L12 7.5M7.5 3v13.5m13.5 0L16.5 21m0 0L12 16.5m4.5 4.5V7.5" />
+            </svg>
+            Compliance Report Status Lifecyle
+        </h3>
+        <div class="timeline-flow">
+            <div class="timeline-line-connector">
+                <div class="timeline-line-progress" id="timeline-progress"></div>
+            </div>
+            
+            <div class="timeline-step" id="time-draft" onclick="setTimelineProgress(1)">
+                <span class="status-pill pill-draft">Draft</span>
+                <span class="timeline-desc">Initial audit run workspace configuration</span>
+            </div>
+            
+            <div class="timeline-step" id="time-submitted" onclick="setTimelineProgress(2)">
+                <span class="status-pill pill-submitted">Submitted</span>
+                <span class="timeline-desc">Auditor finishes AI analysis and triggers report generation</span>
+            </div>
+            
+            <div class="timeline-step" id="time-pending" onclick="setTimelineProgress(3)">
+                <span class="status-pill pill-pending">Pending Review</span>
+                <span class="timeline-desc">AI analysis complete; awaiting auditee/client review</span>
+            </div>
+            
+            <div class="timeline-step" id="time-reviewed" onclick="setTimelineProgress(4)">
+                <span class="status-pill pill-reviewed">Reviewed</span>
+                <span class="timeline-desc">Auditee inspects findings, gaps, and compliance scores</span>
+            </div>
+            
+            <div class="timeline-step" id="time-approved" onclick="setTimelineProgress(5)">
+                <span class="status-pill pill-approved">Approved</span>
+                <span class="timeline-desc">Signed report available for PDF export</span>
+            </div>
+
+            <div class="timeline-step" id="time-rejected" onclick="setTimelineProgress(6)">
+                <span class="status-pill pill-rejected">Rejected</span>
+                <span class="timeline-desc">Sent back to Draft status with comments</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript logic -->
+    <script>
+        // Node details database
+        const detailsData = {
+            'admin-users': {
+                title: 'User & Role Management',
+                desc: 'Admin console allows creating system profiles and assigning rigid roles (Admin, Auditee, Auditor). This enforces the permission gates across the Streamlit UI, such as rendering checklist controls disabled or completely hiding the upload evidence buttons.'
+            },
+            'admin-reports': {
+                title: 'Global Reports Dashboard',
+                desc: 'Admins have full visibility across all reports created by any Auditee. They can track compliance scores, export full audit data, clear database findings log tables, or inspect details of any session.'
+            },
+            'admin-settings': {
+                title: 'System Settings Console',
+                desc: 'Central command for managing Master-Slave PostgreSQL database engine configurations and downloading/pulling required LLM models offline (Qwen, Llama3, Gemma).'
+            },
+            'auditee-scope': {
+                title: 'Framework Scoping',
+                desc: 'The Auditee selects a framework (e.g. ISO 27001) and selects target controls. Scoping can be Manual or AI-Assisted (LLM automatically selects controls based on scanned document preambles).'
+            },
+            'auditee-upload': {
+                title: 'Evidence Gathering',
+                desc: 'Auditee uploads documents. AICyberAuditBox processes files locally. It parses PDFs (via pdfplumber), Word files (via python-docx), spreadsheets, or runs OCR for PNGs/JPGs to build the indexing context.'
+            },
+            'auditee-run': {
+                title: 'Local Agentic RAG Analysis',
+                desc: 'Initiates analysis. The system chunks text, extracts keyword synonyms, matches against scoped controls, and queries the local LLM. It generates a detailed gaps report with Compliant/Non-Compliant status.'
+            },
+            'auditee-report': {
+                title: 'Report Saved & Submitted',
+                desc: 'When AI completes, the findings are saved to ShaktiDB Master and synchronously replicated to Slave 1 and Slave 2. The report is automatically saved with the status "Pending Review" and sent to the auditor queue.'
+            },
+            'auditor-queue': {
+                title: 'Auditor Inbox',
+                desc: 'Auditors see a list of submitted reports under the Audit Records tab. This workspace lists reports, their framework, current status, and timestamps. Auditor selects a report to open.'
+            },
+            'auditor-review': {
+                title: 'Audit Review Workspace',
+                desc: 'Opens the report in a read-only layout. Auditor inspects AI-detected findings, evidence snippets, recommendations, and relevance scores. Can download the report PDF.'
+            },
+            'auditor-decision': {
+                title: 'Submit Review Verdict',
+                desc: 'Auditor uses the Auditor Review Panel to set the status to "Approved", "Reviewed", or "Rejected". Rejections require inserting corrective feedback comments. Click Save to snapshot to apply.'
+            }
+        };
+
+        // Highlight and filter roles
+        function filterRole(role) {
+            // Remove active classes from filter buttons
+            document.querySelectorAll('.controls-area .btn').forEach(btn => {
+                btn.classList.remove('btn-active-admin', 'btn-active-auditee', 'btn-active-auditor');
+            });
+
+            // Reset lane styles
+            const lanes = ['admin', 'auditee', 'auditor'];
+            lanes.forEach(l => {
+                document.getElementById(`lane-${l}`).classList.remove('dimmed');
+            });
+
+            if (role === 'all') {
+                document.getElementById('filter-all').classList.add('btn-active-admin');
+                drawConnections('all');
+                return;
+            }
+
+            // Set filter button active style
+            document.getElementById(`filter-${role}`).classList.add(`btn-active-${role}`);
+
+            // Dim other swimlanes
+            lanes.forEach(l => {
+                if (l !== role) {
+                    document.getElementById(`lane-${l}`).classList.add('dimmed');
+                }
+            });
+
+            drawConnections(role);
+        }
+
+        // Show node info card details
+        function showNode(nodeId) {
+            // Deactivate other nodes
+            document.querySelectorAll('.node').forEach(node => {
+                node.classList.remove('node-active');
+            });
+
+            // Activate current node
+            const activeNode = document.getElementById(`node-${nodeId}`);
+            if (activeNode) {
+                activeNode.classList.add('node-active');
+            }
+
+            // Update Info Panel
+            const info = detailsData[nodeId];
+            if (info) {
+                document.getElementById('sim-step-title').innerText = info.title;
+                document.getElementById('sim-step-desc').innerText = info.desc;
+            }
+        }
+
+        // Timeline progress logic
+        function setTimelineProgress(stepIndex) {
+            const steps = ['draft', 'submitted', 'pending', 'reviewed', 'approved', 'rejected'];
+            const progressPercentage = [0, 20, 40, 60, 80, 100];
+            
+            // Reset active steps
+            steps.forEach(s => {
+                document.getElementById(`time-${s}`).classList.remove('timeline-active');
+            });
+
+            // Highlight progress line and status pills
+            let limit = stepIndex;
+            if (stepIndex === 6) {
+                // Rejected flow showing red pill
+                document.getElementById('time-rejected').classList.add('timeline-active');
+                document.getElementById('timeline-progress').style.width = '100%';
+                document.getElementById('timeline-progress').style.background = 'var(--status-rejected)';
+            } else {
+                document.getElementById('timeline-progress').style.background = 'linear-gradient(90deg, #64748b, #3b82f6, #fb923c, #06b6d4, #22c55e)';
+                for (let i = 0; i < limit; i++) {
+                    document.getElementById(`time-${steps[i]}`).classList.add('timeline-active');
+                }
+                document.getElementById('timeline-progress').style.width = `${progressPercentage[limit - 1]}%`;
+            }
+        }
+
+        // Connections renderer using SVG
+        function drawConnections(mode) {
+            const svg = document.getElementById('svg-overlay');
+            // Clear existing lines except defs
+            const lines = svg.querySelectorAll('path, marker, g');
+            lines.forEach(l => l.remove());
+
+            // Build dynamic inline connectors based on layout offsets
+            const nodes = {
+                scope: document.getElementById('node-auditee-scope'),
+                upload: document.getElementById('node-auditee-upload'),
+                run: document.getElementById('node-auditee-run'),
+                report: document.getElementById('node-auditee-report'),
+                queue: document.getElementById('node-auditor-queue'),
+                review: document.getElementById('node-auditor-review'),
+                decision: document.getElementById('node-auditor-decision')
+            };
+
+            if (!nodes.scope) return; // Safeguard if not rendered yet
+
+            const svgRect = svg.getBoundingClientRect();
+
+            const getCenter = (el) => {
+                const r = el.getBoundingClientRect();
+                return {
+                    x: r.left - svgRect.left + r.width / 2,
+                    y: r.top - svgRect.top + r.height / 2,
+                    left: r.left - svgRect.left,
+                    right: r.right - svgRect.left,
+                    top: r.top - svgRect.top,
+                    bottom: r.bottom - svgRect.top,
+                    width: r.width,
+                    height: r.height
+                };
+            };
+
+            const scopeCoords = getCenter(nodes.scope);
+            const uploadCoords = getCenter(nodes.upload);
+            const runCoords = getCenter(nodes.run);
+            const reportCoords = getCenter(nodes.report);
+            const queueCoords = getCenter(nodes.queue);
+            const reviewCoords = getCenter(nodes.review);
+            const decisionCoords = getCenter(nodes.decision);
+
+            // Add SVG Marker for arrows
+            const marker = document.createElementNS("http://www.w3.org/2000/svg", "marker");
+            marker.setAttribute("id", "arrow");
+            marker.setAttribute("viewBox", "0 0 10 10");
+            marker.setAttribute("refX", "6");
+            marker.setAttribute("refY", "5");
+            marker.setAttribute("markerWidth", "6");
+            marker.setAttribute("markerHeight", "6");
+            marker.setAttribute("orient", "auto-start-reverse");
+            
+            const markerPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            markerPath.setAttribute("d", "M 0 1 L 10 5 L 0 9 z");
+            markerPath.setAttribute("fill", "rgba(255,255,255,0.4)");
+            marker.appendChild(markerPath);
+            svg.querySelector('defs').appendChild(marker);
+
+            const drawPath = (coordsFrom, coordsTo, color, flowText, isBi = false, gradId = null) => {
+                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                let d = "";
+
+                // Decide start and end points smartly
+                if (coordsFrom.bottom < coordsTo.top) {
+                    // Vertical flow downwards
+                    d = `M ${coordsFrom.x} ${coordsFrom.bottom} L ${coordsTo.x} ${coordsTo.top}`;
+                } else if (coordsFrom.top > coordsTo.bottom) {
+                    // Vertical flow upwards
+                    d = `M ${coordsFrom.x} ${coordsFrom.top} L ${coordsTo.x} ${coordsTo.bottom}`;
+                } else {
+                    // Horizontal flow
+                    d = `M ${coordsFrom.right} ${coordsFrom.y} L ${coordsTo.left} ${coordsTo.y}`;
+                }
+
+                path.setAttribute("d", d);
+                path.setAttribute("stroke", gradId ? `url(#${gradId})` : color);
+                path.setAttribute("stroke-width", "2.5");
+                path.setAttribute("fill", "none");
+                path.setAttribute("marker-end", "url(#arrow)");
+                path.setAttribute("stroke-dasharray", "8, 4");
+                
+                // Add animated moving signal flow dots/dashes
+                const animate = document.createElementNS("http://www.w3.org/2000/svg", "animate");
+                animate.setAttribute("attributeName", "stroke-dashoffset");
+                animate.setAttribute("values", "30;0");
+                animate.setAttribute("dur", "2s");
+                animate.setAttribute("repeatCount", "indefinite");
+                path.appendChild(animate);
+                
+                svg.appendChild(path);
+            };
+
+            // ── DRAW CHANNELS ──
+            if (mode === 'all' || mode === 'auditee') {
+                drawPath(scopeCoords, uploadCoords, "var(--auditee-color)");
+                drawPath(uploadCoords, runCoords, "var(--auditee-color)");
+                drawPath(runCoords, reportCoords, "var(--auditee-color)");
+            }
+
+            if (mode === 'all') {
+                // Cross-swimlane flow: Auditee report finishes -> Auditor Queue
+                drawPath(reportCoords, queueCoords, null, null, false, "grad-teal-purple");
+            }
+
+            if (mode === 'all' || mode === 'auditor') {
+                drawPath(queueCoords, reviewCoords, "var(--auditor-color)");
+                drawPath(reviewCoords, decisionCoords, "var(--auditor-color)");
+            }
+
+            if (mode === 'all') {
+                // Cross-swimlane flow: Auditor decision sets Approved/Rejected -> Auditee Workspace
+                drawPath(decisionCoords, scopeCoords, null, null, false, "grad-purple-teal");
+            }
+        }
+
+        // Interactive Simulation Player
+        let simInterval = null;
+        function startSimulation() {
+            if (simInterval) clearInterval(simInterval);
+            
+            filterRole('all');
+            let step = 0;
+            const steps = [
+                { node: 'auditee-scope', status: 1, title: 'Step 1: Auditee Set Framework & Controls', desc: 'Auditee selects ISO 27001 as target standard and scopes in controls (e.g. Access Control policy checks). Report status is set to Draft.' },
+                { node: 'auditee-upload', status: 2, title: 'Step 2: Auditee Uploads Evidence', desc: 'Auditee gathers and uploads evidence documents (Word policies, PDF logs, OCR screenshots). Document text is indexed into memory.' },
+                { node: 'auditee-run', status: 2, title: 'Step 3: Run AI Compliance Scan', desc: 'AI processing kicks off. Semantic chunking maps relevant policies, synonyms-expansion translates framework codes, and the local model scores the audit.' },
+                { node: 'auditee-report', status: 3, title: 'Step 4: Report Saved & Submitted', desc: 'Analysis completed. Audit findings snap is logged in ChatMessage. Status transitions to "Pending Review" and appears in the auditor inbox.' },
+                { node: 'auditor-queue', status: 3, title: 'Step 5: Auditor Views Submitted Queue', desc: 'Auditor logs in and reviews the dashboard containing the newly submitted pending ISO 27001 audit report run.' },
+                { node: 'auditor-review', status: 4, title: 'Step 6: Auditor Inspects Findings', desc: 'Auditor opens the submitted report. Views gaps details, relevance scores, extracted quote snippets, and downloads the draft PDF.' },
+                { node: 'auditor-decision', status: 5, title: 'Step 7: Auditor Approves Report', desc: 'Auditor changes status to "Approved" and logs signed remarks. Auditee downloads the verified signed report PDF. (Alternatively, Auditor rejects, prompting comments, sending report back to Draft).' }
+            ];
+
+            const runStep = () => {
+                if (step >= steps.length) {
+                    clearInterval(simInterval);
+                    document.getElementById('sim-step-title').innerText = "Simulation Completed";
+                    document.getElementById('sim-step-desc').innerText = "The AICyberAuditBox full-loop role flow simulation is complete! Feel free to run it again or click framework/controls nodes manually.";
+                    return;
+                }
+
+                const s = steps[step];
+                showNode(s.node);
+                setTimelineProgress(s.status);
+                document.getElementById('sim-step-title').innerText = s.title;
+                document.getElementById('sim-step-desc').innerText = s.desc;
+                
+                step++;
+            };
+
+            runStep();
+            simInterval = setInterval(runStep, 4500); // 4.5 seconds per step
+        }
+
+        // Draw connections on load & resize
+        window.addEventListener('load', () => {
+            filterRole('all');
+            setTimelineProgress(3); // Start timeline at Pending Review for display
+        });
+        window.addEventListener('resize', () => {
+            drawConnections(document.querySelector('.controls-area .btn-active-admin, .controls-area .btn-active-auditee, .controls-area .btn-active-auditor') ? 'active' : 'all');
+        });
+    </script>
+</body>
+</html>

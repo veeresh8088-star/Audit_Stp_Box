@@ -1,0 +1,5 @@
+Access Control Policy:
+1. Physical Access: All facility entrances are secured with biometric controls. Visitors must sign in and be escorted at all times.
+2. Logical Access: Access rights are assigned based on the principle of least privilege. Strong password policies (minimum 12 characters, complexity requirements) are enforced on all directory accounts.
+3. Identity Management: Accounts are provisioned and de-provisioned through centralized workflows. Inactive accounts are disabled after 90 days.
+4. Authentication: Two-factor authentication (2FA) is mandatory for all remote logins.

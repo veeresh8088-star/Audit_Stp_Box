@@ -1,0 +1,15 @@
+services:
+  shakthidb:
+    build: .
+    container_name: shakthidb_service
+    environment:
+      - POSTGRES_PASSWORD=ShakthiDB@2026
+      - POSTGRES_DB=shakthidb
+    ports:
+      - "15234:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    restart: always
+
+volumes:
+  pgdata:

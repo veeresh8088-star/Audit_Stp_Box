@@ -1,0 +1,14 @@
+__pycache__/
+*.db
+*.tar
+*.ova
+.venv/
+.env
+*.log
+DEPLOYMENT_GUIDE.md
+*.pdf
+Deployment_details.md
+*details*.md
+*EXCLUDE*
+scratch/
+.deps_installed
