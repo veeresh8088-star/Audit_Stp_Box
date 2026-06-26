@@ -115,14 +115,25 @@ def map_new_schema_to_legacy(finding):
     
     # 2. severity mapping
     sev_val = finding.get("severity", "Medium")
+    sev_key = str(sev_val).strip() if sev_val is not None else "Medium"
     sev_map = {
-        "N/A": "NONE",
-        "Low": "P4 Low",
-        "Medium": "P3 Medium",
-        "High": "P2 High",
-        "Critical": "P1 Critical"
+        "N/A": "N/A",
+        "NONE": "N/A",
+        "NIL": "N/A",
+        "OK": "N/A",
+        "ACCEPTED": "N/A",
+        "LOW": "P4 Low",
+        "P4 LOW": "P4 Low",
+        "MEDIUM": "P3 Medium",
+        "MED": "P3 Medium",
+        "MODERATE": "P3 Medium",
+        "P3 MEDIUM": "P3 Medium",
+        "HIGH": "P2 High",
+        "P2 HIGH": "P2 High",
+        "CRITICAL": "P1 Critical",
+        "P1 CRITICAL": "P1 Critical"
     }
-    mapped["severity"] = sev_map.get(sev_val, "P3 Medium")
+    mapped["severity"] = sev_map.get(sev_key.upper(), "P3 Medium")
     
     # 3. evidence quote mapping
     evidence_list = finding.get("evidence", [])
@@ -156,10 +167,10 @@ def map_new_schema_to_legacy(finding):
     # 6. confidence mapping (map evidence_strength to confidence score)
     strength = finding.get("evidence_strength", "None")
     strength_map = {
-        "Strong": 10,
-        "Moderate": 7,
-        "Weak": 4,
-        "None": 1
+        "Strong": 10, "STRONG": 10,
+        "Moderate": 7, "MODERATE": 7,
+        "Weak": 4, "WEAK": 4,
+        "None": 1, "NONE": 1
     }
     mapped["confidence"] = strength_map.get(strength, 10)
     

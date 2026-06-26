@@ -43,6 +43,7 @@ class AuditState(TypedDict):
     bg_key: Optional[str]
     control_idx: int
     total_controls: int
+    audit_mode: Optional[str]
 
 
 # Synonyms dictionary used in retrieval
@@ -213,6 +214,13 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
     if is_failed:
         error_msg = validated_finding.get("review_note") or validated_finding.get("validator_note") or "Grounding check failed: Evidence quote was not verified in the document."
         
+        if state.get("audit_mode") == "Quick":
+            print(f"[LANGGRAPH VALIDATOR] Validation failed, but audit_mode is Quick. Bypassing self-correction for control {state['control_id']}.", flush=True)
+            return {
+                "validation_error": None,
+                "final_finding": validated_finding
+            }
+            
         if state["retry_count"] >= 2:
             print(f"[LANGGRAPH VALIDATOR] Hard retry limit reached for control {state['control_id']}. Routing to final save.", flush=True)
             validated_finding["status"] = "HUMAN_REVIEW"
@@ -279,6 +287,8 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
 # Define edge routing condition
 def should_continue(state: AuditState) -> str:
     """Routes state based on validation status and retry bounds."""
+    if state.get("audit_mode") == "Quick":
+        return "end"
     if state["validation_error"] is not None:
         return "reflect"
     return "end"

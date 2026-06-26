@@ -20,13 +20,13 @@ class AuditFindingSchema(BaseModel):
     Pydantic schema representing a structured compliance audit finding.
     Determines compliance status based solely on documented evidence and control coverage.
     """
-    status: Literal["COMPLIANT", "PARTIAL", "NON_COMPLIANT"] = Field(
+    status: Literal["COMPLIANT", "PARTIAL", "PARTIAL_COMPLIANT", "NON_COMPLIANT"] = Field(
         description="The compliance status of the control based on the evidence."
     )
     severity: Literal["N/A", "Low", "Medium", "High", "Critical"] = Field(
         description="The severity level of the finding."
     )
-    evidence_strength: Literal["Strong", "Moderate", "Weak", "None"] = Field(
+    evidence_strength: Literal["Strong", "Moderate", "Weak", "None", "STRONG", "MODERATE", "WEAK", "NONE"] = Field(
         description="Strength of the documented evidence."
     )
     control_coverage: int = Field(
@@ -50,7 +50,7 @@ class AuditFindingSchema(BaseModel):
     )
     missing_requirements: List[str] = Field(
         default=[],
-        description="Key requirements missing (required for PARTIAL or NON_COMPLIANT, empty for COMPLIANT)."
+        description="Key requirements missing (required for PARTIAL/PARTIAL_COMPLIANT or NON_COMPLIANT, empty for COMPLIANT)."
     )
     recommendation: str = Field(
         default="",
@@ -84,7 +84,7 @@ class AuditFindingSchema(BaseModel):
                 raise ValueError("Compliance status cannot be set to 'COMPLIANT' if no verbatim evidence quote was found in the evidence excerpts.")
 
         # Rule 2: Gaps rules (Non-Compliant or Partial)
-        elif status_val in ("NON_COMPLIANT", "PARTIAL"):
+        elif status_val in ("NON_COMPLIANT", "PARTIAL", "PARTIAL_COMPLIANT"):
             if severity_val == "N/A":
                 object.__setattr__(self, 'severity', 'Medium')
             if not self.business_impact or self.business_impact.strip() in ("", "NOT_FOUND"):

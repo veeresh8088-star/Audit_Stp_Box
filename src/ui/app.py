@@ -1147,11 +1147,75 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     pct_gap = f"{int(open_gaps / max(total, 1) * 100)}%"
     pdf.cell(70, 8, pct_gap, border=1, align="C", new_x="LMARGIN", new_y="NEXT")
     
-    pdf.ln(10)
+    pdf.ln(6)
+
+    # Definition of Risk Classifications Section
+    if pdf.get_y() > 200:
+        pdf.add_page()
+        pdf.set_y(38)
+    
+    pdf.set_font("helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 7, "Definition of Risk Classifications", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_draw_color(226, 232, 240) # Slate 200 line
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(3)
+    
+    # P1 Critical
+    pdf.set_font("helvetica", "B", 8.5)
+    pdf.set_text_color(220, 38, 38)
+    pdf.cell(22, 5, "P1 Critical:")
+    pdf.set_font("helvetica", "", 8.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 4.5, "Severe, systemic control failure representing an immediate threat to the entire organization, critical systems, or highly sensitive data. Catastrophic business/operational impact or major compliance violations. Requires immediate emergency resolution.", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+    
+    # P2 High
+    pdf.set_font("helvetica", "B", 8.5)
+    pdf.set_text_color(217, 119, 6)
+    pdf.cell(22, 5, "P2 High:")
+    pdf.set_font("helvetica", "", 8.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 4.5, "Significant control failure or non-adherence to SEBI, Government Guidelines, policies approved by competent authority, or standard practices. High probability of threat exploitation causing significant security, compliance, or operational impact. Requires program for immediate and permanent resolution.", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+    
+    # P3 Medium
+    pdf.set_font("helvetica", "B", 8.5)
+    pdf.set_text_color(161, 98, 7)
+    pdf.cell(22, 5, "P3 Medium:")
+    pdf.set_font("helvetica", "", 8.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 4.5, "Important control weakness or potential exposure that increases organizational risk. Management should quickly develop action plans to ensure timely and permanent resolution of the weaknesses before they develop into a major exposure.", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+    
+    # P4 Low
+    pdf.set_font("helvetica", "B", 8.5)
+    pdf.set_text_color(37, 99, 235)
+    pdf.cell(22, 5, "P4 Low:")
+    pdf.set_font("helvetica", "", 8.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 4.5, "Minor weakness or operational inefficiency with limited impact. Not a direct threat to control or security, but management should address it in the interest of efficiency and resolve it as activities increase.", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+    
+    # Accepted
+    pdf.set_font("helvetica", "B", 8.5)
+    pdf.set_text_color(22, 163, 74)
+    pdf.cell(22, 5, "Accepted:")
+    pdf.set_font("helvetica", "", 8.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 4.5, "Normal and good practice as per guidelines and best practices. The observations categorized as 'ACCEPTED' (Compliant) need no corrective action.", new_x="LMARGIN", new_y="NEXT")
+    
+    pdf.ln(8)
     
     # Detailed Findings Section
-    pdf.set_font("helvetica", "B", 12)
-    pdf.cell(0, 8, "Gaps & Findings Details", new_x="LMARGIN", new_y="NEXT")
+    if pdf.get_y() > 240:
+        pdf.add_page()
+        pdf.set_y(38)
+        
+    pdf.set_font("helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 7, "Gaps & Findings Details", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_draw_color(30, 41, 59)
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(4)
     
@@ -2090,32 +2154,20 @@ def scan_file_security(uploaded_file):
     return True, "Clean"
 
 def _resolve_ollama_model(model_choice):
-    """Map UI model name to Ollama model identifier (all installed models)."""
+    """Map UI model name to Ollama model identifier (restricted to selected models)."""
     MODEL_MAP = {
-        "Qwen 2.5 (3B) - Light Auditor":                          "qwen2.5:3b",
         "Qwen 2.5 (7B) - High Performance Auditor/Reasoning":     "qwen2.5:7b",
-        "Llama 3.1 (8B) - High Performance Generalist":           "llama3.1:latest",
         "Gemma 2 (9B) - Advanced Reasoning":                      "gemma2:9b",
-        "Gemma 4 (4B) - Quick Auditor":                           "gemma4:e4b",
         "Gemma 4 (12B) - Deep Auditor/Reasoning":                 "gemma4:12b",
-        "Escalation Mode (Qwen 3B -> 7B) - High Accuracy/Reasoning": "qwen2.5:7b",
     }
     # Exact match first
     if model_choice in MODEL_MAP:
         return MODEL_MAP[model_choice]
-    # Substring fallbacks for safety
-    if "Gemma 4" in model_choice:
-        if "12B" in model_choice:
-            return "gemma4:12b"
-        return "gemma4:e4b"
-    if "Gemma" in model_choice or "9B" in model_choice:
+    # Substring fallbacks for safety / compatibility with legacy configs
+    if "12B" in model_choice:
+        return "gemma4:12b"
+    if "Gemma" in model_choice or "9B" in model_choice or "4B" in model_choice or "2B" in model_choice:
         return "gemma2:9b"
-    if "Llama" in model_choice or "8B" in model_choice:
-        return "llama3.1:latest"
-    if "7B" in model_choice:
-        return "qwen2.5:7b"
-    if "3B" in model_choice:
-        return "qwen2.5:3b"
     return "qwen2.5:7b"  # safe default
 
 
@@ -3157,7 +3209,20 @@ def generate_ollama_reflection(context, file_names_list, selected_sls, draft_fin
     print(f"\n[{time.strftime('%H:%M:%S')}] [INFO] Starting ISO 27001 Reflection Critique for {total} controls in {len(batches_c)} batches...")
 
     VALID_SEVERITIES = ("P1 Critical", "P2 High", "P3 Medium", "P4 Low", "N/A")
-    SEV_UPGRADE_MAP = {"CRITICAL": "P1 Critical", "HIGH": "P2 High", "MEDIUM": "P3 Medium", "LOW": "P4 Low"}
+    SEV_UPGRADE_MAP = {
+        "CRITICAL": "P1 Critical",
+        "CRIT": "P1 Critical",
+        "HIGH": "P2 High",
+        "MEDIUM": "P3 Medium",
+        "MED": "P3 Medium",
+        "MODERATE": "P3 Medium",
+        "LOW": "P4 Low",
+        "N/A": "N/A",
+        "NONE": "N/A",
+        "NIL": "N/A",
+        "OK": "N/A",
+        "ACCEPTED": "N/A"
+    }
 
     for batch_idx, (batch_c, batch_df) in enumerate(zip(batches_c, batches_df)):
         start_n = batch_idx * batch_size + 1
@@ -3329,7 +3394,7 @@ def generate_ollama_reflection(context, file_names_list, selected_sls, draft_fin
     return resolved_list, all_results
 
 
-def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None):
+def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep"):
     """Audit controls sequentially using the LangGraph state machine.
     Uses the ISO 27001 Lead Auditor logic and preserves database routing and session checkpoints.
     """
@@ -3411,7 +3476,8 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             # Progress tracking
             "bg_key": bg_key,
             "control_idx": idx,
-            "total_controls": total
+            "total_controls": total,
+            "audit_mode": audit_mode
         }
 
         try:
@@ -3558,7 +3624,7 @@ def ai_chat_stream(system_ctx, user_msg, model_choice):
     except Exception as e:
         yield f"⚠️ Offline Engine not responding: {e}"
 
-def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None):
+def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep"):
     import io
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)
     _sid = session_id or bg_key   # use session_id for checkpoint keying
@@ -3620,7 +3686,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         
         resolved_combined, findings_combined = generate_ollama_findings(
             context_str, file_names_list, selected_sls_copy, ai_model, bg_key=bg_key,
-            checkpoint_session_id=_sid
+            checkpoint_session_id=_sid, audit_mode=audit_mode
         )
 
         print(f"[_run_ollama_bg] Success! resolved: {len(resolved_combined)}, findings/results: {len(findings_combined)}", flush=True)
@@ -3929,19 +3995,15 @@ with st.sidebar:
 
 
     if st.session_state.user_role in ("auditor", "auditee"):
-        ai_model = "Qwen 2.5 (7B) - High Performance Auditor/Reasoning"
+        ai_model = st.session_state.get("selected_ai_model", "Qwen 2.5 (7B) - High Performance Auditor/Reasoning")
     else:
         st.divider()
         st.markdown("<div class='section-title-wrapper'>AI Engine Setup</div>", unsafe_allow_html=True)
         ai_model = st.selectbox("Select Offline LLM (via Ollama)", [
-            "Qwen 2.5 (3B) - Light Auditor",
             "Qwen 2.5 (7B) - High Performance Auditor/Reasoning",
-            "Llama 3.1 (8B) - High Performance Generalist",
             "Gemma 2 (9B) - Advanced Reasoning",
-            "Gemma 4 (4B) - Quick Auditor",
-            "Gemma 4 (12B) - Deep Auditor/Reasoning",
-            "Escalation Mode (Qwen 3B -> 7B) - High Accuracy/Reasoning"
-        ], label_visibility="collapsed", index=1, key="selected_ai_model")
+            "Gemma 4 (12B) - Deep Auditor/Reasoning"
+        ], label_visibility="collapsed", index=0, key="selected_ai_model")
         st.divider()
 
     if st.session_state.user_role == "auditee":
@@ -4140,6 +4202,24 @@ with st.sidebar:
             sl = uc["sl"]
             key = f"ctrl_chk_{sl}"
             st.session_state[key] = st.session_state.ctrl_states[sl]
+
+        # 🛡️ AUDIT MODE
+        if st.session_state.user_role != "auditee":
+            st.markdown("**🛡️ Audit Mode**")
+            if "audit_mode" not in st.session_state:
+                st.session_state.audit_mode = "Deep"
+            
+            default_mode_index = 1 if st.session_state.audit_mode == "Deep" else 0
+            audit_mode_ui = st.radio(
+                "Audit Mode Selection",
+                options=["⚡ Quick Audit (Single-pass)", "🔍 Deep Audit (Full reflection)"],
+                index=default_mode_index,
+                label_visibility="collapsed",
+                horizontal=True,
+                key="audit_mode_radio"
+            )
+            st.session_state.audit_mode = "Deep" if "Full" in audit_mode_ui else "Quick"
+            st.divider()
 
         # 🔍 SCOPE DETECTION
         if st.session_state.user_role != "auditee":
@@ -4678,7 +4758,10 @@ if run or st.session_state.get("start_analysis_on_next_run"):
             thread = threading.Thread(
                 target=_run_ollama_bg,
                 args=(bg_key, files_data, set(selected_sls), ai_model),
-                kwargs={"session_id": st.session_state.active_chat_id},
+                kwargs={
+                    "session_id": st.session_state.active_chat_id,
+                    "audit_mode": st.session_state.get("audit_mode", "Deep")
+                },
                 daemon=True
             )
             add_script_run_ctx(thread, get_script_run_ctx())
@@ -4779,7 +4862,7 @@ if _resumable and _resumable.session_id not in _bg_running:
             st.session_state["ollama_error"]       = None
             st.session_state.context       = _resumable.context_text or ""
 
-            def _resume_thread(bg_key, pending_sls, context_str, file_names, model, session_id, prior_results):
+            def _resume_thread(bg_key, pending_sls, context_str, file_names, model, session_id, prior_results, audit_mode="Deep"):
                 try:
                     with _bg_lock:
                         _bg_store["progress"][bg_key] = {
@@ -4788,7 +4871,7 @@ if _resumable and _resumable.session_id not in _bg_running:
                         }
                     new_resolved, new_findings = generate_ollama_findings(
                         context_str, file_names, pending_sls, model,
-                        bg_key=bg_key, checkpoint_session_id=session_id
+                        bg_key=bg_key, checkpoint_session_id=session_id, audit_mode=audit_mode
                     )
                     # Merge with prior results
                     merged_lookup = {r["control_id"]: r for r in prior_results}
@@ -4825,6 +4908,7 @@ if _resumable and _resumable.session_id not in _bg_running:
                 target=_resume_thread,
                 args=(_resume_bg_key, _pending_sls, _resumable.context_text or "",
                       _file_names, _resumable.ai_model, st.session_state.active_chat_id, _partial),
+                kwargs={"audit_mode": st.session_state.get("audit_mode", "Deep")},
                 daemon=True
             )
             add_script_run_ctx(thread, get_script_run_ctx())
@@ -5140,6 +5224,19 @@ with _main_wrap:
                     report_md = generate_copyable_markdown_report(findings, file_names, scopes)
                     st.code(report_md, language="markdown")
             
+                # --- Definition of Risk Classifications Expander ---
+                with st.expander("📊 Definition of Risk Classifications (NIST & Audit Framework)", expanded=False):
+                    st.markdown("""
+                    ### Risk Severity Criteria
+                    The risk of an audit finding is determined by assessing the potential negative impact and the likelihood that it materializes, aligned with the **NIST Risk Assessment Framework (NIST SP 800-30)** and the organization's compliance guidelines.
+                    
+                    *   🔴 **P1 · CRITICAL**: Severe, systemic control failure representing an immediate threat to the entire organization, critical systems, or highly sensitive data. Catastrophic business/operational impact or major compliance violations. Requires immediate emergency resolution.
+                    *   🟠 **P2 · HIGH**: Significant control failure or non-adherence to SEBI, Government Guidelines, policies approved by competent authority, or standard practices. High probability of threat exploitation causing significant security, compliance, or operational impact. Requires program for immediate and permanent resolution.
+                    *   🟡 **P3 · MEDIUM**: Important control weakness or potential exposure that increases organizational risk. Management should quickly develop action plans to ensure timely and permanent resolution of the weaknesses before they develop into a major exposure.
+                    *   🟢 **P4 · LOW**: Minor weakness or operational inefficiency with limited impact. Not a direct threat to control or security, but management should address it in the interest of efficiency and resolve it as activities increase.
+                    *   ✅ **✓ COMPLIANT / ACCEPTED**: Normal and good practice as per guidelines and best practices. No corrective action is required.
+                    """, unsafe_allow_html=True)
+
                 st.markdown("<br>", unsafe_allow_html=True)
 
                 active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected", "Compliant", "Out Of Scope", "Out of Scope") or (f.get("requires_human_review") and f.get("status") not in ("Dismissed", "Rejected"))]
