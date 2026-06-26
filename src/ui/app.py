@@ -2278,7 +2278,7 @@ Document Scope Summary: <your summary here>
                 },
                 "keep_alive": "15m"
             },
-            timeout=180
+            timeout=900
         )
         if r.status_code == 200:
             return r.json().get("response", "").strip()

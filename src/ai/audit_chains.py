@@ -422,7 +422,8 @@ class NativeOllamaChain:
     def __init__(self, model_name: str, prompt_template: str, url: str = "http://127.0.0.1:11434"):
         self.model_name = model_name
         self.prompt_template = prompt_template
-        self.client = ollama.Client(host=url)
+        # Set a high timeout (30 minutes) to prevent read timeouts on slower CPU-only environments
+        self.client = ollama.Client(host=url, timeout=1800.0)
         
     def invoke(self, input_dict: dict) -> AuditFindingSchema:
         # Format the prompt using standard python string formatting

@@ -147,20 +147,21 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
     draft = state["draft_finding"]
     
     if not draft:
-        if state["retry_count"] >= 2:
-            print(f"[LANGGRAPH] Hard retry limit reached for control {state['control_id']}. Routing to final save.", flush=True)
+        if state.get("audit_mode") == "Quick" or state["retry_count"] >= 2:
+            mode_prefix = "Quick audit" if state.get("audit_mode") == "Quick" else "Self-correction"
+            print(f"[LANGGRAPH] {mode_prefix} failed generation for control {state['control_id']}. Routing to fallback.", flush=True)
             fallback = {
                 "status": "HUMAN_REVIEW",
                 "requires_human_review": True,
                 "requires_review": True,
-                "review_note": f"Failed self-correction: {state['validation_error']}",
+                "review_note": f"Failed generation: {state['validation_error']}",
                 "control_id": state["control_id"],
                 "control": state["control_label"],
                 "severity": "P3 Medium",
                 "evidence_quote": "NOT_FOUND",
                 "evidence_snippet": "",
-                "finding": f"Self-correction loop failed for control {state['control_id']}. Verification required.",
-                "gap_description": f"Self-correction loop failed for control {state['control_id']}. Verification required.",
+                "finding": f"Auditor engine failed to generate/parse finding draft for control {state['control_id']}. Technical verification required.",
+                "gap_description": f"Auditor engine failed to generate/parse finding draft for control {state['control_id']}. Technical verification required.",
                 "reasoning": f"Graph execution failed: {state['validation_error']}",
                 "recommendation": state.get("recommendation") or f"Review policies and verify implementation for {state['control_id']}."
             }
