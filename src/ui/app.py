@@ -2158,6 +2158,7 @@ def _resolve_ollama_model(model_choice):
     MODEL_MAP = {
         "Qwen 2.5 (7B) - High Performance Auditor/Reasoning":     "qwen2.5:7b",
         "Gemma 2 (9B) - Advanced Reasoning":                      "gemma2:9b",
+        "Gemma 4 (4B) - Quick Auditor":                           "gemma4:e4b",
         "Gemma 4 (12B) - Deep Auditor/Reasoning":                 "gemma4:12b",
     }
     # Exact match first
@@ -2166,7 +2167,9 @@ def _resolve_ollama_model(model_choice):
     # Substring fallbacks for safety / compatibility with legacy configs
     if "12B" in model_choice:
         return "gemma4:12b"
-    if "Gemma" in model_choice or "9B" in model_choice or "4B" in model_choice or "2B" in model_choice:
+    if "e4b" in model_choice or "4B" in model_choice:
+        return "gemma4:e4b"
+    if "Gemma" in model_choice or "9B" in model_choice or "2B" in model_choice:
         return "gemma2:9b"
     return "qwen2.5:7b"  # safe default
 
@@ -4002,6 +4005,7 @@ with st.sidebar:
         ai_model = st.selectbox("Select Offline LLM (via Ollama)", [
             "Qwen 2.5 (7B) - High Performance Auditor/Reasoning",
             "Gemma 2 (9B) - Advanced Reasoning",
+            "Gemma 4 (4B) - Quick Auditor",
             "Gemma 4 (12B) - Deep Auditor/Reasoning"
         ], label_visibility="collapsed", index=0, key="selected_ai_model")
         st.divider()
