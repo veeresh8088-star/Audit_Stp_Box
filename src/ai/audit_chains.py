@@ -72,6 +72,7 @@ The auditor reasoning must explain:
 * If evidence directly satisfies the control objective, do not mark the control as PARTIAL_COMPLIANT or NON_COMPLIANT solely because preferred implementation examples are absent.
 * When evidence is ambiguous, explain the uncertainty and choose the most conservative evidence-based conclusion.
 * Prioritize intent-based evaluation over keyword matching.
+* The expected evidence guides are illustrative examples of how a control might be satisfied, NOT a mandatory checklist. If the document demonstrates alternative or equivalent controls that satisfy the overall control intent (e.g., using badges and visitor escorts to secure physical access), you MUST mark the control as COMPLIANT. Do NOT create gaps or mark the control as PARTIAL_COMPLIANT solely because specific preferred examples (such as biometrics, physical logbooks, or tailgating rules) are absent.
 * Do NOT use confidence scores, relevance scores, similarity scores, retrieval scores, or model certainty to determine compliance status.
 
 FINDING RULES:
@@ -180,7 +181,7 @@ CONTROL TO AUDIT:
 ════════════════════════════════════════
 Control ID: {control_id}
 Control Name: {control_label}
-Expected Evidence Guide: {expected_evidence}
+Control Objective & Illustrative Evidence Examples (Do NOT treat as a mandatory checklist): {expected_evidence}
 {feedback_section}
 
 You MUST respond with a JSON object matching this schema:
@@ -275,6 +276,7 @@ The auditor reasoning must explain:
 * If evidence directly satisfies the control objective, do not mark the control as PARTIAL_COMPLIANT or NON_COMPLIANT solely because preferred implementation examples are absent.
 * When evidence is ambiguous, explain the uncertainty and choose the most conservative evidence-based conclusion.
 * Prioritize intent-based evaluation over keyword matching.
+* The expected evidence guides are illustrative examples of how a control might be satisfied, NOT a mandatory checklist. If the document demonstrates alternative or equivalent controls that satisfy the overall control intent (e.g., using badges and visitor escorts to secure physical access), you MUST mark the control as COMPLIANT. Do NOT create gaps or mark the control as PARTIAL_COMPLIANT solely because specific preferred examples (such as biometrics, physical logbooks, or tailgating rules) are absent.
 * Do NOT use confidence scores, relevance scores, similarity scores, retrieval scores, or model certainty to determine compliance status.
 
 FINDING RULES:
