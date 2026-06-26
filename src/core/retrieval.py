@@ -214,8 +214,8 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     Phase 5: Token-budget accumulation: TARGET=4000 tokens, HARD_MAX=5000 tokens.
     Phase 8: Returns retrieved_chunk_metas for evidence source provenance.
     """
-    TARGET_CONTEXT_TOKENS = 1500
-    HARD_MAX_CONTEXT_TOKENS = 2000
+    TARGET_CONTEXT_TOKENS = 4000
+    HARD_MAX_CONTEXT_TOKENS = 5000
 
     # 1. Ensure chunks exist for ALL uploaded files
     chunks_count = 0
@@ -333,9 +333,7 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
 
     unique_src_files = list({sc[3] for sc in scored_chunks if sc[3] != "fallback"})
     num_files = len(unique_src_files)
-    if num_files > 1:
-        TARGET_CONTEXT_TOKENS = min(4000, 1500 + (num_files * 400))
-        HARD_MAX_CONTEXT_TOKENS = min(5000, 2000 + (num_files * 500))
+
 
     # [HYBRID SEARCH] Compute Local Embeddings
     query_text = " ".join([f"{c['control']} {c['label']} {c.get('expected', '')}" for c in controls_batch])
