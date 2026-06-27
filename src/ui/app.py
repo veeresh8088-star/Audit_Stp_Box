@@ -3397,20 +3397,21 @@ def generate_ollama_reflection(context, file_names_list, selected_sls, draft_fin
     finally:
         session.close()
     
-    for r in all_results:
+    for i, r in enumerate(all_results):
         if r.get("status") == "Out of Scope":
             continue
             
         # Run the validator post-process passing preloaded db_chunks
-        r = post_process(r, context, expected_evidence_map, db_chunks)
+        r_processed = post_process(r, context, expected_evidence_map, db_chunks)
         
         # Map back to UI-expected statuses and enrich with source metadata
-        r = _enrich_finding_metadata(r, db_chunks)
+        all_results[i] = _enrich_finding_metadata(r_processed, db_chunks)
 
     # Call cross-control duplicate quote check
     all_results = validate_cross_control_duplicates(all_results)
 
-    resolved_list = [r["control_id"] for r in all_results if r.get("status") == "Compliant"]
+    TERMINAL_STATUSES = ["Compliant", "Non-Compliant", "Partially Compliant", "Partial-Compliant", "Human Review", "HUMAN_REVIEW", "Out of Scope"]
+    resolved_list = [r["control_id"] for r in all_results if r.get("status") in TERMINAL_STATUSES]
     return resolved_list, all_results
 
 
@@ -3596,10 +3597,10 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
         session.close()
 
     # Enforce metadata enrichment and cross-control duplicate checking
-    for r in all_results:
+    for i, r in enumerate(all_results):
         if r.get("status") == "Out of Scope":
             continue
-        r = _enrich_finding_metadata(r, db_chunks)
+        all_results[i] = _enrich_finding_metadata(r, db_chunks)
 
     from src.core.validator import validate_cross_control_duplicates
     all_results = validate_cross_control_duplicates(all_results)
@@ -3607,7 +3608,8 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     overall_elapsed = time.time() - overall_start_time
     print(f"[{time.strftime('%H:%M:%S')}] [SUCCESS] LangGraph Audit complete! Total time: {overall_elapsed:.2f} seconds.", flush=True)
 
-    resolved_list = [r["control_id"] for r in all_results if r.get("status") == "Compliant"]
+    TERMINAL_STATUSES = ["Compliant", "Non-Compliant", "Partially Compliant", "Partial-Compliant", "Human Review", "HUMAN_REVIEW", "Out of Scope"]
+    resolved_list = [r["control_id"] for r in all_results if r.get("status") in TERMINAL_STATUSES]
     return resolved_list, all_results
 
 def ai_chat_stream(system_ctx, user_msg, model_choice):
