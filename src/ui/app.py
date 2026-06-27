@@ -2221,7 +2221,7 @@ def _get_auditor_feedback_few_shot(control_ids):
 
 def get_num_ctx(model_name: str) -> int:
     name = model_name.lower()
-    if any(x in name for x in ["7b","8b","9b"]):
+    if any(x in name for x in ["7b","8b","9b","12b","27b"]):
         return 8192
     if "3b" in name:
         return 4096

@@ -410,6 +410,14 @@ You MUST respond with findings wrapped in XML tags matching this format:
 Ensure the output contains only the XML tags and no surrounding text.
 """
 
+def get_num_ctx(model_name: str) -> int:
+    name = model_name.lower()
+    if any(x in name for x in ["7b", "8b", "9b", "12b", "27b"]):
+        return 8192
+    if "3b" in name:
+        return 4096
+    return 4096
+
 class NativeOllamaChain:
     """
     A drop-in replacement wrapper for LangChain's PromptTemplate + ChatOllama.
@@ -688,7 +696,10 @@ class NativeOllamaChain:
             response = self.client.chat(
                 model=self.model_name,
                 messages=[{'role': 'user', 'content': prompt}],
-                options={'temperature': 0.0},
+                options={
+                    'temperature': 0.0,
+                    'num_ctx': get_num_ctx(self.model_name)
+                },
                 keep_alive="15m"
             )
             content = response['message']['content']
