@@ -184,31 +184,28 @@ Control Name: {control_label}
 Control Objective & Illustrative Evidence Examples (Do NOT treat as a mandatory checklist): {expected_evidence}
 {feedback_section}
 
-You MUST respond with a JSON object matching this schema:
-{{
-  "status": "COMPLIANT" | "PARTIAL" | "PARTIAL_COMPLIANT" | "NON_COMPLIANT",
-  "severity": "N/A" | "Low" | "Medium" | "High" | "Critical",
-  "evidence_strength": "STRONG" | "MODERATE" | "WEAK" | "NONE" | "Strong" | "Moderate" | "Weak" | "None",
-  "control_coverage": 0,
-  "evidence_count": 0,
-  "business_impact": "business impact of identified gaps, or empty if COMPLIANT",
-  "remediation_priority": "Low" | "Medium" | "High" | "Immediate",
-  "justification": "Detailed auditor explanation supported by evidence.",
-  "missing_requirements": [
-    "Requirement 1",
-    "Requirement 2"
-  ],
-  "recommendation": "Specific remediation actions, or empty if COMPLIANT.",
-  "evidence": [
-    {{
-      "source": "Document Name",
-      "page": "Page Number",
-      "excerpt": "Supporting evidence text / verbatim quote"
-    }}
-  ]
-}}
+You MUST respond with findings wrapped in XML tags matching this format:
+<status>COMPLIANT | PARTIAL_COMPLIANT | NON_COMPLIANT</status>
+<evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
+<control_coverage>percentage_integer</control_coverage>
+<evidence_count>integer</evidence_count>
+<business_impact>business impact of identified gaps, or empty if COMPLIANT</business_impact>
+<remediation_priority>Low | Medium | High | Immediate</remediation_priority>
+<justification>Detailed auditor explanation supported by evidence.</justification>
+<missing_requirements>
+  <requirement>Requirement 1</requirement>
+  <requirement>Requirement 2</requirement>
+</missing_requirements>
+<recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
+<evidence_items>
+  <evidence_item>
+    <source>Document Name</source>
+    <page>Page Number</page>
+    <excerpt>Supporting evidence text / verbatim quote</excerpt>
+  </evidence_item>
+</evidence_items>
 
-Ensure the output contains only the JSON object and no surrounding text.
+Ensure the output contains only the XML tags and no surrounding text.
 """
 
 REFLECTION_PROMPT_TEMPLATE = """You are a highly skeptical adversarial compliance challenger.
@@ -389,31 +386,28 @@ CRITIQUE & CORRECT
 2. Fix any Pydantic schema validation errors mentioned above.
 3. Generate a refined, compliant finding that satisfies all compliance rules and represents the ground truth.
 
-You MUST respond with a JSON object matching this schema:
-{{
-  "status": "COMPLIANT" | "PARTIAL" | "PARTIAL_COMPLIANT" | "NON_COMPLIANT",
-  "severity": "N/A" | "Low" | "Medium" | "High" | "Critical",
-  "evidence_strength": "STRONG" | "MODERATE" | "WEAK" | "NONE" | "Strong" | "Moderate" | "Weak" | "None",
-  "control_coverage": 0,
-  "evidence_count": 0,
-  "business_impact": "business impact of identified gaps, or empty if COMPLIANT",
-  "remediation_priority": "Low" | "Medium" | "High" | "Immediate",
-  "justification": "Detailed auditor explanation supported by evidence.",
-  "missing_requirements": [
-    "Requirement 1",
-    "Requirement 2"
-  ],
-  "recommendation": "Specific remediation actions, or empty if COMPLIANT.",
-  "evidence": [
-    {{
-      "source": "Document Name",
-      "page": "Page Number",
-      "excerpt": "Supporting evidence text / verbatim quote"
-    }}
-  ]
-}}
+You MUST respond with findings wrapped in XML tags matching this format:
+<status>COMPLIANT | PARTIAL_COMPLIANT | NON_COMPLIANT</status>
+<evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
+<control_coverage>percentage_integer</control_coverage>
+<evidence_count>integer</evidence_count>
+<business_impact>business impact of identified gaps, or empty if COMPLIANT</business_impact>
+<remediation_priority>Low | Medium | High | Immediate</remediation_priority>
+<justification>Detailed auditor explanation supported by evidence.</justification>
+<missing_requirements>
+  <requirement>Requirement 1</requirement>
+  <requirement>Requirement 2</requirement>
+</missing_requirements>
+<recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
+<evidence_items>
+  <evidence_item>
+    <source>Document Name</source>
+    <page>Page Number</page>
+    <excerpt>Supporting evidence text / verbatim quote</excerpt>
+  </evidence_item>
+</evidence_items>
 
-Ensure the output contains only the JSON object and no surrounding text.
+Ensure the output contains only the XML tags and no surrounding text.
 """
 
 class NativeOllamaChain:
@@ -428,25 +422,307 @@ class NativeOllamaChain:
         self.client = ollama.Client(host=url, timeout=1800.0)
         
     def invoke(self, input_dict: dict) -> AuditFindingSchema:
+        import re
+        import xml.etree.ElementTree as ET
+        
+        # Extract default severity from input_dict (falls back to Medium if not specified)
+        default_severity = input_dict.get("severity", "Medium")
+        # Normalize default severity string (e.g. "HIGH" -> "High", "P2 High" -> "High")
+        def normalize_severity(sev):
+            s = str(sev).upper().strip()
+            if "CRIT" in s or "P1" in s: return "Critical"
+            if "HIGH" in s or "P2" in s: return "High"
+            if "MED" in s or "P3" in s: return "Medium"
+            if "LOW" in s or "P4" in s: return "Low"
+            return "Medium"
+            
+        control_default_severity = normalize_severity(default_severity)
+        
+        # Helper to clean and normalize parsed dictionaries to prevent validation errors
+        def clean_and_normalize_data(data: dict) -> dict:
+            if not isinstance(data, dict):
+                return {}
+                
+            normalized = {}
+            
+            # 1. status
+            status = str(data.get("status", "NON_COMPLIANT")).upper().strip()
+            if status in ("COMPLIANT", "PARTIAL", "PARTIAL_COMPLIANT", "NON_COMPLIANT"):
+                normalized["status"] = status
+            elif "PARTIAL_COMPLIANT" in status or "PARTIALLY_COMPLIANT" in status or "PARTIALLY" in status:
+                normalized["status"] = "PARTIAL_COMPLIANT"
+            elif "PARTIAL" in status:
+                normalized["status"] = "PARTIAL"
+            elif "NON_COMPLIANT" in status or "NON-COMPLIANT" in status or "FAIL" in status:
+                normalized["status"] = "NON_COMPLIANT"
+            elif "COMPLIANT" in status or "PASS" in status:
+                normalized["status"] = "COMPLIANT"
+            else:
+                normalized["status"] = "NON_COMPLIANT"
+                
+            # 2. severity (DETERMINISTIC ASSIGNMENT: NOT FROM LLM PROMPT)
+            # If status is COMPLIANT, severity is always N/A
+            if normalized["status"] == "COMPLIANT":
+                normalized["severity"] = "N/A"
+            else:
+                # Assign default control severity
+                normalized["severity"] = control_default_severity
+                    
+            # 3. evidence_strength
+            strength = str(data.get("evidence_strength", "None")).strip()
+            str_upper = strength.upper()
+            if str_upper in ("STRONG", "MODERATE", "WEAK", "NONE"):
+                normalized["evidence_strength"] = str_upper.capitalize()
+            else:
+                normalized["evidence_strength"] = "None"
+                
+            # 4. control_coverage
+            try:
+                coverage = int(str(data.get("control_coverage", 0)).strip())
+                normalized["control_coverage"] = max(0, min(100, coverage))
+            except (TypeError, ValueError):
+                # Try to extract any digits if LLM returned text like "65%"
+                digits = re.findall(r'\d+', str(data.get("control_coverage", "")))
+                if digits:
+                    normalized["control_coverage"] = max(0, min(100, int(digits[0])))
+                else:
+                    normalized["control_coverage"] = 0
+                
+            # 5. evidence
+            evidence = data.get("evidence", [])
+            if not isinstance(evidence, list):
+                if isinstance(evidence, dict):
+                    evidence = [evidence]
+                else:
+                    evidence = []
+                    
+            root_excerpt = data.get("evidence_quote") or data.get("evidence_snippet") or data.get("excerpt") or ""
+            root_source = data.get("evidence_source") or data.get("source") or "Policy Document"
+            root_page = data.get("page") or data.get("page_number") or "N/A"
+            
+            normalized_evidence = []
+            for item in evidence:
+                if isinstance(item, dict):
+                    src = item.get("source") or item.get("document") or root_source or "Policy Document"
+                    pg = item.get("page") or item.get("page_number") or root_page or "N/A"
+                    exc = item.get("excerpt") or item.get("quote") or item.get("text") or root_excerpt or ""
+                    if exc:
+                        normalized_evidence.append({
+                            "source": str(src),
+                            "page": str(pg),
+                            "excerpt": str(exc)
+                        })
+                        
+            if not normalized_evidence and root_excerpt:
+                normalized_evidence.append({
+                    "source": str(root_source),
+                    "page": str(root_page),
+                    "excerpt": str(root_excerpt)
+                })
+                
+            normalized["evidence"] = normalized_evidence
+            
+            # 6. evidence_count
+            try:
+                count = int(str(data.get("evidence_count", len(normalized["evidence"]))).strip())
+                normalized["evidence_count"] = max(0, count)
+            except (TypeError, ValueError):
+                normalized["evidence_count"] = len(normalized["evidence"])
+                
+            # 7. business_impact
+            normalized["business_impact"] = str(data.get("business_impact") or data.get("impact") or "")
+            
+            # 8. remediation_priority
+            priority = str(data.get("remediation_priority", "Medium")).strip().upper()
+            if priority in ("LOW", "MEDIUM", "HIGH", "IMMEDIATE"):
+                normalized["remediation_priority"] = priority.capitalize()
+            else:
+                if "IMM" in priority:
+                    normalized["remediation_priority"] = "Immediate"
+                elif "HIGH" in priority:
+                    normalized["remediation_priority"] = "High"
+                elif "LOW" in priority:
+                    normalized["remediation_priority"] = "Low"
+                else:
+                    normalized["remediation_priority"] = "Medium"
+                    
+            # 9. justification
+            normalized["justification"] = str(data.get("justification") or data.get("reasoning") or data.get("explanation") or "")
+            if not normalized["justification"].strip():
+                normalized["justification"] = "No compliance justification was provided by the model."
+                
+            # 10. missing_requirements
+            missing = data.get("missing_requirements", [])
+            if isinstance(missing, str):
+                missing = [missing]
+            elif not isinstance(missing, list):
+                missing = []
+            normalized["missing_requirements"] = [str(m) for m in missing]
+            
+            # 11. recommendation
+            normalized["recommendation"] = str(data.get("recommendation") or data.get("suggested_action") or "")
+            
+            return normalized
+
+        # Parse XML helper
+        def parse_xml_to_dict(xml_text: str) -> dict:
+            parsed_data = {}
+            expected_tags = ["status", "evidence_strength", "control_coverage", "evidence_count", 
+                             "business_impact", "remediation_priority", "justification", "recommendation"]
+            
+            # Tag Repair Logic (pre-processing unclosed tags)
+            repaired_text = xml_text.strip()
+            
+            for tag in expected_tags:
+                if f"<{tag}>" in repaired_text and f"</{tag}>" not in repaired_text:
+                    start_pos = repaired_text.find(f"<{tag}>") + len(tag) + 2
+                    next_tag_pos = repaired_text.find("<", start_pos)
+                    if next_tag_pos != -1:
+                        repaired_text = repaired_text[:next_tag_pos] + f"</{tag}>" + repaired_text[next_tag_pos:]
+                    else:
+                        repaired_text = repaired_text + f"</{tag}>"
+
+            if "<requirement>" in repaired_text and "</requirement>" not in repaired_text:
+                repaired_text = re.sub(r'<requirement>([^<]+)(?!</requirement>)', r'<requirement>\1</requirement>', repaired_text)
+                
+            # Wrap in single root tag to parse with ElementTree
+            xml_body = repaired_text
+            first_tag_idx = xml_body.find("<")
+            if first_tag_idx != -1:
+                xml_body = xml_body[first_tag_idx:]
+            last_tag_idx = xml_body.rfind(">")
+            if last_tag_idx != -1:
+                xml_body = xml_body[:last_tag_idx+1]
+                
+            root_wrapped = f"<root>{xml_body}</root>"
+            
+            def regex_get_tag(t, txt):
+                m = re.search(rf'<{t}>(.*?)</{t}>', txt, re.DOTALL)
+                return m.group(1).strip() if m else ""
+                
+            parsed_successfully = False
+            try:
+                root_el = ET.fromstring(root_wrapped)
+                parsed_successfully = True
+                
+                for tag in expected_tags:
+                    el = root_el.find(tag)
+                    parsed_data[tag] = el.text.strip() if (el is not None and el.text) else ""
+                    
+                missing_reqs = []
+                mr_el = root_el.find("missing_requirements")
+                if mr_el is not None:
+                    for req in mr_el.findall("requirement"):
+                        if req.text:
+                            missing_reqs.append(req.text.strip())
+                else:
+                    for req in root_el.findall("requirement"):
+                        if req.text:
+                            missing_reqs.append(req.text.strip())
+                parsed_data["missing_requirements"] = missing_reqs
+                
+                evidence_items = []
+                ei_el = root_el.find("evidence_items")
+                targets = ei_el.findall("evidence_item") if ei_el is not None else root_el.findall("evidence_item")
+                for item in targets:
+                    src = item.find("source")
+                    pg = item.find("page")
+                    exc = item.find("excerpt")
+                    if exc is None:
+                        exc = item.find("quote")
+                    src_txt = src.text.strip() if (src is not None and src.text) else ""
+                    pg_txt = pg.text.strip() if (pg is not None and pg.text) else ""
+                    exc_txt = exc.text.strip() if (exc is not None and exc.text) else ""
+                    if exc_txt:
+                        evidence_items.append({
+                            "source": src_txt,
+                            "page": pg_txt,
+                            "excerpt": exc_txt
+                        })
+                parsed_data["evidence"] = evidence_items
+                
+            except Exception as e:
+                print(f"[XML PARSER WARNING] ElementTree failed ({e}). Falling back to pure regex parser...", flush=True)
+                
+            if not parsed_successfully or not any(parsed_data.values()):
+                for tag in expected_tags:
+                    parsed_data[tag] = regex_get_tag(tag, repaired_text)
+                    
+                missing_reqs = re.findall(r'<requirement>(.*?)</requirement>', repaired_text, re.DOTALL)
+                parsed_data["missing_requirements"] = [r.strip() for r in missing_reqs]
+                
+                evidence_items = []
+                items_raw = re.findall(r'<evidence_item>(.*?)</evidence_item>', repaired_text, re.DOTALL)
+                for item in items_raw:
+                    src = regex_get_tag("source", item)
+                    pg = regex_get_tag("page", item)
+                    exc = regex_get_tag("excerpt", item) or regex_get_tag("quote", item)
+                    if exc:
+                        evidence_items.append({
+                            "source": src,
+                            "page": pg,
+                            "excerpt": exc
+                        })
+                parsed_data["evidence"] = evidence_items
+                
+            return parsed_data
+
         # Format the prompt using standard python string formatting
         # This replaces '{var}' with values and '{{' / '}}' with literal '{' / '}'
         prompt = self.prompt_template.format(**input_dict)
         
-        # Call ollama natively, forcing the Pydantic schema as the structured output format
-        response = self.client.chat(
-            model=self.model_name,
-            messages=[{'role': 'user', 'content': prompt}],
-            options={'temperature': 0.0},
-            format=AuditFindingSchema.model_json_schema(),
-            keep_alive="15m"
-        )
-        
-        content = response['message']['content']
+        # Run Ollama without rigid format constraints for maximum generation speed and reliability
+        print(f"[OLLAMA CHAIN] Querying '{self.model_name}' (XML format-free chat) for {input_dict.get('control_id', 'unknown')}...", flush=True)
         try:
-            data = json.loads(content)
-            return AuditFindingSchema(**data)
-        except (json.JSONDecodeError, ValidationError) as e:
-            raise e
+            response = self.client.chat(
+                model=self.model_name,
+                messages=[{'role': 'user', 'content': prompt}],
+                options={'temperature': 0.0},
+                keep_alive="15m"
+            )
+            content = response['message']['content']
+            if not content or not content.strip():
+                raise ValueError("Ollama returned an empty response.")
+                
+            content_clean = content.strip()
+            
+            # Check if response is JSON (fallback support)
+            if content_clean.startswith("{") or (content_clean.startswith("```json") and "{" in content_clean):
+                print(f"[OLLAMA CHAIN] Model returned JSON instead of XML. Parsing as JSON...", flush=True)
+                json_str = content_clean
+                if "```" in json_str:
+                    blocks = re.findall(r'```(?:json)?\s*(.*?)\s*```', json_str, re.DOTALL)
+                    if blocks:
+                        json_str = blocks[0]
+                if not (json_str.startswith("{") and json_str.endswith("}")):
+                    start_idx = json_str.find("{")
+                    end_idx = json_str.rfind("}")
+                    if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                        json_str = json_str[start_idx:end_idx+1]
+                data = json.loads(json_str)
+            else:
+                # Parse as XML (primary strategy)
+                data = parse_xml_to_dict(content_clean)
+                
+            normalized_data = clean_and_normalize_data(data)
+            return AuditFindingSchema(**normalized_data)
+            
+        except Exception as e:
+            print(f"[OLLAMA CHAIN ERROR] Parse failed for {input_dict.get('control_id', 'unknown')}: {e}", flush=True)
+            # Return a default NON_COMPLIANT finding schema to prevent crashes
+            return AuditFindingSchema(
+                status="NON_COMPLIANT",
+                severity=control_default_severity,
+                evidence_strength="None",
+                control_coverage=0,
+                evidence_count=0,
+                business_impact="Potential security exposure or compliance gap due to unparseable model response.",
+                remediation_priority="High" if control_default_severity in ("High", "Critical") else "Medium",
+                justification=f"Auditor engine fell back to non-compliant: model output was completely unparseable. Technical details: {str(e)}",
+                missing_requirements=[f"Verify control requirements for {input_dict.get('control_id', 'unknown')}"],
+                recommendation=f"Establish, document, and implement procedures to satisfy {input_dict.get('control_id', 'unknown')}.",
+                evidence=[]
+            )
 
 def get_generator_chain(model_name: str, url: str = "http://127.0.0.1:11434"):
     """
