@@ -1026,256 +1026,442 @@ TOP 5 PRIORITY FIXES:
 ═══════════════════════════════════════════════════════════════════"""
     return report_md
 
-def export_pdf_report(session_title, findings, resolved_list, status, comments=""):
-    from fpdf import FPDF
-    
-    class PDF(FPDF):
-        def header(self):
-            # Brand colors: Sleek dark theme matching AICyberAuditBox
-            self.set_fill_color(15, 23, 42) # Slate 900
-            self.rect(0, 0, 210, 32, "F")
-            
-            self.set_xy(10, 8)
-            self.set_text_color(255, 255, 255)
-            self.set_font("helvetica", "B", 16)
-            self.cell(0, 8, "AICyberAuditBox - Audit Report", align="L", new_x="LMARGIN", new_y="NEXT")
-            
-            self.set_font("helvetica", "I", 9)
-            self.set_text_color(148, 163, 184) # Slate 400
-            self.cell(0, 4, "Offline AI Compliance & Evidence Audit System", align="L", new_x="LMARGIN", new_y="NEXT")
-            
-        def footer(self):
-            self.set_y(-15)
-            self.set_font("helvetica", "I", 8)
-            self.set_text_color(100, 116, 139) # Slate 500
-            # Line separator
-            self.line(10, 280, 200, 280)
-            self.set_xy(10, 281)
-            self.cell(0, 6, "Confidential  ·  Page " + str(self.page_no()) + "  ·  Fully Offline & Encrypted", border=0, align="L")
-            self.cell(0, 6, datetime.now().strftime("%d %b %Y %H:%M:%S"), border=0, align="R")
-            
-    pdf = PDF()
-    pdf.set_auto_page_break(auto=True, margin=20)
-    pdf.add_page()
-    pdf.set_y(38) # Start content below header banner
-    
-    # Metadata Box
-    pdf.set_fill_color(248, 250, 252) # Slate 50
-    pdf.set_draw_color(226, 232, 240) # Slate 200
-    pdf.rect(10, 38, 190, 34, "DF")
-    
-    pdf.set_xy(14, 41)
-    pdf.set_font("helvetica", "B", 10)
-    pdf.set_text_color(71, 85, 105) # Slate 600
-    pdf.cell(45, 6, "Report Name:")
-    pdf.set_font("helvetica", "", 10)
-    pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 6, str(session_title), new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.set_x(14)
-    pdf.set_font("helvetica", "B", 10)
-    pdf.set_text_color(71, 85, 105)
-    pdf.cell(45, 6, "Audit Status:")
-    pdf.set_font("helvetica", "B", 10)
-    if status == "Approved":
-        pdf.set_text_color(22, 163, 74) # Green 600
-    elif status == "Rejected":
-        pdf.set_text_color(220, 38, 38) # Red 600
-    elif status == "Pending Review":
-        pdf.set_text_color(217, 119, 6) # Yellow 600
-    else:
-        pdf.set_text_color(71, 85, 105)
-    pdf.cell(0, 6, str(status), new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.set_x(14)
-    pdf.set_font("helvetica", "B", 10)
-    pdf.set_text_color(71, 85, 105)
-    pdf.cell(45, 6, "Review Date:")
-    pdf.set_font("helvetica", "", 10)
-    pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 6, datetime.now().strftime("%d %b %Y"), new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.set_x(14)
-    pdf.set_font("helvetica", "B", 10)
-    pdf.set_text_color(71, 85, 105)
-    pdf.cell(45, 6, "Auditor Comments:")
-    pdf.set_font("helvetica", "I", 10)
-    pdf.set_text_color(51, 65, 85)
-    pdf.cell(0, 6, str(comments if comments else "No comments provided."), new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.ln(12)
-    
-    # Filter findings to in-scope and actual gaps
-    in_scope_findings = [f for f in findings if f.get("status") in ("Compliant", "Partially Compliant", "Non-Compliant", "Partial", "Human Review")]
-    gap_findings = [f for f in in_scope_findings if f.get("status") in ("Partially Compliant", "Non-Compliant", "Partial", "Human Review")]
-    compliant_findings = [f for f in in_scope_findings if f.get("status") == "Compliant"]
-    
-    # Fallback to len(resolved_list) if findings doesn't contain compliant statuses
-    resolved = len(compliant_findings) if len(in_scope_findings) > 0 else len(resolved_list)
-    open_gaps = len(gap_findings) if len(in_scope_findings) > 0 else len([f for f in findings if f.get("status") not in ("Dismissed", "Rejected", "Compliant", "Out of Scope", "Out Of Scope")])
-    total = resolved + open_gaps
-    
-    pdf.set_font("helvetica", "B", 12)
-    pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 8, "Compliance Summary", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_draw_color(30, 41, 59)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(3)
-    
-    # Simple summary table grid
-    pdf.set_fill_color(241, 245, 249) # Slate 100
-    pdf.set_font("helvetica", "B", 9)
-    pdf.set_text_color(71, 85, 105)
-    pdf.cell(60, 8, "Metric", border=1, fill=True, align="C")
-    pdf.cell(60, 8, "Count", border=1, fill=True, align="C")
-    pdf.cell(70, 8, "Percentage", border=1, fill=True, align="C", new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.set_font("helvetica", "", 9)
-    pdf.set_text_color(15, 23, 42)
-    
-    pdf.cell(60, 8, "Total Target Controls", border=1, align="C")
-    pdf.cell(60, 8, str(total), border=1, align="C")
-    pdf.cell(70, 8, "100%", border=1, align="C", new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.cell(60, 8, "Resolved Controls (Compliant)", border=1, align="C")
-    pdf.cell(60, 8, str(resolved), border=1, align="C")
-    pct_res = f"{int(resolved / max(total, 1) * 100)}%"
-    pdf.cell(70, 8, pct_res, border=1, align="C", new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.cell(60, 8, "Outstanding Gaps (Non-Compliant)", border=1, align="C")
-    pdf.cell(60, 8, str(open_gaps), border=1, align="C")
-    pct_gap = f"{int(open_gaps / max(total, 1) * 100)}%"
-    pdf.cell(70, 8, pct_gap, border=1, align="C", new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.ln(6)
+def export_docx_report(session_title, findings, resolved_list, status, comments=""):
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Inches, Cm
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_ALIGN_VERTICAL
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    import io as _io
 
-    # Definition of Risk Classifications Section
-    if pdf.get_y() > 200:
-        pdf.add_page()
-        pdf.set_y(38)
-    
-    pdf.set_font("helvetica", "B", 11)
-    pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 7, "Definition of Risk Classifications", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_draw_color(226, 232, 240) # Slate 200 line
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(3)
-    
-    # P1 Critical
-    pdf.set_font("helvetica", "B", 8.5)
-    pdf.set_text_color(220, 38, 38)
-    pdf.cell(22, 5, "P1 Critical:")
-    pdf.set_font("helvetica", "", 8.5)
-    pdf.set_text_color(51, 65, 85)
-    pdf.multi_cell(0, 4.5, "Severe, systemic control failure representing an immediate threat to the entire organization, critical systems, or highly sensitive data. Catastrophic business/operational impact or major compliance violations. Requires immediate emergency resolution.", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(1)
-    
-    # P2 High
-    pdf.set_font("helvetica", "B", 8.5)
-    pdf.set_text_color(217, 119, 6)
-    pdf.cell(22, 5, "P2 High:")
-    pdf.set_font("helvetica", "", 8.5)
-    pdf.set_text_color(51, 65, 85)
-    pdf.multi_cell(0, 4.5, "Significant control failure or non-adherence to SEBI, Government Guidelines, policies approved by competent authority, or standard practices. High probability of threat exploitation causing significant security, compliance, or operational impact. Requires program for immediate and permanent resolution.", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(1)
-    
-    # P3 Medium
-    pdf.set_font("helvetica", "B", 8.5)
-    pdf.set_text_color(161, 98, 7)
-    pdf.cell(22, 5, "P3 Medium:")
-    pdf.set_font("helvetica", "", 8.5)
-    pdf.set_text_color(51, 65, 85)
-    pdf.multi_cell(0, 4.5, "Important control weakness or potential exposure that increases organizational risk. Management should quickly develop action plans to ensure timely and permanent resolution of the weaknesses before they develop into a major exposure.", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(1)
-    
-    # P4 Low
-    pdf.set_font("helvetica", "B", 8.5)
-    pdf.set_text_color(37, 99, 235)
-    pdf.cell(22, 5, "P4 Low:")
-    pdf.set_font("helvetica", "", 8.5)
-    pdf.set_text_color(51, 65, 85)
-    pdf.multi_cell(0, 4.5, "Minor weakness or operational inefficiency with limited impact. Not a direct threat to control or security, but management should address it in the interest of efficiency and resolve it as activities increase.", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(1)
-    
-    # Accepted
-    pdf.set_font("helvetica", "B", 8.5)
-    pdf.set_text_color(22, 163, 74)
-    pdf.cell(22, 5, "Accepted:")
-    pdf.set_font("helvetica", "", 8.5)
-    pdf.set_text_color(51, 65, 85)
-    pdf.multi_cell(0, 4.5, "Normal and good practice as per guidelines and best practices. The observations categorized as 'ACCEPTED' (Compliant) need no corrective action.", new_x="LMARGIN", new_y="NEXT")
-    
-    pdf.ln(8)
-    
-    # Detailed Findings Section
-    if pdf.get_y() > 240:
-        pdf.add_page()
-        pdf.set_y(38)
-        
-    pdf.set_font("helvetica", "B", 11)
-    pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 7, "Gaps & Findings Details", new_x="LMARGIN", new_y="NEXT")
-    pdf.set_draw_color(30, 41, 59)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(4)
-    
-    # We display findings
-    display_list = gap_findings if len(in_scope_findings) > 0 else [f for f in findings if f.get("status") not in ("Dismissed", "Rejected", "Compliant", "Out of Scope", "Out Of Scope")]
-    for idx, f in enumerate(display_list, 1):
-        if pdf.get_y() > 240:
-            pdf.add_page()
-            pdf.set_y(38)
-            
-        pdf.set_font("helvetica", "B", 10)
-        pdf.set_text_color(15, 23, 42)
-        ctrl_hdr = f"#{idx}. Control {f.get('control_id', '')} - {f.get('control', '')}"
-        pdf.multi_cell(0, 6, ctrl_hdr.encode("latin1", errors="replace").decode("latin1"), new_x="LMARGIN", new_y="NEXT")
-        
-        pdf.set_font("helvetica", "B", 8)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(25, 6, "Severity:")
-        sev = f.get("severity", "P3 Medium")
-        if "Critical" in sev:
-            pdf.set_text_color(220, 38, 38)
-        elif "High" in sev:
-            pdf.set_text_color(217, 119, 6)
+    # ── Helpers ────────────────────────────────────────────────────────────────
+    def _rgb(r, g, b):
+        return RGBColor(r, g, b)
+
+    def _set_cell_bg(cell, hex_color):
+        """Set cell background shading via XML."""
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:val'), 'clear')
+        shd.set(qn('w:color'), 'auto')
+        shd.set(qn('w:fill'), hex_color)
+        tcPr.append(shd)
+
+    def _set_cell_borders(cell, border_color='1F2937'):
+        tc = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        tcBorders = OxmlElement('w:tcBorders')
+        for side in ['top', 'left', 'bottom', 'right']:
+            border = OxmlElement(f'w:{side}')
+            border.set(qn('w:val'), 'single')
+            border.set(qn('w:sz'), '4')
+            border.set(qn('w:space'), '0')
+            border.set(qn('w:color'), border_color)
+            tcBorders.append(border)
+        tcPr.append(tcBorders)
+
+    def _heading(doc, text, level=1, color=(15, 23, 42), space_before=12, space_after=4):
+        p = doc.add_heading(text, level=level)
+        run = p.runs[0] if p.runs else p.add_run(text)
+        run.font.color.rgb = _rgb(*color)
+        run.font.bold = True
+        p.paragraph_format.space_before = Pt(space_before)
+        p.paragraph_format.space_after = Pt(space_after)
+        return p
+
+    def _body(doc, text, bold=False, italic=False, color=(51, 65, 85), size=10, space_after=4):
+        p = doc.add_paragraph()
+        run = p.add_run(text)
+        run.bold = bold
+        run.italic = italic
+        run.font.size = Pt(size)
+        run.font.color.rgb = _rgb(*color)
+        p.paragraph_format.space_after = Pt(space_after)
+        return p
+
+    def _add_table(doc, headers, rows, header_bg='0F172A', header_fg=(255,255,255),
+                   col_widths=None, row_colors=None):
+        table = doc.add_table(rows=1, cols=len(headers))
+        table.style = 'Table Grid'
+        # Header row
+        hdr_cells = table.rows[0].cells
+        for i, h in enumerate(headers):
+            cell = hdr_cells[i]
+            _set_cell_bg(cell, header_bg)
+            _set_cell_borders(cell)
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run(str(h))
+            run.bold = True
+            run.font.size = Pt(9)
+            run.font.color.rgb = _rgb(*header_fg)
+        # Data rows
+        for r_idx, row_data in enumerate(rows):
+            row_cells = table.add_row().cells
+            bg = (row_colors[r_idx] if row_colors and r_idx < len(row_colors) else None)
+            for c_idx, val in enumerate(row_data):
+                cell = row_cells[c_idx]
+                if bg:
+                    _set_cell_bg(cell, bg)
+                _set_cell_borders(cell)
+                p = cell.paragraphs[0]
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                run = p.add_run(str(val) if val is not None else '')
+                run.font.size = Pt(8.5)
+                run.font.color.rgb = _rgb(30, 41, 59)
+        # Set column widths
+        if col_widths:
+            for col_i, width in enumerate(col_widths):
+                for cell in table.columns[col_i].cells:
+                    cell.width = Cm(width)
+        return table
+
+    # ── Severity mapping ───────────────────────────────────────────────────────
+    SEVERITY_MAP = {
+        'P1 Critical': 'Critical', 'P1': 'Critical', 'Critical': 'Critical',
+        'P2 High': 'High', 'P2': 'High', 'High': 'High',
+        'P3 Medium': 'Medium', 'P3': 'Medium', 'Medium': 'Medium',
+        'P4 Low': 'Low', 'P4': 'Low', 'Low': 'Low',
+        'Compliant': 'Accepted', 'N/A': 'Accepted', 'Accepted': 'Accepted',
+    }
+
+    def _map_severity(raw):
+        if not raw:
+            return 'Medium'
+        for k, v in SEVERITY_MAP.items():
+            if k.lower() in str(raw).lower():
+                return v
+        return str(raw)
+
+    # ── Severity counts ────────────────────────────────────────────────────────
+    in_scope = [f for f in findings if f.get('status') not in ('Out of Scope', 'Out Of Scope', 'Dismissed', 'Rejected')]
+    compliant_fs = [f for f in in_scope if f.get('status') == 'Compliant']
+
+    sev_counts = {'Critical': 0, 'High': 0, 'Medium': 0, 'Low': 0, 'Accepted': 0}
+    for f in findings:
+        if f.get('status') == 'Compliant':
+            sev_counts['Accepted'] += 1
         else:
-            pdf.set_text_color(161, 98, 7)
-        pdf.cell(45, 6, str(sev))
-        
-        pdf.set_font("helvetica", "B", 8)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(25, 6, "Status:")
-        status_val = f.get("status", "Non-Compliant")
-        if status_val == "Compliant":
-            pdf.set_text_color(22, 163, 74)
+            sev = _map_severity(f.get('severity', ''))
+            if sev in sev_counts:
+                sev_counts[sev] += 1
+            else:
+                sev_counts['Medium'] += 1
+
+    report_date = datetime.now().strftime('%B %d, %Y')
+    audit_date = datetime.now().strftime('%d %b %Y')
+    uploaded_files = list({f.get('source_files', '') for f in findings if f.get('source_files')})
+    scope_controls = list({f.get('control', '') for f in in_scope if f.get('control')})
+
+    # ── Build Document ─────────────────────────────────────────────────────────
+    doc = Document()
+
+    # Page margins
+    for section in doc.sections:
+        section.top_margin    = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin   = Cm(2.5)
+        section.right_margin  = Cm(2.5)
+
+    # ── COVER PAGE ─────────────────────────────────────────────────────────────
+    cover_title = doc.add_paragraph()
+    cover_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = cover_title.add_run('IS AUDIT REPORT')
+    run.bold = True
+    run.font.size = Pt(28)
+    run.font.color.rgb = _rgb(15, 23, 42)
+    cover_title.paragraph_format.space_before = Pt(60)
+    cover_title.paragraph_format.space_after = Pt(6)
+
+    sub = doc.add_paragraph()
+    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r2 = sub.add_run(str(session_title))
+    r2.font.size = Pt(16)
+    r2.font.color.rgb = _rgb(71, 85, 105)
+    r2.italic = True
+    sub.paragraph_format.space_after = Pt(60)
+
+    details_data = [
+        ('Engagement Type', 'Information Systems Audit'),
+        ('Auditor Name', 'Lead IS Auditor'),
+        ('Firm Name', 'AICyberAuditBox'),
+        ('Report Date', report_date),
+        ('Audit Status', str(status)),
+    ]
+    tbl_cover = doc.add_table(rows=len(details_data), cols=2)
+    tbl_cover.style = 'Table Grid'
+    for i, (label, value) in enumerate(details_data):
+        cells = tbl_cover.rows[i].cells
+        _set_cell_bg(cells[0], 'F1F5F9')
+        _set_cell_borders(cells[0])
+        _set_cell_borders(cells[1])
+        lp = cells[0].paragraphs[0]
+        lr = lp.add_run(label)
+        lr.bold = True
+        lr.font.size = Pt(10)
+        lr.font.color.rgb = _rgb(30, 41, 59)
+        vp = cells[1].paragraphs[0]
+        vr = vp.add_run(value)
+        vr.font.size = Pt(10)
+        vr.font.color.rgb = _rgb(30, 41, 59)
+        cells[0].width = Cm(6)
+        cells[1].width = Cm(11)
+
+    doc.add_page_break()
+
+    # ── DOCUMENT CONTROL ───────────────────────────────────────────────────────
+    _heading(doc, '1. Document Control', level=1)
+    _add_table(doc,
+        headers=['Title', 'Version', 'Prepared By', 'Reviewed By', 'Date'],
+        rows=[[
+            str(session_title), '1.0', 'AICyberAuditBox AI Engine',
+            'Lead IS Auditor', report_date
+        ]],
+        col_widths=[5.5, 2, 4.5, 4, 3]
+    )
+
+    # ── AUDITEE DETAILS ────────────────────────────────────────────────────────
+    _heading(doc, '2. Auditee Details', level=1)
+    _add_table(doc,
+        headers=['Organization Name', 'Audit Area', 'Location'],
+        rows=[['—', 'Information Systems', '—']],
+        col_widths=[6, 6, 7]
+    )
+
+    # ── AUDITOR DETAILS ────────────────────────────────────────────────────────
+    _heading(doc, '3. Auditor Details', level=1)
+    _add_table(doc,
+        headers=['Auditor Name', 'Audit Dates', 'Report Date'],
+        rows=[['Lead IS Auditor', audit_date, report_date]],
+        col_widths=[6, 6, 7]
+    )
+
+    # ── DISCLAIMER ────────────────────────────────────────────────────────────
+    _heading(doc, '4. Disclaimer', level=1)
+    _body(doc,
+        'This report has been prepared solely for the use of the organization named above. '
+        'The findings and recommendations contained herein are based on information provided by '
+        'the organization and documents reviewed during the audit period. This report is confidential '
+        'and must not be disclosed to any third party without prior written consent. '
+        'AICyberAuditBox and its AI Engine make no representations as to the completeness or '
+        'accuracy of information not provided by the auditee.',
+        size=10, space_after=6
+    )
+    if comments:
+        _body(doc, f'Auditor Comments: {comments}', italic=True, color=(71, 85, 105), size=10)
+
+    # ── REFERENCES ────────────────────────────────────────────────────────────
+    _heading(doc, '5. References', level=1)
+    refs = [
+        'ISO/IEC 27001:2022 – Information Security Management Systems',
+        'NIST SP 800-30 Rev. 1 – Guide for Conducting Risk Assessments',
+        'NIST Cybersecurity Framework (CSF) v2.0',
+        'CIS Controls v8 – Center for Internet Security',
+    ]
+    for ref in refs:
+        p = doc.add_paragraph(style='List Bullet')
+        run = p.add_run(ref)
+        run.font.size = Pt(9.5)
+        run.font.color.rgb = _rgb(51, 65, 85)
+
+    # ── EVIDENCE ──────────────────────────────────────────────────────────────
+    _heading(doc, '6. Evidence', level=1)
+    _body(doc, 'The following evidence documents were uploaded and analysed during this audit:', size=10)
+    if uploaded_files:
+        for uf in uploaded_files:
+            for fname in str(uf).split(','):
+                fname = fname.strip()
+                if fname:
+                    p = doc.add_paragraph(style='List Bullet')
+                    run = p.add_run(fname)
+                    run.font.size = Pt(9.5)
+                    run.font.color.rgb = _rgb(30, 41, 59)
+    else:
+        _body(doc, 'No evidence files recorded.', italic=True, color=(100, 116, 139), size=9.5)
+
+    # ── INTRODUCTION ──────────────────────────────────────────────────────────
+    _heading(doc, '7. Introduction', level=1)
+    _body(doc,
+        'This Information Systems (IS) Audit was conducted to assess the organization\'s compliance '
+        'with applicable information security standards, policies, and regulatory requirements. '
+        'The audit leveraged an AI-powered RAG (Retrieval-Augmented Generation) engine to '
+        'evaluate submitted evidence documents against defined ISO 27001 control objectives. '
+        'Findings have been validated through a multi-gate hallucination and grounding check '
+        'pipeline to ensure accuracy and traceability of all cited evidence.',
+        size=10, space_after=6
+    )
+
+    # ── SCOPE ─────────────────────────────────────────────────────────────────
+    _heading(doc, '8. Scope', level=1)
+    _body(doc, 'The following control areas were included in the scope of this audit:', size=10)
+    if scope_controls:
+        for ctrl in scope_controls:
+            p = doc.add_paragraph(style='List Bullet')
+            run = p.add_run(ctrl)
+            run.font.size = Pt(9.5)
+            run.font.color.rgb = _rgb(30, 41, 59)
+    else:
+        _body(doc, 'All applicable ISO 27001 controls.', size=9.5)
+
+    # ── AUDIT METHODOLOGY ────────────────────────────────────────────────────
+    _heading(doc, '9. Audit Methodology', level=1)
+    _body(doc,
+        'The audit was conducted using a document review methodology powered by an Agentic AI '
+        'LangGraph pipeline. Evidence documents were ingested, chunked, and indexed using a '
+        'hybrid BM25 + semantic vector RAG retrieval engine. For each ISO 27001 control, '
+        'the AI model generated structured audit findings that were subsequently validated '
+        'through three quality gates: (1) Leakage Gate — detects prompt injection artefacts; '
+        '(2) Grounding Gate — verifies that cited evidence quotes exist verbatim or with '
+        'high similarity in the source documents; (3) Self-Correction — reflects on and '
+        'refines initial findings in Deep mode. All status decisions are deterministic and '
+        'rule-based, not subject to LLM judgment.',
+        size=10, space_after=6
+    )
+
+    # ── RISK CLASSIFICATIONS ──────────────────────────────────────────────────
+    _heading(doc, '10. Definition of Risk Classifications', level=1)
+    risk_defs = [
+        ('Critical', _rgb(220, 38, 38),
+         'Severe, systemic control failure representing an immediate threat to the entire '
+         'organization, critical systems, or highly sensitive data. Catastrophic business/operational '
+         'impact or major compliance violations. Requires immediate emergency resolution.'),
+        ('High', _rgb(217, 119, 6),
+         'Significant control failure or non-adherence to policies approved by competent authority '
+         'or standard practices. High probability of threat exploitation causing significant security, '
+         'compliance, or operational impact. Requires a programme for immediate and permanent resolution.'),
+        ('Medium', _rgb(161, 98, 7),
+         'Important control weakness or potential exposure that increases organizational risk. '
+         'Management should quickly develop action plans to ensure timely and permanent resolution '
+         'of the weaknesses before they develop into a major exposure.'),
+        ('Low', _rgb(37, 99, 235),
+         'Minor weakness or operational inefficiency with limited impact. Not a direct threat to '
+         'control or security, but management should address it in the interest of efficiency and '
+         'resolve it as activities increase.'),
+        ('Accepted', _rgb(22, 163, 74),
+         'Normal and good practice as per guidelines and best practices. Observations categorized '
+         'as Accepted (Compliant) need no corrective action.'),
+    ]
+    for label, color, description in risk_defs:
+        p = doc.add_paragraph()
+        lbl = p.add_run(f'{label}: ')
+        lbl.bold = True
+        lbl.font.size = Pt(10)
+        lbl.font.color.rgb = color
+        desc_run = p.add_run(description)
+        desc_run.font.size = Pt(9.5)
+        desc_run.font.color.rgb = _rgb(51, 65, 85)
+        p.paragraph_format.space_after = Pt(5)
+
+    # ── SUMMARY OF FINDINGS ───────────────────────────────────────────────────
+    doc.add_page_break()
+    _heading(doc, '11. Summary of Findings', level=1)
+    _add_table(doc,
+        headers=['Risk Level', 'Count'],
+        rows=[
+            ['Critical', str(sev_counts['Critical'])],
+            ['High',     str(sev_counts['High'])],
+            ['Medium',   str(sev_counts['Medium'])],
+            ['Low',      str(sev_counts['Low'])],
+            ['Accepted', str(sev_counts['Accepted'])],
+            ['Total',    str(sum(sev_counts.values()))],
+        ],
+        row_colors=[
+            'FEE2E2',  # Critical — red tint
+            'FEF3C7',  # High — amber tint
+            'FEF9C3',  # Medium — yellow tint
+            'DBEAFE',  # Low — blue tint
+            'DCFCE7',  # Accepted — green tint
+            'F1F5F9',  # Total — slate
+        ],
+        col_widths=[9, 4]
+    )
+
+    # ── AUDIT OBSERVATIONS TABLE ──────────────────────────────────────────────
+    doc.add_page_break()
+    _heading(doc, '12. Audit Observations', level=1)
+
+    obs_headers = [
+        'S.No', 'Control Points', 'Policy Reference',
+        'Observations', 'Risk', 'Impact', 'Suggestion', 'Evidence'
+    ]
+    obs_rows = []
+    for idx, f in enumerate(findings, 1):
+        raw_sev = f.get('severity', '')
+        if f.get('status') == 'Compliant':
+            mapped_risk = 'Accepted'
         else:
-            pdf.set_text_color(220, 38, 38)
-        pdf.cell(0, 6, str(status_val), new_x="LMARGIN", new_y="NEXT")
-        
-        pdf.set_font("helvetica", "", 9)
-        pdf.set_text_color(51, 65, 85)
-        pdf.set_x(10)
-        
-        finding_text = f"Finding: {f.get('finding', '')}"
-        rec_text = f"Recommendation: {f.get('recommendation', '')}"
-        
-        pdf.multi_cell(0, 5, finding_text.encode("latin1", errors="replace").decode("latin1"), new_x="LMARGIN", new_y="NEXT")
-        if f.get("recommendation"):
-            pdf.set_text_color(22, 163, 74)
-            pdf.multi_cell(0, 5, rec_text.encode("latin1", errors="replace").decode("latin1"), new_x="LMARGIN", new_y="NEXT")
-            
-        cmt = f.get("comment", "")
-        if cmt:
-            pdf.set_text_color(59, 130, 246)
-            pdf.multi_cell(0, 5, f"Auditor Notes: {cmt}".encode("latin1", errors="replace").decode("latin1"), new_x="LMARGIN", new_y="NEXT")
-            
-        pdf.ln(4)
-        pdf.set_draw_color(241, 245, 249)
-        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-        pdf.ln(2)
-        
-    return bytes(pdf.output())
+            mapped_risk = _map_severity(raw_sev)
+
+        policy_ref = (f.get('clause') or f.get('standard')
+                      or f.get('control_id') or '—')
+        obs_rows.append([
+            str(idx),
+            f.get('control', '—'),
+            str(policy_ref),
+            f.get('finding') or f.get('description') or '—',
+            mapped_risk,
+            f.get('business_impact') or '—',
+            f.get('recommendation') or '—',
+            f.get('source_files') or '—',
+        ])
+
+    obs_table = doc.add_table(rows=1, cols=len(obs_headers))
+    obs_table.style = 'Table Grid'
+    hdr_row = obs_table.rows[0].cells
+    for i, h in enumerate(obs_headers):
+        _set_cell_bg(hdr_row[i], '0F172A')
+        _set_cell_borders(hdr_row[i])
+        p = hdr_row[i].paragraphs[0]
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run(h)
+        run.bold = True
+        run.font.size = Pt(8.5)
+        run.font.color.rgb = _rgb(255, 255, 255)
+
+    # Risk color map for row shading
+    RISK_ROW_COLOR = {
+        'Critical': 'FEE2E2', 'High': 'FEF3C7',
+        'Medium': 'FEFCE8', 'Low': 'EFF6FF',
+        'Accepted': 'F0FDF4',
+    }
+    OBS_COL_WIDTHS = [1.0, 3.0, 2.5, 4.5, 2.0, 3.0, 3.5, 3.0]
+
+    for row_data in obs_rows:
+        risk_val = row_data[4]  # 'Risk' column
+        row_bg = RISK_ROW_COLOR.get(risk_val, 'FFFFFF')
+        data_cells = obs_table.add_row().cells
+        for c_idx, val in enumerate(row_data):
+            cell = data_cells[c_idx]
+            _set_cell_bg(cell, row_bg)
+            _set_cell_borders(cell)
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            run = p.add_run(str(val) if val else '—')
+            run.font.size = Pt(8)
+            run.font.color.rgb = _rgb(30, 41, 59)
+            if c_idx == 4:  # Risk column — color by severity
+                color_map = {
+                    'Critical': _rgb(220, 38, 38),
+                    'High':     _rgb(217, 119, 6),
+                    'Medium':   _rgb(161, 98, 7),
+                    'Low':      _rgb(37, 99, 235),
+                    'Accepted': _rgb(22, 163, 74),
+                }
+                run.bold = True
+                run.font.color.rgb = color_map.get(risk_val, _rgb(30, 41, 59))
+
+    # Set column widths
+    for col_i, width in enumerate(OBS_COL_WIDTHS):
+        for cell in obs_table.columns[col_i].cells:
+            cell.width = Cm(width)
+
+    # ── Serialize to bytes ─────────────────────────────────────────────────────
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
 
 def save_chat_message(session_id, session_title, role, content):
     with force_master():
@@ -6856,7 +7042,7 @@ with _main_wrap:
                                             st.toast("Report loaded successfully!")
                                             st.rerun()
                                 with col_btn2:
-                                    pdf_data = export_pdf_report(
+                                    docx_data = export_docx_report(
                                         session_title=r['session_title'],
                                         findings=r['findings'],
                                         resolved_list=r['resolved_list'],
@@ -6864,11 +7050,11 @@ with _main_wrap:
                                         comments=r['auditor_comments']
                                     )
                                     st.download_button(
-                                        label="⬇️ PDF",
-                                        data=pdf_data,
-                                        file_name=f"{r['session_title'].replace(' ', '_')}_Report.pdf",
-                                        mime="application/pdf",
-                                        key=f"pdf_rep_{idx}",
+                                        label="⬇️ DOCX",
+                                        data=docx_data,
+                                        file_name=f"{r['session_title'].replace(' ', '_')}_Report.docx",
+                                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                        key=f"docx_rep_{idx}",
                                         use_container_width=True
                                     )
                                 with col_btn3:
