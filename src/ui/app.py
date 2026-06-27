@@ -2264,8 +2264,12 @@ Output format:
 Document Scope Summary: <your summary here>
 """
     try:
+        import os as _os
+        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
+            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
         r = requests.post(
-            "http://127.0.0.1:11434/api/generate",
+            f"{base_url}/api/generate",
             json={
                 "model": ollama_model,
                 "prompt": summary_prompt,
@@ -2287,7 +2291,12 @@ Document Scope Summary: <your summary here>
     return "No scope summary available."
 
 
-def _get_ollama_embedding(text, model="nomic-embed-text", url="http://127.0.0.1:11434"):
+def _get_ollama_embedding(text, model="nomic-embed-text", url=None):
+    import os as _os
+    if url is None:
+        url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if url and not url.startswith("http://") and not url.startswith("https://"):
+            url = f"http://{url}" if ":" in url else f"http://{url}:11434"
     try:
         r = requests.post(
             f"{url}/api/embeddings",
@@ -2648,8 +2657,12 @@ EXAMPLE 3 — NON_COMPLIANT without evidence (Zero relevant content found):
         current_timeout = min(max(1800, len(ctrl_batch) * 1800), 7200)
         
         start_time = _time.time()
+        import os as _os
+        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
+            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
         r = requests.post(
-            "http://127.0.0.1:11434/api/generate",
+            f"{base_url}/api/generate",
             json={
                 "model": ollama_model, 
                 "prompt": sub_prompt, 
@@ -2977,8 +2990,12 @@ Return ONLY valid JSON:
         current_timeout = min(max(1800, len(ctrl_batch) * 1800), 7200)
         
         start_time = _time.time()
+        import os as _os
+        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
+            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
         r = requests.post(
-            "http://127.0.0.1:11434/api/generate",
+            f"{base_url}/api/generate",
             json={
                 "model": ollama_model, 
                 "prompt": sub_prompt, 
@@ -3601,7 +3618,11 @@ def ai_chat_stream(system_ctx, user_msg, model_choice):
     else:
         ollama_model = _resolve_ollama_model(model_choice)
     try:
-        r = requests.post("http://127.0.0.1:11434/api/generate",
+        import os as _os
+        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
+            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
+        r = requests.post(f"{base_url}/api/generate",
             json={
                 "model": ollama_model, 
                 "prompt": prompt, 

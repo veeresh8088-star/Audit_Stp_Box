@@ -186,7 +186,12 @@ def save_document_chunks(filename, text):
         _ingested_chunks_cache.pop(filename, None)
         session.close()
 
-def _get_ollama_embedding(text, model="nomic-embed-text", url="http://127.0.0.1:11434"):
+def _get_ollama_embedding(text, model="nomic-embed-text", url=None):
+    import os as _os
+    if url is None:
+        url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if url and not url.startswith("http://") and not url.startswith("https://"):
+            url = f"http://{url}" if ":" in url else f"http://{url}:11434"
     try:
         r = requests.post(
             f"{url}/api/embeddings",

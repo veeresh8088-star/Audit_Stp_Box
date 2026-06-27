@@ -298,8 +298,12 @@ Return ONLY valid JSON — no explanation, no markdown:
 
     try:
         print(f"[{time.strftime('%H:%M:%S')}] [INFO] Step 1: LLM detecting document type and controls...")
+        import os as _os
+        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
+            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
         r1 = requests.post(
-            "http://127.0.0.1:11434/api/generate",
+            f"{base_url}/api/generate",
             json={
                 "model": ollama_model,
                 "prompt": step1_prompt,

@@ -415,11 +415,22 @@ class NativeOllamaChain:
     A drop-in replacement wrapper for LangChain's PromptTemplate + ChatOllama.
     Provides the .invoke(dict) interface expected by LangGraph.
     """
-    def __init__(self, model_name: str, prompt_template: str, url: str = "http://127.0.0.1:11434"):
+    def __init__(self, model_name: str, prompt_template: str, url: str = None):
         self.model_name = model_name
         self.prompt_template = prompt_template
+        
+        import os
+        host_env = os.environ.get("OLLAMA_HOST", "").strip()
+        if host_env:
+            if not host_env.startswith("http://") and not host_env.startswith("https://"):
+                resolved_url = f"http://{host_env}" if ":" in host_env else f"http://{host_env}:11434"
+            else:
+                resolved_url = host_env
+        else:
+            resolved_url = url or "http://127.0.0.1:11434"
+            
         # Set a high timeout (30 minutes) to prevent read timeouts on slower CPU-only environments
-        self.client = ollama.Client(host=url, timeout=1800.0)
+        self.client = ollama.Client(host=resolved_url, timeout=1800.0)
         
     def invoke(self, input_dict: dict) -> AuditFindingSchema:
         import re
@@ -724,13 +735,13 @@ class NativeOllamaChain:
                 evidence=[]
             )
 
-def get_generator_chain(model_name: str, url: str = "http://127.0.0.1:11434"):
+def get_generator_chain(model_name: str, url: str = None):
     """
     Returns a native Ollama chain for generating the initial draft finding.
     """
     return NativeOllamaChain(model_name, GENERATOR_PROMPT_TEMPLATE, url)
 
-def get_reflection_chain(model_name: str, url: str = "http://127.0.0.1:11434"):
+def get_reflection_chain(model_name: str, url: str = None):
     """
     Returns a native Ollama chain for critique and self-correction reflection.
     """
