@@ -1662,66 +1662,80 @@ SAVE_CHECKPOINT_ON_FAILURE = True
 # ── CHECKPOINT HELPERS ────────────────────────────────────────────────────────
 def _checkpoint_create(session_id, bg_key, ai_model, selected_sls, file_names, context_str, total_controls, batch_size):
     """Create a fresh in-progress checkpoint row when an audit starts."""
-    db = SessionLocal()
-    try:
-        # Remove any stale checkpoint for this session
-        db.query(AuditCheckpoint).filter(AuditCheckpoint.session_id == session_id).delete()
-        chk = AuditCheckpoint(
-            session_id=session_id,
-            bg_key=bg_key,
-            ai_model=ai_model,
-            selected_sls_json=json.dumps(list(selected_sls)),
-            file_names_json=json.dumps(file_names),
-            context_text=context_str,
-            total_controls=total_controls,
-            completed_batches=0,
-            batch_size=batch_size,
-            partial_results_json="[]",
-            status="in_progress",
-        )
-        db.add(chk)
-        db.commit()
-        return chk.id
-    except Exception as e:
-        print(f"[checkpoint] Failed to create checkpoint: {e}")
-        return None
-    finally:
-        db.close()
+    # force_master() ensures ShaktiDB routes this write to the MASTER database,
+    # not a read-only slave replica which would silently fail or raise an error.
+    with force_master():
+        db = SessionLocal()
+        try:
+            # Remove any stale checkpoint for this session.
+            # synchronize_session=False avoids DetachedInstanceError when cached
+            # objects are still in the identity map.
+            db.query(AuditCheckpoint).filter(
+                AuditCheckpoint.session_id == session_id
+            ).delete(synchronize_session=False)
+            chk = AuditCheckpoint(
+                session_id=session_id,
+                bg_key=bg_key,
+                ai_model=ai_model,
+                selected_sls_json=json.dumps(list(selected_sls)),
+                file_names_json=json.dumps(file_names),
+                context_text=context_str,
+                total_controls=total_controls,
+                completed_batches=0,
+                batch_size=batch_size,
+                partial_results_json="[]",
+                status="in_progress",
+            )
+            db.add(chk)
+            db.commit()
+            # Capture the id as a plain int BEFORE db.close() expires the instance.
+            # SQLAlchemy's expire_on_commit=True means accessing chk.id after
+            # db.close() would trigger a lazy-load on a closed session and raise
+            # "Instance has been deleted, or its row is otherwise not present".
+            chk_id = chk.id
+            return chk_id
+        except Exception as e:
+            print(f"[checkpoint] Failed to create checkpoint: {e}")
+            return None
+        finally:
+            db.close()
 
 def _checkpoint_update(session_id, completed_batches, all_results_so_far):
     """Persist partial results after each batch completes."""
-    db = SessionLocal()
-    try:
-        chk = db.query(AuditCheckpoint).filter(
-            AuditCheckpoint.session_id == session_id,
-            AuditCheckpoint.status == "in_progress"
-        ).first()
-        if chk:
-            chk.completed_batches = completed_batches
-            chk.partial_results_json = json.dumps(all_results_so_far)
-            chk.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            db.commit()
-    except Exception as e:
-        print(f"[checkpoint] Failed to update checkpoint: {e}")
-    finally:
-        db.close()
+    with force_master():
+        db = SessionLocal()
+        try:
+            chk = db.query(AuditCheckpoint).filter(
+                AuditCheckpoint.session_id == session_id,
+                AuditCheckpoint.status == "in_progress"
+            ).first()
+            if chk:
+                chk.completed_batches = completed_batches
+                chk.partial_results_json = json.dumps(all_results_so_far)
+                chk.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                db.commit()
+        except Exception as e:
+            print(f"[checkpoint] Failed to update checkpoint: {e}")
+        finally:
+            db.close()
 
 def _checkpoint_finish(session_id, status="completed"):
     """Mark the checkpoint as completed or failed."""
-    db = SessionLocal()
-    try:
-        chk = db.query(AuditCheckpoint).filter(
-            AuditCheckpoint.session_id == session_id,
-            AuditCheckpoint.status.in_(["in_progress", "failed"])
-        ).first()
-        if chk:
-            chk.status = status
-            chk.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            db.commit()
-    except Exception as e:
-        print(f"[checkpoint] Failed to finish checkpoint: {e}")
-    finally:
-        db.close()
+    with force_master():
+        db = SessionLocal()
+        try:
+            chk = db.query(AuditCheckpoint).filter(
+                AuditCheckpoint.session_id == session_id,
+                AuditCheckpoint.status.in_(["in_progress", "failed"])
+            ).first()
+            if chk:
+                chk.status = status
+                chk.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                db.commit()
+        except Exception as e:
+            print(f"[checkpoint] Failed to finish checkpoint: {e}")
+        finally:
+            db.close()
 
 def get_resumable_checkpoint(session_id):
     """Return an in-progress or failed checkpoint for this session, or None."""
@@ -2407,9 +2421,16 @@ def _get_auditor_feedback_few_shot(control_ids):
 
 def get_num_ctx(model_name: str) -> int:
     name = model_name.lower()
-    if any(x in name for x in ["7b","8b","9b","12b","27b"]):
+    # gemma4:12b on CPU-only Azure VM: use 6144 instead of 8192.
+    # At 12B scale, an 8192-token KV-cache requires ~4-5GB extra RAM and
+    # dramatically slows per-token generation. 6144 is enough for the
+    # ~4000-token RAG context + system prompt with headroom to spare.
+    if "12b" in name:
+        return 6144
+    if any(x in name for x in ["7b", "8b", "9b", "27b"]):
         return 8192
-    if "3b" in name:
+    if "3b" in name or "e4b" in name:
+        # gemma4:e4b is a 4B model — 4096 context is sufficient and fast on CPU
         return 4096
     return 4096  # fallback for unrecognized models
 
@@ -2839,7 +2860,14 @@ EXAMPLE 3 — NON_COMPLIANT without evidence (Zero relevant content found):
         # Swap the controls section in the prompt
         sub_prompt = prompt.replace(controls_text, sub_controls_text)
         
-        # Calculate a reasonable dynamic timeout based on control count to avoid huge hangs
+        # num_predict tuning per model size:
+        # - 12B on CPU: 512 (audit JSON is ~300-500 tokens; halves generation time)
+        # - e4b (4B): 1024 (fast enough on CPU to handle full output)
+        # - others: 1024
+        if "12b" in ollama_model.lower():
+            num_predict_for_model = 512
+        else:
+            num_predict_for_model = 1024
         current_timeout = min(max(1800, len(ctrl_batch) * 1800), 7200)
         
         start_time = _time.time()
@@ -2858,7 +2886,7 @@ EXAMPLE 3 — NON_COMPLIANT without evidence (Zero relevant content found):
                     "temperature": 0.0,
                     "seed": 42,
                     "num_ctx": get_num_ctx(ollama_model),
-                    "num_predict": 1024,
+                    "num_predict": num_predict_for_model,
                     "num_thread": 8
                 },
                 "keep_alive": "15m"
@@ -3380,7 +3408,7 @@ def _enrich_finding_metadata(r, db_chunks):
 
 def generate_ollama_reflection(context, file_names_list, selected_sls, draft_findings_list, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None):
     if batch_size is None:
-        batch_size = 1 if ("7B" in model_choice or "8B" in model_choice or "9B" in model_choice or "Escalation" in model_choice) else 4
+        batch_size = 1 if ("7B" in model_choice or "8B" in model_choice or "9B" in model_choice or "12B" in model_choice or "Escalation" in model_choice) else 4
     ollama_model = _resolve_ollama_model(model_choice)
     controls = _build_controls_for_audit(selected_sls)
 

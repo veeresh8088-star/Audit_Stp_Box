@@ -219,8 +219,12 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     Phase 5: Token-budget accumulation: TARGET=4000 tokens, HARD_MAX=5000 tokens.
     Phase 8: Returns retrieved_chunk_metas for evidence source provenance.
     """
-    TARGET_CONTEXT_TOKENS = 4000
-    HARD_MAX_CONTEXT_TOKENS = 5000
+    # Token budget: smaller for 12B on CPU to cut prefill (KV-cache fill) time.
+    # Prefill scales linearly with prompt length — reducing from 5000→3000 tokens
+    # can cut the pre-generation wait from ~3min to ~1.5min on a CPU-only VM.
+    is_12b = any("12b" in m.lower() for m in [ollama_model])
+    TARGET_CONTEXT_TOKENS = 2500 if is_12b else 4000
+    HARD_MAX_CONTEXT_TOKENS = 3000 if is_12b else 5000
 
     # 1. Ensure chunks exist for ALL uploaded files
     chunks_count = 0
