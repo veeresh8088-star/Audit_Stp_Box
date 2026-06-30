@@ -5321,6 +5321,10 @@ with _main_wrap:
                 resolved_list = st.session_state.get("resolved_list", [])
             
                 # --- ISO CONTROL FILTER (SIDEBAR CHECKBOXES) ---
+                # Define selected_ucs based on the controls that were actually audited in this session
+                # rather than the current sidebar checklist states, which may have reset due to expander collapse.
+                audited_names = {f.get("control_id") or f.get("control") for f in findings} | set(resolved_list)
+                selected_ucs = [u for u in USE_CASES if u["use_case"] in audited_names]
                 checked_control_ids = {u["use_case"] for u in selected_ucs}
                 findings = [f for f in findings if (f.get("control_id") or f.get("control")) in checked_control_ids]
                 resolved_list = [ctrl for ctrl in resolved_list if ctrl in checked_control_ids]
@@ -6748,18 +6752,19 @@ with _main_wrap:
                 
                 # Retrieve or create AuditReport for current active session
                 session_id = st.session_state.active_chat_id
-                report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-                if not report:
-                    report = AuditReport(
-                        session_id=session_id,
-                        session_title=f"Audit Session - {datetime.now().strftime('%d %b %Y %H:%M')}",
-                        auditee_id=user_id,
-                        framework="All Standards",
-                        status="Draft"
-                    )
-                    db.add(report)
-                    db.commit()
-                    db.refresh(report)
+                with force_master():
+                    report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+                    if not report:
+                        report = AuditReport(
+                            session_id=session_id,
+                            session_title=f"Audit Session - {datetime.now().strftime('%d %b %Y %H:%M')}",
+                            auditee_id=user_id,
+                            framework="All Standards",
+                            status="Draft"
+                        )
+                        db.add(report)
+                        db.commit()
+                        db.refresh(report)
                 
                 # Check status
                 current_status = report.status
@@ -6816,7 +6821,7 @@ with _main_wrap:
                             EvidenceFile.report_id == report.id,
                             EvidenceFile.filename == uf.name
                         ).first()
-                        if exists and os.path.exists(exists.file_path):
+                        if exists and os.path.exists(exists.file_path) and uf.name not in st.session_state.processed_tab_files:
                             dups_in_upload.append(uf.name)
                     if dups_in_upload:
                         st.warning(f"⚠️ File(s) already exist in this session: {', '.join(dups_in_upload)}")
