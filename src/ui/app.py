@@ -3624,8 +3624,7 @@ def generate_ollama_reflection(context, file_names_list, selected_sls, draft_fin
     # Call cross-control duplicate quote check
     all_results = validate_cross_control_duplicates(all_results)
 
-    TERMINAL_STATUSES = ["Compliant", "Non-Compliant", "Partially Compliant", "Partial-Compliant", "Human Review", "HUMAN_REVIEW", "Out of Scope"]
-    resolved_list = [r["control_id"] for r in all_results if r.get("status") in TERMINAL_STATUSES]
+    resolved_list = [r["control_id"] for r in all_results if r.get("status") == "Compliant"]
     return resolved_list, all_results
 
 
@@ -3822,8 +3821,7 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     overall_elapsed = time.time() - overall_start_time
     print(f"[{time.strftime('%H:%M:%S')}] [SUCCESS] LangGraph Audit complete! Total time: {overall_elapsed:.2f} seconds.", flush=True)
 
-    TERMINAL_STATUSES = ["Compliant", "Non-Compliant", "Partially Compliant", "Partial-Compliant", "Human Review", "HUMAN_REVIEW", "Out of Scope"]
-    resolved_list = [r["control_id"] for r in all_results if r.get("status") in TERMINAL_STATUSES]
+    resolved_list = [r["control_id"] for r in all_results if r.get("status") == "Compliant"]
     return resolved_list, all_results
 
 def ai_chat_stream(system_ctx, user_msg, model_choice):
