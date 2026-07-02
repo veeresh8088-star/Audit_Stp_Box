@@ -354,7 +354,7 @@ def render_login_gate():
                 st.markdown(f"<p style='color: #64748b; font-size: 0.85rem;'>Secret Key: <code style='color: #60a5fa;'>{st.session_state.signup_success_secret}</code></p>", unsafe_allow_html=True)
                 st.markdown("</div>", unsafe_allow_html=True)
                 
-                st.button("🔑 Proceed to Sign In", key="signup_complete_btn", use_container_width=True, type="primary", on_click=proceed_to_signin)
+                st.button("Proceed to Sign In", key="signup_complete_btn", use_container_width=True, type="primary", on_click=proceed_to_signin)
 
             elif st.session_state.otp_sent:
                 st.markdown("""
@@ -385,7 +385,7 @@ def render_login_gate():
 
                 with st.form("otp_form", clear_on_submit=False):
                     otp_input = st.text_input("Enter Code", placeholder="Enter 6-digit OTP", key="otp_input_field")
-                    st.form_submit_button("🔑 Verify & Authenticate", use_container_width=True, on_click=verify_otp_callback)
+                    st.form_submit_button("Verify & Authenticate", use_container_width=True, on_click=verify_otp_callback)
 
                 if st.session_state.login_error:
                     st.error(st.session_state.login_error)
@@ -398,13 +398,13 @@ def render_login_gate():
                 role_c1, role_c2, role_c3 = st.columns(3)
                 with role_c1:
                     admin_active = st.session_state.selected_role == "admin"
-                    st.button("🔐\n\nAdmin", key="role_btn_admin", use_container_width=True, type="primary" if admin_active else "secondary", on_click=select_role_admin)
+                    st.button("Admin", key="role_btn_admin", use_container_width=True, type="primary" if admin_active else "secondary", on_click=select_role_admin)
                 with role_c2:
                     auditor_active = st.session_state.selected_role == "auditor"
-                    st.button("📋\n\nAuditor", key="role_btn_auditor", use_container_width=True, type="primary" if auditor_active else "secondary", on_click=select_role_auditor)
+                    st.button("Auditor", key="role_btn_auditor", use_container_width=True, type="primary" if auditor_active else "secondary", on_click=select_role_auditor)
                 with role_c3:
                     auditee_active = st.session_state.selected_role == "auditee"
-                    st.button("🗂️\n\nAuditee", key="role_btn_auditee", use_container_width=True, type="primary" if auditee_active else "secondary", on_click=select_role_auditee)
+                    st.button("Auditee", key="role_btn_auditee", use_container_width=True, type="primary" if auditee_active else "secondary", on_click=select_role_auditee)
 
                 selected_role = st.session_state.selected_role
 
@@ -442,7 +442,7 @@ def render_login_gate():
                         st.markdown("<div style='text-align:right; padding-top: 4px;'><a href='#' style='color:#3b82f6; text-decoration:none; font-size:14px; font-weight:500;'>Forgot password?</a></div>", unsafe_allow_html=True)
                     
                     st.form_submit_button(
-                        "🔒 Secure Sign In" if auth_action == "Login" else "📝 Create Secure Account",
+                        "Secure Sign In" if auth_action == "Login" else "Create Secure Account",
                         use_container_width=True,
                         on_click=handle_login_submit_callback
                     )
@@ -468,9 +468,9 @@ def render_login_gate():
                     """, unsafe_allow_html=True)
 
                     if auth_action == "Login":
-                        st.button("＋  Create Account", key="toggle_signup_btn", use_container_width=True, on_click=set_auth_action_register)
+                        st.button("Create Account", key="toggle_signup_btn", use_container_width=True, on_click=set_auth_action_register)
                     else:
-                        st.button("🔑  Back to Login", key="toggle_login_btn", use_container_width=True, on_click=set_auth_action_login)
+                        st.button("Back to Login", key="toggle_login_btn", use_container_width=True, on_click=set_auth_action_login)
 
             # Footer
             st.markdown("""

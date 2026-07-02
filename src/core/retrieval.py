@@ -187,19 +187,9 @@ def save_document_chunks(filename, text):
         session.close()
 
 def _get_ollama_embedding(text, model="nomic-embed-text", url=None):
-    import os as _os
-    if url is None:
-        url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if url and not url.startswith("http://") and not url.startswith("https://"):
-            url = f"http://{url}" if ":" in url else f"http://{url}:11434"
     try:
-        r = requests.post(
-            f"{url}/api/embeddings",
-            json={"model": model, "prompt": text},
-            timeout=15
-        )
-        if r.status_code == 200:
-            return r.json().get("embedding")
+        from src.core.llm_client import get_embedding
+        return get_embedding(text, model=model)
     except Exception as e:
         print(f"[HYBRID RAG WARNING] Failed to get embedding for text: {e}")
     return None
@@ -222,9 +212,15 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     # Token budget: smaller for 12B on CPU to cut prefill (KV-cache fill) time.
     # Prefill scales linearly with prompt length — reducing from 5000→3000 tokens
     # can cut the pre-generation wait from ~3min to ~1.5min on a CPU-only VM.
+    import os
+    backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
     is_12b = any("12b" in m.lower() for m in [ollama_model])
-    TARGET_CONTEXT_TOKENS = 2500 if is_12b else 4000
-    HARD_MAX_CONTEXT_TOKENS = 3000 if is_12b else 5000
+    if backend in ("llama.cpp", "llamacpp"):
+        TARGET_CONTEXT_TOKENS = 1800
+        HARD_MAX_CONTEXT_TOKENS = 2200
+    else:
+        TARGET_CONTEXT_TOKENS = 2500 if is_12b else 4000
+        HARD_MAX_CONTEXT_TOKENS = 3000 if is_12b else 5000
 
     # 1. Ensure chunks exist for ALL uploaded files
     chunks_count = 0

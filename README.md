@@ -84,3 +84,7 @@ docker-compose up -d
 .\pull_models.bat
 python -m py_compile src/ui/app.py   # syntax check
 ```
+
+## 
+cd "C:\Users\HP\Desktop\llama,cpp\au"
+run_llamacpp_demo.bat

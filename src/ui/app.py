@@ -2471,47 +2471,25 @@ Output format:
 Document Scope Summary: <your summary here>
 """
     try:
-        import os as _os
-        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
-            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
-        r = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": ollama_model,
-                "prompt": summary_prompt,
-                "stream": False,
-                "options": {
-                    "temperature": 0.0,
-                    "num_ctx": get_num_ctx(ollama_model),
-                    "num_predict": 300,
-                    "num_thread": 8
-                },
-                "keep_alive": "15m"
-            },
+        from src.core.llm_client import query_llm
+        res = query_llm(
+            prompt=summary_prompt,
+            model=ollama_model,
+            num_ctx=get_num_ctx(ollama_model),
+            temperature=0.0,
+            num_thread=8,
             timeout=900
         )
-        if r.status_code == 200:
-            return r.json().get("response", "").strip()
+        return res
     except Exception as e:
         print(f"[SUMMARY ERROR] Failed to generate context summary: {e}")
     return "No scope summary available."
 
 
 def _get_ollama_embedding(text, model="nomic-embed-text", url=None):
-    import os as _os
-    if url is None:
-        url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if url and not url.startswith("http://") and not url.startswith("https://"):
-            url = f"http://{url}" if ":" in url else f"http://{url}:11434"
     try:
-        r = requests.post(
-            f"{url}/api/embeddings",
-            json={"model": model, "prompt": text},
-            timeout=15
-        )
-        if r.status_code == 200:
-            return r.json().get("embedding")
+        from src.core.llm_client import get_embedding
+        return get_embedding(text, model=model)
     except Exception as e:
         print(f"[HYBRID RAG WARNING] Failed to get embedding for text: {e}")
     return None
@@ -2871,32 +2849,25 @@ EXAMPLE 3 — NON_COMPLIANT without evidence (Zero relevant content found):
         current_timeout = min(max(1800, len(ctrl_batch) * 1800), 7200)
         
         start_time = _time.time()
-        import os as _os
-        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
-            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
-        r = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": ollama_model, 
-                "prompt": sub_prompt, 
-                "stream": False, 
-                "format": "json",
-                "options": {
-                    "temperature": 0.0,
-                    "seed": 42,
-                    "num_ctx": get_num_ctx(ollama_model),
-                    "num_predict": num_predict_for_model,
-                    "num_thread": 8
-                },
-                "keep_alive": "15m"
-            },
-            timeout=current_timeout,
-        )
+        try:
+            from src.core.llm_client import query_llm
+            res = query_llm(
+                prompt=sub_prompt,
+                model=ollama_model,
+                format="json",
+                num_ctx=get_num_ctx(ollama_model),
+                temperature=0.0,
+                num_thread=8,
+                timeout=current_timeout
+            )
+            r_status_code = 200
+        except Exception as query_err:
+            print(f"[AUDIT ERROR] Query failed: {query_err}")
+            res = "{}"
+            r_status_code = 500
         elapsed = _time.time() - start_time
         
-        if r.status_code == 200:
-            res = r.json().get("response", "{}")
+        if r_status_code == 200:
             
             # Print structured audit metrics for each control in the batch
             import os
@@ -3204,32 +3175,25 @@ Return ONLY valid JSON:
         current_timeout = min(max(1800, len(ctrl_batch) * 1800), 7200)
         
         start_time = _time.time()
-        import os as _os
-        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
-            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
-        r = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": ollama_model, 
-                "prompt": sub_prompt, 
-                "stream": False, 
-                "format": "json",
-                "options": {
-                    "temperature": 0.0,
-                    "seed": 42,
-                    "num_ctx": get_num_ctx(ollama_model),
-                    "num_predict": 1024,
-                    "num_thread": 8
-                },
-                "keep_alive": "15m"
-            },
-            timeout=current_timeout,
-        )
+        try:
+            from src.core.llm_client import query_llm
+            res = query_llm(
+                prompt=sub_prompt,
+                model=ollama_model,
+                format="json",
+                num_ctx=get_num_ctx(ollama_model),
+                temperature=0.0,
+                num_thread=8,
+                timeout=current_timeout
+            )
+            r_status_code = 200
+        except Exception as query_err:
+            print(f"[RECONCILE ERROR] Query failed: {query_err}")
+            res = "{}"
+            r_status_code = 500
         elapsed = _time.time() - start_time
         
-        if r.status_code == 200:
-            res = r.json().get("response", "{}")
+        if r_status_code == 200:
             
             # Print structured challenge/reflection metrics for each control in the batch
             import os
@@ -3832,33 +3796,9 @@ def ai_chat_stream(system_ctx, user_msg, model_choice):
     else:
         ollama_model = _resolve_ollama_model(model_choice)
     try:
-        import os as _os
-        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
-            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
-        r = requests.post(f"{base_url}/api/generate",
-            json={
-                "model": ollama_model, 
-                "prompt": prompt, 
-                "stream": True,
-                "options": {
-                    "temperature": 0.2,
-                    "num_ctx": get_num_ctx(ollama_model),
-                    "num_thread": 8
-                },
-                "keep_alive": "15m"
-            }, stream=True, timeout=90)
-        if r.status_code != 200:
-            try:
-                err = r.json().get("error", r.text)
-            except:
-                err = r.text
-            yield f"⚠️ Ollama Error: {err}. Please make sure you have downloaded the model using pull_models.bat!"
-            return
-        for line in r.iter_lines():
-            if line:
-                chunk = json.loads(line)
-                yield chunk.get("response", "")
+        from src.core.llm_client import query_llm_stream
+        for token in query_llm_stream(prompt, ollama_model, temperature=0.2, num_thread=8):
+            yield token
     except Exception as e:
         yield f"⚠️ Offline Engine not responding: {e}"
 
@@ -4094,7 +4034,7 @@ with st.sidebar:
     col_prof1, col_prof2 = st.columns([2, 1])
 
     role_colors = {"admin": "#f87171", "auditor": "#60a5fa", "auditee": "#4ade80"}
-    col_prof1.markdown(f"👤 **{st.session_state.username}**<br><span style='font-size:0.75rem;color:{role_colors.get(st.session_state.user_role, '#aaa')}'>{(st.session_state.user_role or '').upper()}</span>", unsafe_allow_html=True)
+    col_prof1.markdown(f"**{st.session_state.username}**<br><span style='font-size:0.75rem;color:{role_colors.get(st.session_state.user_role, '#aaa')}'>{(st.session_state.user_role or '').upper()}</span>", unsafe_allow_html=True)
     if col_prof2.button("Logout"):
         st.session_state.clear()
         st.rerun()
@@ -4527,8 +4467,8 @@ with st.sidebar:
             st.info("💡 **Tip:** Search filters the displayed checkboxes. To select *only* specific search results, click **✕ Clear All** first, then check the ones you need.")
     
         col_all, col_none = st.columns(2)
-        select_all = col_all.button("✓ Select All", use_container_width=True)
-        clear_all = col_none.button("✕ Clear All", use_container_width=True)
+        select_all = col_all.button("Select All", use_container_width=True)
+        clear_all = col_none.button("Clear All", use_container_width=True)
 
         if select_all:
             for uc in filtered_use_cases:
@@ -4749,21 +4689,21 @@ with st.sidebar:
         if st.session_state.user_role != "auditee":
             col_run, col_rst = st.columns([2,1])
             if is_current_running:
-                if col_run.button("⏹ Stop Scan", type="primary", use_container_width=True, key="stop_scan_main_btn"):
+                if col_run.button("Stop Scan", type="primary", use_container_width=True, key="stop_scan_main_btn"):
                     with _bg_lock:
                         _bg_running.discard(st.session_state.active_chat_id)
                     st.session_state.stage = 0
-                    st.toast("⏹ Stopping AI analysis...")
+                    st.toast("Stopping AI analysis...")
                     st.rerun()
                 run = False
             else:
                 selected_ucs = [u for u in filtered_use_cases if st.session_state.get(f"ctrl_chk_{u['sl']}", True)]
                 is_manual = st.session_state.get("scoping_mode", "Manual Scoping") == "Manual Scoping"
                 if not selected_ucs:
-                    st.warning("⚠️ No controls selected. Please check at least one control above to analyze.")
-                    run = col_run.button("▶ Run Analysis", type="primary", use_container_width=True, disabled=is_manual)
+                    st.warning("No controls selected. Please check at least one control above to analyze.")
+                    run = col_run.button("Run Analysis", type="primary", use_container_width=True, disabled=is_manual)
                 else:
-                    run = col_run.button("▶ Run Analysis", type="primary", use_container_width=True)
+                    run = col_run.button("Run Analysis", type="primary", use_container_width=True)
             
             if col_rst.button("↺", use_container_width=True):
                 with _bg_lock:
@@ -5055,7 +4995,7 @@ if _resumable and _resumable.session_id not in _bg_running:
     """, unsafe_allow_html=True)
 
     _col_res, _col_dis = st.columns([2, 1])
-    if _col_res.button("⚡ Resume Interrupted Audit", type="primary", use_container_width=True, key="resume_btn"):
+    if _col_res.button("Resume Interrupted Audit", type="primary", use_container_width=True, key="resume_btn"):
         # Switch session state active_chat_id to the checkpoint's session_id to restore the session fully!
         st.session_state.active_chat_id = _resumable.session_id
         # Reload partial results into session state immediately
@@ -5155,7 +5095,7 @@ if _resumable and _resumable.session_id not in _bg_running:
             st.toast(f"⚡ Resuming audit — {len(_pending_sls)} controls remaining...")
             st.rerun()
 
-    if _col_dis.button("🗑️ Discard", use_container_width=True, key="discard_checkpoint_btn"):
+    if _col_dis.button("Discard", use_container_width=True, key="discard_checkpoint_btn"):
         _checkpoint_finish(_resumable.session_id, "discarded")
         st.rerun()
 
@@ -5231,16 +5171,16 @@ _check_bg_analysis()
 _main_wrap = st.container()
 with _main_wrap:
     if st.session_state.user_role == "auditee":
-        tab_upload, tab_submitted = st.tabs(["📤  Upload Evidence", "📋  Submitted Reports"])
+        tab_upload, tab_submitted = st.tabs(["Upload Evidence", "Submitted Reports"])
         tab_chat, tab_report, tab_docs, tab_submitted, tab_records, tab_logs = None, None, None, None, None, None
     elif st.session_state.user_role == "admin":
         tab_chat, tab_report, tab_records, tab_logs = st.tabs([
-            "💬  AI Assistant", "📊  Audit Report", "🗄️  Audit Records", "🔍  Admin Logs"
+            "AI Assistant", "Audit Report", "Audit Records", "Admin Logs"
         ])
         tab_docs, tab_submitted, tab_upload = None, None, None
     else:
         tab_chat, tab_report, tab_docs, tab_submitted, tab_records = st.tabs([
-            "💬  AI Assistant", "📊  Audit Report", "🗂️  Audit Documents", "📋  Submitted Reports", "🗄️  Audit Records"
+            "AI Assistant", "Audit Report", "Audit Documents", "Submitted Reports", "Audit Records"
         ])
         tab_upload, tab_logs = None, None
 
@@ -5313,7 +5253,7 @@ with _main_wrap:
                 """, unsafe_allow_html=True)
             
             elif st.session_state.stage == 0:
-                st.markdown("### 📤 Upload Evidence to Begin")
+                st.markdown("### Upload Evidence to Begin")
                 st.info("Select compliance framework and individual controls in the sidebar, upload your evidence document(s), and click **Run Analysis** to automatically detect security gaps.")
 
             elif st.session_state.stage == 5:
@@ -5418,7 +5358,7 @@ with _main_wrap:
                 if st.session_state.user_role == "auditor" and current_status in ("Draft", "Pending Review"):
                     st.info("💡 **Publish to Auditee:** Push the report to the auditee workspace so they can view the findings.")
                     
-                    if st.button("📤 Send to Auditee", type="primary", use_container_width=True, key="send_to_auditee_btn"):
+                    if st.button("Send to Auditee", type="primary", use_container_width=True, key="send_to_auditee_btn"):
                         st.session_state.audit_status = "Sent to Auditee"
                         with force_master():
                             db = SessionLocal()
@@ -5711,7 +5651,7 @@ with _main_wrap:
                                             save_current_findings_snapshot()
                                             st.rerun()
                                     with col_cancel:
-                                        if st.button("✕ Cancel", key=f"comp_cancel_edit_{ctrl}", use_container_width=True):
+                                        if st.button("Cancel", key=f"comp_cancel_edit_{ctrl}", use_container_width=True):
                                             for orig_f in st.session_state.findings:
                                                 if orig_f.get("control_id") == ctrl or orig_f.get("control") == ctrl:
                                                     orig_f["editing"] = False
@@ -5743,21 +5683,21 @@ with _main_wrap:
                                     ca1, ca2, ca3, ca4 = st.columns([1.5, 1.5, 1.5, 5])
                                     with ca1:
                                         if comp_workflow == "Accepted":
-                                            if st.button("↩ Undo", key=f"comp_undo_{ctrl}", use_container_width=True, type="secondary"):
+                                            if st.button("Undo", key=f"comp_undo_{ctrl}", use_container_width=True, type="secondary"):
                                                 for orig_f in st.session_state.findings:
                                                     if orig_f.get("control_id") == ctrl or orig_f.get("control") == ctrl:
                                                         orig_f["display_status"] = "Open"
                                                 save_current_findings_snapshot()
                                                 st.rerun()
                                         else:
-                                            if st.button("✓ Accept", key=f"comp_acc_{ctrl}", use_container_width=True, type="secondary"):
+                                            if st.button("Accept", key=f"comp_acc_{ctrl}", use_container_width=True, type="secondary"):
                                                 for orig_f in st.session_state.findings:
                                                     if orig_f.get("control_id") == ctrl or orig_f.get("control") == ctrl:
                                                         orig_f["display_status"] = "Accepted"
                                                 save_current_findings_snapshot()
                                                 st.rerun()
                                     with ca2:
-                                        if st.button("✏️ Modify", key=f"comp_mod_{ctrl}", use_container_width=True, type="secondary"):
+                                        if st.button("Modify", key=f"comp_mod_{ctrl}", use_container_width=True, type="secondary"):
                                             found = False
                                             for orig_f in st.session_state.findings:
                                                 if orig_f.get("control_id") == ctrl or orig_f.get("control") == ctrl:
@@ -5779,7 +5719,7 @@ with _main_wrap:
                                                 st.session_state.findings.append(new_f)
                                             st.rerun()
                                     with ca3:
-                                        if st.button("❌ Reject", key=f"comp_rej_{ctrl}", use_container_width=True, type="secondary"):
+                                        if st.button("Reject", key=f"comp_rej_{ctrl}", use_container_width=True, type="secondary"):
                                             for orig_f in st.session_state.findings:
                                                 if orig_f.get("control_id") == ctrl or orig_f.get("control") == ctrl:
                                                     orig_f["status"] = "Rejected"
@@ -6059,27 +5999,27 @@ with _main_wrap:
                             col_act1, col_act2, col_act3, col_act4 = st.columns([1.8, 1.8, 1.8, 5])
                             with col_act1:
                                 if workflow_status == "Accepted":
-                                    if st.button("↩ Undo", key=f"undo_{idx}", use_container_width=True, type="secondary"):
+                                    if st.button("Undo", key=f"undo_{idx}", use_container_width=True, type="secondary"):
                                         for orig_f in st.session_state.findings:
                                             if orig_f.get("control_id") == f.get("control_id") and orig_f["finding"] == f["finding"]:
                                                 orig_f["display_status"] = "Open"
                                         save_current_findings_snapshot()
                                         st.rerun()
                                 else:
-                                    if st.button("✓ Accept", key=f"acc_{idx}", use_container_width=True, type="secondary"):
+                                    if st.button("Accept", key=f"acc_{idx}", use_container_width=True, type="secondary"):
                                         for orig_f in st.session_state.findings:
                                             if orig_f.get("control_id") == f.get("control_id") and orig_f["finding"] == f["finding"]:
                                                 orig_f["display_status"] = "Accepted"
                                         save_current_findings_snapshot()
                                         st.rerun()
                             with col_act2:
-                                if st.button("✏️ Modify", key=f"mod_{idx}", use_container_width=True, type="secondary"):
+                                if st.button("Modify", key=f"mod_{idx}", use_container_width=True, type="secondary"):
                                     for orig_f in st.session_state.findings:
                                         if orig_f.get("control_id") == f.get("control_id") and orig_f["finding"] == f["finding"]:
                                             orig_f["editing"] = True
                                     st.rerun()
                             with col_act3:
-                                if st.button("❌ Reject", key=f"rej_{idx}", use_container_width=True, type="secondary"):
+                                if st.button("Reject", key=f"rej_{idx}", use_container_width=True, type="secondary"):
                                     for orig_f in st.session_state.findings:
                                         if orig_f.get("control_id") == f.get("control_id") and orig_f["finding"] == f["finding"]:
                                             orig_f["status"] = "Rejected"
@@ -6260,11 +6200,11 @@ with _main_wrap:
                         "Auditor Comment":   f.get("comment", "")
                     } for f in active_findings]
                     csv_data = _dict_list_to_csv(_export_rows)
-                    st.download_button("⬇️  Export Report CSV", csv_data, "iso27001_audit_report.csv", use_container_width=True)
+                    st.download_button("Export Report CSV", csv_data, "iso27001_audit_report.csv", use_container_width=True)
 
     if tab_docs is not None:
         with tab_docs:
-            st.markdown("### 🗂️ Audit Documents")
+            st.markdown("### Audit Documents")
             
             doc_view_scope_select = st.selectbox(
                 "Select Document View Scope",
@@ -6739,7 +6679,7 @@ with _main_wrap:
     
     if tab_upload is not None:
         with tab_upload:
-            st.markdown("### 📤 Upload Evidence Documents")
+            st.markdown("### Upload Evidence Documents")
             st.info(
                 "Please upload your cybersecurity policy documents and evidence files below. "
                 "The audit team will analyze these documents against the compliance standards."
@@ -6892,7 +6832,7 @@ with _main_wrap:
                             f"⚠️ **{len(missing_files)} file(s) are missing from the server.**  "
                             "Re-upload them using the uploader above — files with the same name will be restored automatically."
                         )
-                        if _mc2.button("🧹 Clean Missing", use_container_width=True,
+                        if _mc2.button("Clean Missing", use_container_width=True,
                                        help="Remove stale database records for files not found on disk"):
                             for _mf in missing_files:
                                 db.delete(_mf)
@@ -6900,7 +6840,7 @@ with _main_wrap:
                             st.toast("Stale records removed. Please re-upload the missing files.")
                             st.rerun()
 
-                    st.markdown("#### 📂 Submitted Evidence Documents")
+                    st.markdown("#### Submitted Evidence Documents")
                     for f in files:
                         _file_ok = _os.path.exists(f.file_path)
                         col_chk, col_file_name, col_file_action = st.columns([0.8, 6.2, 3])
@@ -6927,7 +6867,7 @@ with _main_wrap:
                                 unsafe_allow_html=True
                             )
                         with col_file_action:
-                            if st.button("🗑️ Remove", key=f"del_file_auditee_{f.id}", use_container_width=True):
+                            if st.button("Remove", key=f"del_file_auditee_{f.id}", use_container_width=True):
                                 if _file_ok:
                                     try:
                                         _os.remove(f.file_path)
@@ -6942,7 +6882,7 @@ with _main_wrap:
                     selected_files = [f for f in files if st.session_state.get(f"send_chk_{f.id}", False)]
                     if True:
                         st.markdown("<br>", unsafe_allow_html=True)
-                        btn_lbl = f"📤 Send {len(selected_files)} Selected to Auditor" if selected_files else "📤 Send Selected to Auditor"
+                        btn_lbl = f"Send {len(selected_files)} Selected to Auditor" if selected_files else "Send Selected to Auditor"
                         if st.button(btn_lbl, type="primary", use_container_width=True, disabled=(len(selected_files) == 0)):
                             with force_master():
                                 db_write = SessionLocal()
@@ -6977,7 +6917,7 @@ with _main_wrap:
 
     if tab_submitted is not None:
         with tab_submitted:
-            st.markdown("### 📋 Submitted Audit Reports")
+            st.markdown("### Submitted Audit Reports")
             if st.session_state.user_role == "auditee":
                 db = SessionLocal()
                 user_row = db.query(User).filter(User.username == st.session_state.username).first()
@@ -7143,7 +7083,7 @@ with _main_wrap:
 
     if tab_records is not None:
         with tab_records:
-            st.markdown(f"#### 🗄️ Audit Records Dashboard  ·  <small style='color:#64748b'>{db_label}</small>", unsafe_allow_html=True)
+            st.markdown(f"#### Audit Records Dashboard  ·  <small style='color:#64748b'>{db_label}</small>", unsafe_allow_html=True)
     
             rows = get_all_findings(role=st.session_state.user_role, session_id=st.session_state.active_chat_id)
             if rows:
@@ -7163,10 +7103,10 @@ with _main_wrap:
                 # --- Actions Column Layout ---
                 col_exp, col_action = st.columns(2)
                 with col_exp:
-                    st.download_button("⬇️ Export All Records", _dict_list_to_csv(_records_data), "all_audit_findings.csv", use_container_width=True)
+                    st.download_button("Export All Records", _dict_list_to_csv(_records_data), "all_audit_findings.csv", use_container_width=True)
                 with col_action:
                     if st.session_state.user_role == "admin":
-                        if st.button("🗑️ Clear All Database Records", use_container_width=True, type="secondary"):
+                        if st.button("Clear All Database Records", use_container_width=True, type="secondary"):
                             from src.db.database import AuditorFeedback
                             db = SessionLocal()
                             try:
@@ -7350,7 +7290,6 @@ with _main_wrap:
         with tab_logs:
             st.markdown("""
             <div style='display:flex;align-items:center;gap:12px;margin-bottom:16px'>
-                <span style='font-size:1.4rem'>🔍</span>
                 <div>
                     <div style='font-size:1.2rem;font-weight:700;color:#f8fafc'>Admin Monitoring &amp; Logs</div>
                     <div style='font-size:0.78rem;color:#64748b'>Privacy-safe event log — no company or document data stored</div>
@@ -7364,7 +7303,7 @@ with _main_wrap:
                 "ERROR":    ("#f97316", "#ffedd5"),
                 "CRITICAL": ("#ef4444", "#fee2e2"),
             }
-            _SEV_ICONS = {"INFO": "✅", "WARNING": "⚠️", "ERROR": "🔴", "CRITICAL": "💥"}
+            _SEV_ICONS = {"INFO": "", "WARNING": "", "ERROR": "", "CRITICAL": ""}
 
             def _sev_badge(sev):
                 col, bg = _SEV_COLORS.get(sev, ("#94a3b8", "#1e293b"))
@@ -7382,14 +7321,14 @@ with _main_wrap:
                 st.session_state.at_page = 0
 
             # ── TABS FOR SYSTEM EVENTS & AUDIT TRAIL ───────────────────────────────
-            _tab_sys, _tab_at = st.tabs(["⚡ System Events", "📋 Audit Trail"])
+            _tab_sys, _tab_at = st.tabs(["System Events", "Audit Trail"])
 
             # ── LEFT: System Events ────────────────────────────────────────────────
             with _tab_sys:
                 st.markdown(
                     "<div style='background:rgba(30,41,59,0.6);border:1px solid rgba(59,130,246,0.25);"
                     "border-radius:12px;padding:16px 18px;margin-bottom:4px'>"
-                    "<div style='font-size:1rem;font-weight:700;color:#f8fafc;margin-bottom:2px'>⚡ System Events</div>"
+                    "<div style='font-size:1rem;font-weight:700;color:#f8fafc;margin-bottom:2px'>System Events</div>"
                     "<div style='font-size:0.75rem;color:#64748b'>DB errors, Ollama failures, failovers &amp; force-saves</div>"
                     "</div>",
                     unsafe_allow_html=True

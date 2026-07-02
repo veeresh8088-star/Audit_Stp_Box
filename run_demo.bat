@@ -6,7 +6,7 @@ echo ==========================================
 
 echo.
 echo [1/3] Checking Ollama (AI Engine)...
-python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:11434/', timeout=2)" >nul 2>&1
+python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 11434))" >nul 2>&1
 if %errorlevel% equ 0 goto :ollama_active
 
 echo [i] NOTE: Ollama is not running. Starting it automatically...

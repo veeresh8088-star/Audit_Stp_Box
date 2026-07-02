@@ -298,48 +298,34 @@ Return ONLY valid JSON — no explanation, no markdown:
 
     try:
         print(f"[{time.strftime('%H:%M:%S')}] [INFO] Step 1: LLM detecting document type and controls...")
-        import os as _os
-        base_url = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if base_url and not base_url.startswith("http://") and not base_url.startswith("https://"):
-            base_url = f"http://{base_url}" if ":" in base_url else f"http://{base_url}:11434"
-        r1 = requests.post(
-            f"{base_url}/api/generate",
-            json={
-                "model": ollama_model,
-                "prompt": step1_prompt,
-                "stream": False,
-                "format": "json",
-                "options": {
-                    "temperature": 0.0,
-                    "num_ctx": 4096,
-                    "num_thread": 8
-                },
-                "keep_alive": "15m"
-            },
+        from src.core.llm_client import query_llm
+        res1 = query_llm(
+            prompt=step1_prompt,
+            model=ollama_model,
+            format="json",
+            num_ctx=4096,
+            temperature=0.0,
+            num_thread=8,
             timeout=120
         )
-        if r1.status_code == 200:
-            res1 = r1.json().get("response", "{}")
-            try:
-                first_brace = res1.find('{')
-                last_brace = res1.rfind('}')
-                json_str1 = res1[first_brace:last_brace+1] if first_brace != -1 else res1
-                data1 = json.loads(json_str1)
-                dt_list = data1.get("doc_types", [])
-                doc_types = [dt for dt in dt_list if dt in DOC_TYPE_MAPPINGS]
-                
-                # Extract and validate selected controls
-                ctrl_list = data1.get("selected_controls", [])
-                all_allowed_controls = set()
-                for ctrls in DOC_TYPE_MAPPINGS.values():
-                    all_allowed_controls.update(ctrls)
-                selected_controls = [c for c in ctrl_list if c in all_allowed_controls]
-                
-                print(f"[{time.strftime('%H:%M:%S')}] [INFO] Step 1 LLM result: {doc_types}, controls: {selected_controls}")
-            except Exception as parse_err:
-                print(f"[{time.strftime('%H:%M:%S')}] [ERROR] Step 1 JSON parse failed: {parse_err}. Raw: {res1}")
-        else:
-            print(f"[{time.strftime('%H:%M:%S')}] [ERROR] Step 1 HTTP error: {r1.status_code}")
+        try:
+            first_brace = res1.find('{')
+            last_brace = res1.rfind('}')
+            json_str1 = res1[first_brace:last_brace+1] if first_brace != -1 else res1
+            data1 = json.loads(json_str1)
+            dt_list = data1.get("doc_types", [])
+            doc_types = [dt for dt in dt_list if dt in DOC_TYPE_MAPPINGS]
+            
+            # Extract and validate selected controls
+            ctrl_list = data1.get("selected_controls", [])
+            all_allowed_controls = set()
+            for ctrls in DOC_TYPE_MAPPINGS.values():
+                all_allowed_controls.update(ctrls)
+            selected_controls = [c for c in ctrl_list if c in all_allowed_controls]
+            
+            print(f"[{time.strftime('%H:%M:%S')}] [INFO] Step 1 LLM result: {doc_types}, controls: {selected_controls}")
+        except Exception as parse_err:
+            print(f"[{time.strftime('%H:%M:%S')}] [ERROR] Step 1 JSON parse failed: {parse_err}. Raw: {res1}")
     except Exception as e:
         ollama_offline = True
         print(f"[{time.strftime('%H:%M:%S')}] [ERROR] Step 1 LLM call failed: {e}")

@@ -411,6 +411,10 @@ Ensure the output contains only the XML tags and no surrounding text.
 """
 
 def get_num_ctx(model_name: str) -> int:
+    import os
+    backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
+    if backend in ("llama.cpp", "llamacpp"):
+        return 4096
     name = model_name.lower()
     if any(x in name for x in ["7b", "8b", "9b", "12b", "27b"]):
         return 8192
@@ -690,21 +694,19 @@ class NativeOllamaChain:
         # This replaces '{var}' with values and '{{' / '}}' with literal '{' / '}'
         prompt = self.prompt_template.format(**input_dict)
         
-        # Run Ollama without rigid format constraints for maximum generation speed and reliability
-        print(f"[OLLAMA CHAIN] Querying '{self.model_name}' (XML format-free chat) for {input_dict.get('control_id', 'unknown')}...", flush=True)
+        import os
+        backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
+        print(f"[{backend.upper()} CHAIN] Querying '{self.model_name}' for {input_dict.get('control_id', 'unknown')}...", flush=True)
         try:
-            response = self.client.chat(
+            from src.core.llm_client import query_llm
+            content = query_llm(
+                prompt=prompt,
                 model=self.model_name,
-                messages=[{'role': 'user', 'content': prompt}],
-                options={
-                    'temperature': 0.0,
-                    'num_ctx': get_num_ctx(self.model_name)
-                },
-                keep_alive="15m"
+                num_ctx=get_num_ctx(self.model_name),
+                temperature=0.0
             )
-            content = response['message']['content']
             if not content or not content.strip():
-                raise ValueError("Ollama returned an empty response.")
+                raise ValueError("Backend returned an empty response.")
                 
             content_clean = content.strip()
             
