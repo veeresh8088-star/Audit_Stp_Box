@@ -621,7 +621,13 @@ class NativeOllamaChain:
             
             def regex_get_tag(t, txt):
                 m = re.search(rf'<{t}>(.*?)</{t}>', txt, re.DOTALL)
-                return m.group(1).strip() if m else ""
+                if m:
+                    return m.group(1).strip()
+                # Fallback: if closing tag is missing, match up to the next tag or end of string
+                m_fallback = re.search(rf'<{t}>(.*?)(?:<|\Z)', txt, re.DOTALL)
+                if m_fallback:
+                    return m_fallback.group(1).strip()
+                return ""
                 
             parsed_successfully = False
             try:
