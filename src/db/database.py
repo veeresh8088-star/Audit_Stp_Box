@@ -283,13 +283,16 @@ def _execute_replicate_changes():
                 dest_conn.execute(text("SET session_replication_role = 'replica';"))
                 
                 with src_engine.connect() as src_conn:
+                    # Clean all existing rows on target in reverse-dependency order
+                    # using DELETE FROM instead of TRUNCATE TABLE CASCADE to avoid AccessExclusiveLocks.
+                    # This prevents deadlock conflicts with active reader transactions.
+                    for table in reversed(Base.metadata.sorted_tables):
+                        dest_conn.execute(text(f'DELETE FROM "{table.name}";'))
+                        
                     for table in Base.metadata.sorted_tables:
                         table_name = table.name
                         # Read all rows from source
                         rows = src_conn.execute(text(f'SELECT * FROM "{table_name}"')).fetchall()
-                        
-                        # Truncate target table
-                        dest_conn.execute(text(f'TRUNCATE TABLE "{table_name}" CASCADE;'))
                         
                         if rows:
                             # Construct INSERT

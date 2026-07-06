@@ -845,6 +845,8 @@ border-radius:10px;padding:14px 18px;margin-bottom:12px;'>
 </div>""", unsafe_allow_html=True)
 
 def generate_copyable_markdown_report(findings, file_names_list, selected_scopes):
+    from src.core.controls_data import USE_CASES as _UC
+    
     # Sort all results by clause/control number
     def get_control_sort_key(c):
         code = c.get("control_id", "").split(" ")[0]
@@ -853,21 +855,31 @@ def generate_copyable_markdown_report(findings, file_names_list, selected_scopes
             return [int(p) for p in parts]
         except ValueError:
             return [99, 99]
+
+    def _get_norm_status(f):
+        st_val = f.get("status", "Non-Compliant")
+        if not st_val: return "Non-Compliant"
+        st_lower = str(st_val).lower().strip()
+        if "out of scope" in st_lower or "out_of_scope" in st_lower: return "Out of Scope"
+        if "non-compliant" in st_lower or "non_compliant" in st_lower: return "Non-Compliant"
+        if "partially compliant" in st_lower or "partial" in st_lower: return "Partially Compliant"
+        if "compliant" in st_lower: return "Compliant"
+        if "human review" in st_lower: return "Human Review"
+        return "Non-Compliant"
             
-    from src.core.controls_data import USE_CASES as _UC
     uc_metadata = {c["use_case"]: c for c in _UC}
     sorted_results = sorted(findings, key=get_control_sort_key)
     
     # 1. Per-control blocks
     blocks = []
     for f in sorted_results:
-        status_val = f.get("status", "Non-Compliant")
+        status_val = _get_norm_status(f)
         status_emoji_map = {
             "Compliant": "✅ Compliant",
-            "Partially Compliant": "⚠️ Partial",
-            "Partial": "⚠️ Partial",
+            "Partially Compliant": "⚠️ Partially Compliant",
             "Non-Compliant": "❌ Non-Compliant",
-            "Out of Scope": "➖ Out of Scope"
+            "Out of Scope": "➖ Out of Scope",
+            "Human Review": "🔍 Human Review"
         }
         status_str = status_emoji_map.get(status_val, "➖ Out of Scope")
         
@@ -909,12 +921,12 @@ Recommendation:{rec}"""
     per_control_markdown = "\n──────────────────────────────────────────\n".join(blocks)
     
     # 2. Final Audit Summary Calculations
-    total_in_scope = sum(1 for f in findings if f.get("status") in ("Compliant", "Partially Compliant", "Non-Compliant", "Partial", "Human Review"))
-    compliant_count = sum(1 for f in findings if f.get("status") == "Compliant")
-    partial_count = sum(1 for f in findings if f.get("status") in ("Partially Compliant", "Partial"))
-    non_compliant_count = sum(1 for f in findings if f.get("status") == "Non-Compliant")
-    human_review_count = sum(1 for f in findings if f.get("status") == "Human Review")
-    out_of_scope_count = sum(1 for f in findings if f.get("status") == "Out of Scope")
+    total_in_scope = sum(1 for f in findings if _get_norm_status(f) in ("Compliant", "Partially Compliant", "Non-Compliant", "Human Review"))
+    compliant_count = sum(1 for f in findings if _get_norm_status(f) == "Compliant")
+    partial_count = sum(1 for f in findings if _get_norm_status(f) == "Partially Compliant")
+    non_compliant_count = sum(1 for f in findings if _get_norm_status(f) == "Non-Compliant")
+    human_review_count = sum(1 for f in findings if _get_norm_status(f) == "Human Review")
+    out_of_scope_count = sum(1 for f in findings if _get_norm_status(f) == "Out of Scope")
     
     compliant_pct = f"{compliant_count} [{int(compliant_count / max(total_in_scope, 1) * 100):.1f}%]" if total_in_scope > 0 else "0 [0.0%]"
     partial_pct = f"{partial_count} [{int(partial_count / max(total_in_scope, 1) * 100):.1f}%]" if total_in_scope > 0 else "0 [0.0%]"
@@ -926,7 +938,7 @@ Recommendation:{rec}"""
     # Risk counts
     risk_counts = {"P1 Critical": 0, "P2 High": 0, "P3 Medium": 0, "P4 Low": 0}
     for f in findings:
-        if f.get("status") in ("Partially Compliant", "Non-Compliant", "Partial", "Human Review"):
+        if _get_norm_status(f) in ("Partially Compliant", "Non-Compliant", "Human Review"):
             sev = f.get("severity", "P3 Medium")
             if sev in risk_counts:
                 risk_counts[sev] += 1
@@ -940,7 +952,7 @@ Recommendation:{rec}"""
     }
     for f in findings:
         code = f.get("control_id", "").split(" ")[0]
-        status = f.get("status", "Out of Scope")
+        status = _get_norm_status(f)
         clause = None
         if code.startswith("5."):
             clause = "Clause 5 (Organizational)"
@@ -952,7 +964,7 @@ Recommendation:{rec}"""
             clause = "Clause 8 (Technological)"
             
         if clause:
-            if status in ("Compliant", "Partially Compliant", "Non-Compliant", "Partial", "Human Review"):
+            if status in ("Compliant", "Partially Compliant", "Non-Compliant", "Human Review"):
                 clause_counts[clause]["in_scope"] += 1
                 if status == "Compliant":
                     clause_counts[clause]["compliant"] += 1
@@ -969,7 +981,7 @@ Recommendation:{rec}"""
     breakdown_str = "\n".join(breakdown_lines)
     
     # Top 5 priority fixes
-    active_gaps = [f for f in findings if f.get("status") in ("Partially Compliant", "Non-Compliant", "Partial", "Human Review")]
+    active_gaps = [f for f in findings if _get_norm_status(f) in ("Partially Compliant", "Non-Compliant", "Human Review")]
     SEV_ORDER = ["P1 Critical", "P2 High", "P3 Medium", "P4 Low"]
     sorted_gaps = sorted(
         active_gaps,
@@ -2067,6 +2079,11 @@ def extract_text(f):
     elif name_lower.endswith((".xlsx", ".xls")):
         try:
             import pandas as pd
+            import re as _re
+            # ISO control ID pattern: matches A.5.9, A.12.1.2, 5.9, 8.16, etc.
+            _ISO_CTRL_RE = _re.compile(
+                r'\b(?:A\.)?(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)\b'
+            )
             excel_data = pd.read_excel(f, sheet_name=None)
             sheets_text = []
             xlsx_chunks = []
@@ -2076,49 +2093,90 @@ def extract_text(f):
                 if total_rows == 0:
                     sheets_text.append(f"--- Sheet: {sheet_name} ---\n[Empty Sheet]")
                     continue
-                ROWS_PER_CHUNK = 15
-                ROW_OVERLAP = 3
+                # ── Improved chunking parameters ──────────────────────────────
+                # 5 rows/chunk (was 15): tighter focus means each chunk is
+                # about one audit control entry, not a mixed 15-row blob.
+                # Overlap of 1 row keeps cross-boundary evidence intact.
+                ROWS_PER_CHUNK = 5
+                ROW_OVERLAP = 1
+                MAX_CHUNK_CHARS = 2000   # hard cap per chunk
                 xlsx_fname = getattr(f, "name", "unknown.xlsx")
                 xlsx_ext = os.path.splitext(xlsx_fname.lower())[1].lstrip(".")
                 xlsx_src_type = "xls" if xlsx_ext == "xls" else "xlsx"
-                # Build header row string to prepend to every chunk
-                header_row_str = "  ".join(str(c) for c in df_filled.columns)
+                columns = [str(c) for c in df_filled.columns]
                 start_row = 0
                 while start_row < total_rows:
-                    # Adaptive row chunking to avoid huge chunks (limit to ~3000 chars)
-                    current_rows_per_chunk = ROWS_PER_CHUNK
-                    while current_rows_per_chunk > 1:
-                        end_row = min(start_row + current_rows_per_chunk, total_rows)
-                        df_slice = df_filled.iloc[start_row:end_row]
-                        chunk_text_val = df_slice.to_string(index=False)
-                        chunk_text_val = re.sub(r' {2,}', '  ', chunk_text_val)
-                        p_text = f"--- Sheet: {sheet_name} | Rows {start_row+1}-{end_row} ---\nHeaders: {header_row_str}\n{chunk_text_val}"
-                        if len(p_text) <= 3000 or current_rows_per_chunk == 1:
-                            break
-                        # Reduce rows per chunk to avoid token overflow
-                        current_rows_per_chunk = max(1, current_rows_per_chunk // 2)
-                    
-                    end_row = min(start_row + current_rows_per_chunk, total_rows)
+                    end_row = min(start_row + ROWS_PER_CHUNK, total_rows)
                     df_slice = df_filled.iloc[start_row:end_row]
-                    chunk_text_val = df_slice.to_string(index=False)
-                    chunk_text_val = re.sub(r' {2,}', '  ', chunk_text_val)
-                    p_text = f"--- Sheet: {sheet_name} | Rows {start_row+1}-{end_row} ---\nHeaders: {header_row_str}\n{chunk_text_val}"
-                    
+
+                    # ── Col=Value pipe format (replaces df.to_string) ─────────
+                    # Before: "Implemented  A.9.1  High" (space-aligned, ambiguous)
+                    # After:  "Control=A.9.1 | Status=Implemented | Risk=High"
+                    # This preserves column identity so the keyword scorer can
+                    # match "access control" → "A.9.1" in the correct column.
+                    row_lines = []
+                    for _, row in df_slice.iterrows():
+                        pairs = []
+                        for col in columns:
+                            val = str(row[col]).strip()
+                            if val and val != "nan":
+                                pairs.append(f"{col}={val}")
+                        if pairs:
+                            row_lines.append(" | ".join(pairs))
+
+                    if not row_lines:
+                        start_row = end_row
+                        continue
+
+                    chunk_body = "\n".join(row_lines)
+
+                    # ── ISO Control ID prefix ──────────────────────────────────
+                    # Scan every cell in the slice for ISO control patterns.
+                    # Surface them as "[Controls: 5.9, 8.16]" at the top of the
+                    # chunk so the keyword scorer gets a direct match even when
+                    # the control ID appears in a column the scorer doesn't weight.
+                    ctrl_ids_found = set()
+                    for _, row in df_slice.iterrows():
+                        for col in columns:
+                            cell_val = str(row[col])
+                            for m in _ISO_CTRL_RE.finditer(cell_val):
+                                ctrl_ids_found.add(m.group(0))
+                    ctrl_prefix = ""
+                    if ctrl_ids_found:
+                        ctrl_prefix = f"[Controls: {', '.join(sorted(ctrl_ids_found))}]\n"
+
+                    p_text = (
+                        f"{ctrl_prefix}"
+                        f"--- Sheet: {sheet_name} | Rows {start_row + 1}-{end_row} ---\n"
+                        f"Columns: {' | '.join(columns)}\n"
+                        f"{chunk_body}"
+                    )
+
+                    # Hard cap: if a single row still exceeds MAX_CHUNK_CHARS,
+                    # truncate gracefully rather than feeding a token monster.
+                    if len(p_text) > MAX_CHUNK_CHARS:
+                        p_text = p_text[:MAX_CHUNK_CHARS] + "\n[...truncated]"
+
                     xlsx_chunks.append((p_text, {
                         "source_file": xlsx_fname,
                         "source_type": xlsx_src_type,
                         "sheet_name": sheet_name,
                         "start_row": start_row + 1,
                         "end_row": end_row,
+                        "iso_controls_in_chunk": sorted(ctrl_ids_found),
                         "chunk_id": ""
                     }))
+
                     if end_row == total_rows:
                         break
                     next_start = end_row - ROW_OVERLAP
                     if next_start <= start_row:
                         next_start = end_row
                     start_row = next_start
-                sheets_text.append(f"--- Sheet: {sheet_name} ---\n" + df_filled.to_string(index=False))
+
+                sheets_text.append(
+                    f"--- Sheet: {sheet_name} ---\n" + df_filled.to_string(index=False)
+                )
             _ingested_chunks_cache[f.name] = xlsx_chunks
             return "\n\n".join(sheets_text)
         except Exception as e:
@@ -3321,22 +3379,20 @@ Execution Time: {execution_time_per_control:.2f}s
 
 
 def _enrich_finding_metadata(r, db_chunks):
-    # 1. Map back to UI-expected statuses
-    if r.get("status") == "COMPLIANT":
+    # 1. Map back to UI-expected statuses (only 3 valid outputs)
+    if r.get("status") in ("COMPLIANT",):
         r["status"] = "Compliant"
-    elif r.get("status") == "PARTIAL":
+    elif r.get("status") in ("PARTIAL", "PARTIAL_COMPLIANT", "PARTIALLY_COMPLIANT", "HUMAN_REVIEW"):
         r["status"] = "Partially Compliant"
-    elif r.get("status") == "HUMAN_REVIEW":
-        r["status"] = "Human Review"
     else:
-        # Keep existing "Compliant", "Partially Compliant", "Human Review", "Out of Scope" if already mapped
-        if r.get("status") not in ("Compliant", "Partially Compliant", "Human Review", "Out of Scope"):
+        # Keep existing mapped values, otherwise default to Non-Compliant
+        if r.get("status") not in ("Compliant", "Partially Compliant", "Out of Scope"):
             r["status"] = "Non-Compliant"
 
     # 2. Enrich with evidence_state (SUFFICIENT / INSUFFICIENT / NO_EVIDENCE)
     if r.get("status") == "Compliant":
         r["evidence_state"] = "SUFFICIENT"
-    elif r.get("status") in ("Partially Compliant", "Human Review"):
+    elif r.get("status") == "Partially Compliant":
         r["evidence_state"] = "INSUFFICIENT"
     else:
         r["evidence_state"] = "NO_EVIDENCE"
@@ -3687,16 +3743,14 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             result = None
 
         if result:
-            # Align status names to UI expected formats
+            # Align status names to UI expected formats (3 statuses only)
             raw_status = result.get("status", "Non-Compliant")
             if raw_status == "COMPLIANT":
                 raw_status = "Compliant"
-            elif raw_status in ("PARTIAL", "PARTIALLY_COMPLIANT"):
+            elif raw_status in ("PARTIAL", "PARTIAL_COMPLIANT", "PARTIALLY_COMPLIANT", "HUMAN_REVIEW"):
                 raw_status = "Partially Compliant"
             elif raw_status == "NON_COMPLIANT":
                 raw_status = "Non-Compliant"
-            elif raw_status == "HUMAN_REVIEW":
-                raw_status = "Human Review"
             elif raw_status == "Out of Scope":
                 raw_status = "Out of Scope"
             else:

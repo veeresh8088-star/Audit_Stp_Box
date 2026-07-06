@@ -1,0 +1,100 @@
+DETAILED DESCRIPTION OF THE
+MOTOROLA SOLUTIONS GLOBAL INCIDENT RESPONSE PLAN
+VERSION: 2.1
+REVISED: April 2022
+
+1.0 INTRODUCTION
+Security incidents frequently threaten personal and business data. Incident response helps to minimize loss, theft of information, and the disruption to business caused by these incidents. Having this singular incident response plan for all of Motorola Solutions, Incorporated (MSI), ensures repeatability, reliability, and consistency in properly handling, reporting, and sharing of information from incidents across the organization. It also helps MSI to comply with its legal and contractual obligations.
+
+PURPOSE
+This document provides a detailed description of MSI’s Global Incident Response Plan (IRP) and outlines MSI’s plan for coordinating and organizing resources needed for responding to information security incidents at MSI. The goal of MSI’s IRP is to facilitate quick, efficient, documented and repeatable responses to incidents, and limit their impact while protecting MSI’s information assets. This plan is considered as policy for all the security incidents that can occur within MSI’s environment. NIST and CISA guidelines are referenced in creating this document.
+
+SCOPE
+This Incident Response Plan applies to all information systems, institutional data, networks of MSI, and any person or device accessing these systems or data. This includes any hosted or SaaS offerings where Motorola Solutions is responsible for employee or customer data, or the resources on which our employees, contractors or customers depend for operational purposes. It also includes any incidents that may involve a MSI product or service deployed on customer premises or customer equipment. The scope of this document is to prepare MSI and plan to respond to cybersecurity incidents.
+
+MAINTENANCE
+MSI’s Enterprise Information Security (EIS) is responsible for the maintenance and revision of MSI’s IRP. Members of this team will serve to review and approve any proposed change(s) to this overall incident framework in conjunction with members from other segments of the organization including Ethics, Legal, Privacy, Cybersecurity Organization, Governance and Risk Compliance (GRC). It is recommended that this team meet bi-annually (as needed) for any improvements from lessons learned or to improve the processes in the framework. EIS will incorporate identified lessons learned into this document and record the changes.
+
+2.0 ROLES AND RESPONSIBILITIES
+The following roles and responsibilities are defined in this document in the table below. While the Core Incident Response Team is required for most of the Incidents, the Incident Coordinator and/or Incident Response Lead will add additional Incident Response (IR) participants as needed. The below tables define the roles and responsibilities that may be needed for any incident. The majority of roles in the Core Incident Response table are required for an incident regardless of severity or impact level of the incident.
+
+Core Incident Response Team
+- Security Operations Center (SOC): The Security Operations Center has primary responsibility for communication with and mobilization of the right stakeholders from a Security and Incident Response perspective. Responsible for assigning initial severity and activating the Incident Response (IR) team for customer products and services.
+- SOC Incident Response Team: Responsible for incidents involving any MSI products/services/customers/suppliers security incidents.
+- Enterprise Information Security (EIS): Responsible for operating the company’s security infrastructure and coordinating with the IR team as needed for investigation, response and remediation activities.
+- Incident Coordinator: The Incident Coordinator is responsible for ensuring coordination between the technical IR team and other IR stakeholders. The incident coordinator will deal with management meetings, providing status updates, ensuring that the IR team has needed resources, including adding other people on the IR team and ensuring reporting is complete. Depending upon the severity IC will also be responsible for escalation and reporting to senior management and the Board of Directors.
+- Incident Response Lead: The IRL is responsible for leading the IR process within the IR technical team, and is the designated decision-maker with respect to activities within that process, including determination of when internal escalation is warranted. This person is also responsible to ensure that the technical IR team is following this plan, as well as to ensure that an appropriate level of details are collected for notifications and generation of the relevant IR reports.
+
+Additional IR participants (as needed by severity)
+- Executive Committee: The Executive Committee (EC) is responsible for making company decisions.
+- Business Stakeholder: Business stakeholders are responsible for making key business decisions for their business units.
+- IT Stakeholders: IT stakeholders are responsible for making decisions for IT systems in support of business decisions, including briefing the executive committee on incidents.
+- Director of Enterprise Information Security: The Director of Enterprise Information Security or their designee is responsible for coordinating the activities of all security personnel engaged during incident response.
+- Legal: Legal will be responsible for ensuring compliance with contractual obligations and coordinating any required notifications to individuals, entities, government agencies and regulators, which are not the responsibility of the Global Data Protection Office. Legal shall review all written communications managed by GDPO to law enforcement, government agencies, regulators, affected individuals and any public statements about incidents. Legal will also determine if a privileged investigation should be initiated for the incident, and, if so will direct the Incident Response Team and provide guidance to ensure that the protections of privilege are maintained. Legal will also issue litigation holds as appropriate based on the facts of a particular incident. Legal will manage any litigation arising out of an incident or breach. Legal will also be a key decision maker when involving insurance.
+- Procurement: Procurement will be responsible for communicating with suppliers’ regarding their compliance with supplier incident response contractual obligations. Procurement will provide support to Legal in any dispute with a supplier. Procurement will negotiate any agreements with suppliers necessary for supporting the Incident Response Plan.
+- Ethics and Compliance: Participate in investigations and discipline of individuals who may be involved in a potential incident.
+- Global Data Protection Office (GDPO) (Note: GDPO includes CJIS team): GDPO is responsible for compliance with legal obligations under laws and regulations addressing personal data (e.g., CJIS, GDPR, HIPAA and international, and Federal, state and local privacy and data breach laws), including laws and regulations requiring notifications to customers, individuals, law enforcement, regulators and other individuals and entities. GDPO will review for legal compliance all communications and public statements about incidents involving personal data. GDPO will provide support to HR, Ethics and Compliance and Legal during any investigation, litigation or discipline related to incidents involving personal data or CJIS data under Motorola’s policies.
+- Communications / Public Relations: The internal person or group appointed to provide the official response to any inquiry from media or public sources. Provides final approval of customer notifications for critical or high severity incidents. Review all communications to law enforcement, regulators, affected individuals and any public statements about incidents.
+- Crisis Management / Business Continuity and Disaster Recovery: CM/BCP/DR is responsible to ensure there is minimal disruption to critical business functions. This includes vital business functions across the organization.
+- Human Resources: If an investigation is indicated by the facts of an incident, Human Resources is responsible for conducting a thorough investigation into the personnel involved in an incident. Human Resources will apply MSI’s policies to the findings of the incident and take corrective action or impose discipline, which can range from verbal coaching, up to and including termination of employment.
+- Security Solutions Team (SST): Responsible for handling the Products, Services security portfolio and coordinating for investigation, response and remediation activities.
+- Governance and Risk Compliance Team: This team is responsible for determining the overall impact of an incident and risk related activities including owning the after-action-review process after the post-incident phase.
+- Major Incident Management (MIM): Responsible for handling management related activities in major non-security incidents like sending internal communications, or coordinating with other teams in completing large tasks.
+- Service Help Desk / Customer Support: Responsible for working with end users or customers in assisting with troubleshooting or data collection and reporting back to the SOC/IR team.
+
+3.0 MSI INCIDENT RESPONSE FRAMEWORK
+MSI’s IR framework consists of several phases, as shown in Figure 1 below. The Prepare phase involves establishing and training an IR team and acquiring the necessary tools and resources. The Detect & Analyze phase is necessary to alert the organization whenever incidents occur. The Contain, Eradicate & Recover phase involves mitigating the impact of the incident by containing it and ultimately recovering from it. This phase activity often cycles back to detection and analysis for eradicating the threat origin from MSI environment as additional information becomes known in the course of the investigation. After the incident is closed out, the IR team initiates the Post Incident phase to ensure that the incident and response are appropriately documented, that steps MSI should take in light of the incident are identified, and that lessons learned are captured for input into future preparedness and response. The below diagram shows Incident Response phases, and additional detail on this IR framework follows in the next section.
+
+Figure 1: Incident Response Phases
+This IR framework provides a defined, repeatable, and measurable process by which MSI can effectively respond and handle cybersecurity incidents. This framework is structured in six-phases derived from NIST. It is designed to drive efficient IR and handling processes among all the IR personnel.
+
+As shown in Figure 2 below in greater detail, MSI’s IR framework comprises the following phases:
+1. Prepare: Ensure that MSI IR is prepared with the appropriate processes in place to effectively and efficiently respond to alerts, incidents and breaches, including with respect to implementation and use of technologies to be used and awareness and training of responsible MSI personnel.
+2. Detect: Establishes and configures processes, including personnel and technologies to enable MSI to timely and accurately identify, ingest, aggregate and correlate events from technical and non-technical sources across the environment with credible intelligence to generate and deliver security alerts to the SOC analyst for analyzing.
+3. Analyze: Investigates and analyzes security alerts in order to determine whether an incident has occurred. This phase involves the Threat Intelligence teams for analyzing the environment.
+4. Contain & Eradicate: Identify and implement containment strategies for confirmed incidents to mitigate against further impacts, and pursue technical and administrative steps to eradicate active threats from MSI systems and networks. Legal, Procurement and GDPO shall determine, according to their roles, if additional information has made an incident a reportable incident and implement supplemental runbooks.
+5. Recover: Remediate impact of the incident and restore impacted systems to normal business operations after an incident has been fully contained and the threat eradicated.
+6. Post Incident: Evaluates incidents after closure (i.e., containment, eradication and recovery complete), individually and in aggregate, to ensure appropriate documentation of the incident and response is captured, necessary steps for MSI to take in light of the incident are identified and tracked, and lessons learned are collected for incorporation into MSI’s preparedness and response going forward. All runbooks will be updated as appropriate.
+
+Figure 2: MSI’s IR Framework
+
+4.0 INCIDENT SEVERITY & IMPACT LEVELS
+This section will describe incident taxonomy which allows to differentiate and characterize incidents:
+
+Figure 3: Severity pyramid for illustration.
+All incidents must be assigned an incident severity, which will be informed by a scoring system based on the following factors: Functional Impact, Information Impact, Recoverability, Location of observed activity, Actor characterization and Potential impact. These factors and how incident severity scores can be calculated is referenced from CISA.
+
+When evaluating the severity of the incidents one should assume that the incident is at a lower level until evidence is discovered to show that a higher level is appropriate, unless directed by the incident coordinator or by IRL. Some of these factors may change during the course of an incident, and the IRL and/or Incident Coordinator should consider reevaluating the severity to determine if an update is appropriate based on new information that becomes available.
+
+- Critical: A critical priority incident poses an imminent threat to the Motorola enterprise, which may include wide-scale negative impacts to Motorola systems and/or operations, lasting reputational harm or significant legal/regulatory/contractual risk.
+- High: A high priority incident is likely to have demonstrable negative impacts to Motorola enterprise systems and/or operations OR is likely to present imminent threats to the systems and/or operations of 1 or more Motorola business units’ (but not the enterprise as a whole), AND may include demonstrable legal/regulatory/contractual risk.
+- Medium: A medium priority incident may have demonstrable negative impacts to Motorola enterprise systems and/or operations OR is likely to have demonstrable negative impact to the systems and/or operations of 1 or more Motorola business units (but not the enterprise as a whole).
+- Low: A low priority incident may have demonstrable negative impacts to a limited number of MSI systems and/or operations, but is unlikely to have demonstrable negative enterprise level impacts to MSI systems and/or operations.
+- Alert: A alert is a notification that a particular event (or series of events) has occurred, which is sent to responsible parties for the purpose of spawning action.
+- Event: An event is an observed change to the normal behavior of a system, environment, process, or workflow.
+
+Figure 4: Incident Severity assessment illustration
+
+5.0 INCIDENT NOTIFICATIONS
+Legal, Procurement and GDPO shall, according to their roles, determine whether the incident is a reportable incident. Motorola shall use commercially reasonable efforts to provide notification to customers of incidents involving customer data within the shorter of either 72 hours or the contractually agreed to reporting time period from becoming aware of an incident.
+
+APPROVAL AUTHORITY & ISSUANCE AND REVISION HISTORY
+APPROVAL AUTHORITY
+Originators: Manav Nagla
+Reviewed By: Manav Nagla, Manager - External Response Team
+Approved By: Tim Collyer, Director of Enterprise Information Security
+
+ISSUANCE & REVISION HISTORY
+Effective Date of Change: Version 2.0, November 2021
+Version 2.1, April 2022
+
+HISTORY
+Revision Number v 2.1
+Summary of Change: Added data classification and language update
+Reviewed By: Manav Nagla, Manager - External Response Team
+Approved By: Tim Collyer, Director of Enterprise Information Security
+
+Revision Number v 2.0 (based on MSI Global IRP v2.0)
+Summary of Change: Global Incident Response Plan for MSI Customers
+Reviewed By: Manav Nagla, Manager - External Response Team
+Approved By: Tim Collyer, Director of Enterprise Information Security

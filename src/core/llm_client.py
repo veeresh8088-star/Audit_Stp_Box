@@ -14,21 +14,25 @@ def _resolve_host(url=None, default_port=11434):
         url = f"http://{url}" if ":" in url else f"http://{url}:{default_port}"
     return url
 
-def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=4, timeout=900):
+def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=4, timeout=900, stop=None):
     """Sends a non-streaming prompt completion request to the configured LLM backend."""
     backend = get_llm_backend()
     host = _resolve_host()
     
     if backend in ("llama.cpp", "llamacpp"):
+        if "gemma" in model.lower():
+            prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
         url = f"{host}/completion"
         payload = {
             "prompt": prompt,
             "temperature": temperature,
             "stream": False,
-            "n_predict": 1024 if format == "json" else 2048,
+            "n_predict": 1024 if format == "json" else 4096,
         }
         if format == "json":
             payload["response_format"] = {"type": "json_object"}
+        if stop:
+            payload["stop"] = stop
             
         r = requests.post(url, json=payload, timeout=timeout)
         if r.status_code == 200:
@@ -38,15 +42,20 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
     else:
         # Default: Ollama
         url = f"{host}/api/generate"
+        options_dict = {
+            "temperature": temperature,
+            "num_ctx": num_ctx,
+            "num_thread": num_thread,
+            "num_predict": 1024 if format == "json" else 2048
+        }
+        if stop:
+            options_dict["stop"] = stop
+            
         payload = {
             "model": model,
             "prompt": prompt,
             "stream": False,
-            "options": {
-                "temperature": temperature,
-                "num_ctx": num_ctx,
-                "num_thread": num_thread
-            },
+            "options": options_dict,
             "keep_alive": "15m"
         }
         if format:
@@ -64,6 +73,8 @@ def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=4)
     host = _resolve_host()
     
     if backend in ("llama.cpp", "llamacpp"):
+        if "gemma" in model.lower():
+            prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
         url = f"{host}/completion"
         payload = {
             "prompt": prompt,

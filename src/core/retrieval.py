@@ -85,7 +85,9 @@ def save_document_chunks(filename, text):
                 return
 
             # Fallback split into double newlines chunks (paragraphs)
-            paragraphs = [p.strip() for p in text.split('\n\n') if len(p.strip()) > 40]
+            # Minimum 8 words (more reliable than 40 chars for ISO policy text)
+            MAX_CHUNK_CHARS = 1200  # hard cap — prevents a single PDF page from eating the token budget
+            paragraphs = [p.strip() for p in text.split('\n\n') if len(p.strip().split()) >= 8]
             
             # Fallback to single newline paragraphs if double newline yields no results,
             # or if the split resulted in too few, very long blocks (often happens with pdfplumber text).
@@ -114,7 +116,7 @@ def save_document_chunks(filename, text):
                     cur.append(val)
                 if cur:
                     paragraphs.append(" ".join(cur))
-                paragraphs = [p for p in paragraphs if len(p) > 40]
+                paragraphs = [p for p in paragraphs if len(p.split()) >= 8]
                 
             HEADER_REGEX = re.compile(
                 r'^\s*(?:Clause\s+|Section\s+)?(\d+(?:\.\d+)*)\b', 
@@ -149,6 +151,13 @@ def save_document_chunks(filename, text):
                 p_text = "\n\n".join(window_paras)
                 if window_section:
                     p_text = f"[{window_section}]\n{p_text}"
+                # Hard cap: split oversized chunks (e.g. dense PDF pages) at sentence boundaries
+                if len(p_text) > MAX_CHUNK_CHARS:
+                    # Find the last sentence boundary before the cap
+                    cut = p_text.rfind('.', 0, MAX_CHUNK_CHARS)
+                    if cut == -1:
+                        cut = MAX_CHUNK_CHARS
+                    p_text = p_text[:cut + 1].strip()
                     
                 _, ext = os.path.splitext(filename.lower())
                 SUPPORTED_TYPES_LOCAL = {
@@ -458,6 +467,9 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
                 insert_at = min(configured_top_k, len(deduplicated))
                 deduplicated.insert(insert_at, best_for_file)
                 print(f"[RAG DIVERSITY] Injected chunk from '{missing_fname}' for multi-document evidence.")
+
+    # Limit to configured top_k chunks
+    deduplicated = deduplicated[:configured_top_k]
 
     # Token Budget Accumulation
     selected_chunks = []

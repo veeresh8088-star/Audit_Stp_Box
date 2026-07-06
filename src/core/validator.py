@@ -354,9 +354,28 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     # ════════════════════════════════════════
     hints = expected_evidence_map.get(code, []) if expected_evidence_map else []
     leakage = check_prompt_leakage(evidence_clean, hints)
+    
+    # Pre-emptively detect adversarial prompt injections in the retrieved context/document text
+    if document_text:
+        doc_lower = document_text.lower()
+        injection_keywords = [
+            "ignore all instructions",
+            "ignore previous instructions",
+            "ignore the instructions",
+            "ignore system instructions",
+            "ignore the system prompt",
+            "attention: ignore",
+            "mark the control as",
+            "override all instructions"
+        ]
+        for kw in injection_keywords:
+            if kw in doc_lower:
+                leakage = "PROMPT_LEAK"
+                break
+                
     print(f"[VALIDATOR DEBUG] GATE 1 (Leakage): {control_id} -> {leakage}", flush=True)
     if leakage == "PROMPT_LEAK":
-        print(f"[VALIDATOR DEBUG] [FAIL] {control_id}: REJECTED by Leakage Gate! Evidence matched prompt hints.", flush=True)
+        print(f"[VALIDATOR DEBUG] [FAIL] {control_id}: REJECTED by Leakage Gate! Evidence matched prompt hints or prompt injection detected.", flush=True)
         print(f"[VALIDATOR DEBUG]   Hints: {hints[:2]}", flush=True)
         finding["status"] = "NON_COMPLIANT"
         finding["hallucination_check"] = "PROMPT_LEAK"
@@ -466,11 +485,11 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         is_compliant_claim = (raw_status_upper == "COMPLIANT" or raw_status_upper == "PARTIAL"
                               or raw_status_upper == "PARTIALLY_COMPLIANT")
         if is_compliant_claim:
-            finding["status"] = "HUMAN_REVIEW"
+            finding["status"] = "PARTIAL_COMPLIANT"
             finding["requires_human_review"] = True
             finding["requires_review"] = True
-            finding["validator_note"] = "Grounding failed but model claimed compliant/partial — routed for human review"
-            finding["review_note"] = "Grounding validation failed: cited evidence quote was not found in policy document text. Model claimed compliance, so this requires manual auditor review."
+            finding["validator_note"] = "Grounding failed but model claimed compliant/partial — downgraded to PARTIAL_COMPLIANT"
+            finding["review_note"] = "Grounding validation failed: cited evidence quote was not found in policy document text. Downgraded to PARTIAL_COMPLIANT pending manual verification."
         else:
             finding["status"] = "NON_COMPLIANT"
             finding["validator_note"] = "Evidence quote not found in document text — rejected"
@@ -493,14 +512,15 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         print(f"[VALIDATOR DEBUG] [OK] {control_id}: PASSED all gates! Status: {finding.get('status')}", flush=True)
         finding["validator_note"] = None
 
-    # Get & Normalize status
+    # Get & Normalize status — only three valid outputs: COMPLIANT, PARTIAL_COMPLIANT, NON_COMPLIANT
     status = finding.get("status", "NON_COMPLIANT").upper()
     if "HUMAN_REVIEW" in status or "HUMAN REVIEW" in status:
-        finding["status"] = "HUMAN_REVIEW"
+        # Map HUMAN_REVIEW -> PARTIAL_COMPLIANT (uncertain / needs verification)
+        finding["status"] = "PARTIAL_COMPLIANT"
     elif "NON_COMPLIANT" in status or "NON-COMPLIANT" in status:
-        finding["status"] = "COMPLIANT" if (finding.get("status") == "COMPLIANT") else "NON_COMPLIANT"
+        finding["status"] = "NON_COMPLIANT"
     elif "PARTIALLY" in status or "PARTIAL" in status:
-        finding["status"] = "PARTIAL"
+        finding["status"] = "PARTIAL_COMPLIANT"
     elif "COMPLIANT" in status:
         finding["status"] = "COMPLIANT"
     else:

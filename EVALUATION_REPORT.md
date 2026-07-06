@@ -85,12 +85,7 @@ A benchmark test was run directly on your hardware to test prompt evaluation spe
 
 ---
 
-## 5. Conclusion & Recommendations
+## 5. Conclusion
 
-The optimization efforts successfully made the **AICyberAuditBox** production-ready for CPU-only enterprise environments. 
+The optimization efforts successfully made the **AICyberAuditBox** production-ready for CPU-only enterprise environments, achieving a 30.15% execution speedup while ensuring full data privacy through a local, zero-dependency offline architecture.
 
-### Final Recommendations:
-1. **Retain `llama.cpp` Backend**: It provides a **15% to 20% speed advantage** over Ollama on CPU because it has no Go-wrapper daemon or memory-overhead process.
-2. **Keep the 4k Context Limits**: The current RAG budget target of 1,800 tokens is the sweet spot. It prevents CPU timeouts while remaining robust enough to fetch the core compliance evidence.
-3. **Run on 8 Threads (`-t 8`)**: Our benchmarks proved this yields the lowest latency.
-4. **Deploy Offline**: The unified batch script architecture has zero dependencies, making it highly secure and fully compliant with air-gapped enterprise standards.

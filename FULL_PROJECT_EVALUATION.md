@@ -38,7 +38,7 @@ graph TD
 
 To ensure fast and stable execution on CPU-only hardware, the project implements a strict token management system:
 
-### A. Document Chunking Size (200–400 Tokens)
+### A. Document Chunking Size (200-400 Tokens)
 * The parser splits documents into paragraphs based on double newlines (`\n\n`), filtering out blocks shorter than 40 characters.
 * Chunks are created using a **sliding window of 3 consecutive paragraphs** with a **stride of 1 paragraph** (meaning Chunk 1 contains paragraphs 1-3, Chunk 2 contains paragraphs 2-4).
 * A single chunk typically contains **200 to 400 tokens**.
@@ -120,12 +120,7 @@ To accommodate the CPU-only client requirement, we tuned the server parameters t
 
 ---
 
-## 7. Conclusion & Recommendations
+## 7. Conclusion
 
-The optimization efforts successfully made the **AICyberAuditBox** production-ready for CPU-only enterprise environments. 
+The optimization efforts successfully made the **AICyberAuditBox** production-ready for CPU-only enterprise environments, achieving a 30.15% execution speedup while ensuring full data privacy through a local, zero-dependency offline architecture.
 
-### Final Recommendations:
-1. **Retain `llama.cpp` Backend**: It provides a **15% to 20% speed advantage** over Ollama on CPU because it has no Go-wrapper daemon or memory-overhead process.
-2. **Keep the 4k Context Limits**: The current RAG budget target of 1,800 tokens is the sweet spot. It prevents CPU timeouts while remaining robust enough to fetch the core compliance evidence.
-3. **Run on 8 Threads (`-t 8`)**: Our benchmarks proved this yields the lowest latency.
-4. **Deploy Offline**: The unified batch script architecture has zero dependencies, making it highly secure and fully compliant with air-gapped enterprise standards.

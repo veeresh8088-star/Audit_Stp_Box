@@ -203,7 +203,7 @@ You MUST respond with findings wrapped in XML tags matching this format:
     <page>Page Number</page>
     <excerpt>Supporting evidence text / verbatim quote</excerpt>
   </evidence_item>
-</evidence_items>
+</ evidence_items>
 
 Ensure the output contains only the XML tags and no surrounding text.
 """
@@ -405,7 +405,7 @@ You MUST respond with findings wrapped in XML tags matching this format:
     <page>Page Number</page>
     <excerpt>Supporting evidence text / verbatim quote</excerpt>
   </evidence_item>
-</evidence_items>
+</ evidence_items>
 
 Ensure the output contains only the XML tags and no surrounding text.
 """
@@ -709,7 +709,8 @@ class NativeOllamaChain:
                 prompt=prompt,
                 model=self.model_name,
                 num_ctx=get_num_ctx(self.model_name),
-                temperature=0.0
+                temperature=0.0,
+                stop=["</evidence_items>", "</root>"]
             )
             if not content or not content.strip():
                 raise ValueError("Backend returned an empty response.")
