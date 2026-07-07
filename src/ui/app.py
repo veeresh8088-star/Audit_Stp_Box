@@ -541,6 +541,11 @@ def get_or_create_active_report(db, session_id):
     return report
 
 def save_findings(uc, findings):
+    # Filter out Out of Scope and Dismissed/Rejected findings
+    findings = [
+        f for f in findings 
+        if f.get("status") not in ("Out of Scope", "Out Of Scope", "Dismissed", "Rejected")
+    ]
     with force_master():
         db = SessionLocal()
         session_id = st.session_state.active_chat_id
@@ -5373,86 +5378,6 @@ with _main_wrap:
 
                 unreviewed_count = len(unreviewed_controls)
 
-                # --- Report Status Flow Header and Review Panel ---
-                current_status = st.session_state.get("audit_status", "Draft")
-                status_colors = {
-                    "Draft": "color: #94a3b8; background: rgba(148, 163, 184, 0.1); border: 1px solid #94a3b8;",
-                    "Pending Review": "color: #fb923c; background: rgba(251, 146, 60, 0.1); border: 1px solid #fb923c;",
-                    "Reviewed": "color: #60a5fa; background: rgba(96, 165, 250, 0.1); border: 1px solid #60a5fa;",
-                    "Approved": "color: #4ade80; background: rgba(74, 222, 128, 0.1); border: 1px solid #4ade80;",
-                    "Rejected": "color: #f87171; background: rgba(248, 113, 113, 0.1); border: 1px solid #f87171;"
-                }
-                status_style = status_colors.get(current_status, "color: #94a3b8; background: rgba(148, 163, 184, 0.1); border: 1px solid #94a3b8;")
-            
-                comments_html = ""
-                if st.session_state.get("auditor_comments"):
-                    comments_html = f"""
-                    <div style='margin-left: 20px; border-left: 1px solid #334155; padding-left: 20px; flex: 1;'>
-                        <span style='font-size: 0.8rem; color: #64748b; font-weight: 600; text-transform: uppercase;'>Auditor Comments</span>
-                        <div style='color: #cbd5e1; font-size: 0.95rem; font-style: italic; margin-top: 4px;'>&ldquo;{st.session_state.auditor_comments}&rdquo;</div>
-                    </div>
-                    """
-                
-                st.markdown(f"""
-                <div style='display: flex; align-items: center; gap: 12px; margin-bottom: 20px; background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 16px;'>
-                    <div>
-                        <span style='font-size: 0.8rem; color: #64748b; font-weight: 600; text-transform: uppercase;'>Report Status</span>
-                        <div style='font-size: 1.1rem; font-weight: 700; margin-top: 2px; padding: 4px 12px; border-radius: 8px; display: inline-block; {status_style}'>
-                            {current_status}
-                        </div>
-                    </div>
-                    {comments_html}
-                </div>
-                """, unsafe_allow_html=True)
-            
-
-
-                # Auditor Send to Auditee Panel
-                if st.session_state.user_role == "auditor" and current_status in ("Draft", "Pending Review"):
-                    st.info("💡 **Publish to Auditee:** Push the report to the auditee workspace so they can view the findings.")
-                    
-                    if st.button("Send to Auditee", type="primary", use_container_width=True, key="send_to_auditee_btn"):
-                        st.session_state.audit_status = "Sent to Auditee"
-                        with force_master():
-                            db = SessionLocal()
-                            report = db.query(AuditReport).filter(AuditReport.session_id == st.session_state.active_chat_id).first()
-                            if report:
-                                user_row = db.query(User).filter(User.username == st.session_state.username).first()
-                                auditor_id = user_row.id if user_row else None
-                                
-                                if unreviewed_count > 0:
-                                    comments_str = f"FORCE PUBLISHED TO AUDITEE: Report published despite {unreviewed_count} unreviewed controls. Unreviewed controls: {', '.join(sorted(unreviewed_controls))}."
-                                    log_system_event(
-                                        event_type="FORCE_SAVE_INCOMPLETE_REVIEW",
-                                        actor=st.session_state.username,
-                                        session_id=st.session_state.active_chat_id,
-                                        framework=report.framework or st.session_state.get("selected_standard", "All Standards"),
-                                        meta={"unreviewed_count": unreviewed_count, "action": "Force Publish"},
-                                        severity="WARNING"
-                                    )
-                                else:
-                                    comments_str = "Report published to auditee after full review"
-                                
-                                db.add(AuditRecord(
-                                    report_id=report.id,
-                                    auditor_id=auditor_id,
-                                    status="Sent to Auditee",
-                                    comments=comments_str
-                                ))
-                                report.status = "Sent to Auditee"
-                                report.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                                db.commit()
-                            db.close()
-                        save_current_findings_snapshot()
-                        st.toast("Report sent to auditee successfully!")
-                        st.rerun()
-                    st.markdown("<br>", unsafe_allow_html=True)
-
-                # Auditor Sent to Auditee Info Panel
-                if st.session_state.user_role == "auditor" and current_status == "Sent to Auditee":
-                    st.success("✅ **This report has been published to the auditee.** They can now view the findings in read-only mode.")
-                    st.markdown("<br>", unsafe_allow_html=True)
-
                 # --- Copyable Markdown Report Expander ---
                 with st.expander("📋 Copyable Markdown Audit Report", expanded=False):
                     file_names = [f.strip() for f in st.session_state.get("last_uploaded_names", "").split(",") if f.strip()]
@@ -7139,6 +7064,7 @@ with _main_wrap:
             st.markdown(f"#### Audit Records Dashboard  ·  <small style='color:#64748b'>{db_label}</small>", unsafe_allow_html=True)
     
             rows = get_all_findings(role=st.session_state.user_role, session_id=st.session_state.active_chat_id)
+            rows = [r for r in rows if r.status not in ("Out of Scope", "Out Of Scope")]
             if rows:
                 _records_data = [{
                     "UC": f"UC{r.use_case_sl}",
