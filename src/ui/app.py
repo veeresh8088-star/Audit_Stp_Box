@@ -860,11 +860,12 @@ def generate_copyable_markdown_report(findings, file_names_list, selected_scopes
         st_val = f.get("status", "Non-Compliant")
         if not st_val: return "Non-Compliant"
         st_lower = str(st_val).lower().strip()
-        if "out of scope" in st_lower or "out_of_scope" in st_lower: return "Out of Scope"
+        if "out of scope" in st_lower or "out_of_scope" in st_lower or "false positive" in st_lower or "false_positive" in st_lower:
+            return "False Positive"
         if "non-compliant" in st_lower or "non_compliant" in st_lower: return "Non-Compliant"
-        if "partially compliant" in st_lower or "partial" in st_lower: return "Partially Compliant"
+        if "partially compliant" in st_lower or "partial" in st_lower or "human review" in st_lower:
+            return "Non-Compliant"
         if "compliant" in st_lower: return "Compliant"
-        if "human review" in st_lower: return "Human Review"
         return "Non-Compliant"
             
     uc_metadata = {c["use_case"]: c for c in _UC}
@@ -876,12 +877,10 @@ def generate_copyable_markdown_report(findings, file_names_list, selected_scopes
         status_val = _get_norm_status(f)
         status_emoji_map = {
             "Compliant": "✅ Compliant",
-            "Partially Compliant": "⚠️ Partially Compliant",
             "Non-Compliant": "❌ Non-Compliant",
-            "Out of Scope": "➖ Out of Scope",
-            "Human Review": "🔍 Human Review"
+            "False Positive": "⚪ False Positive"
         }
-        status_str = status_emoji_map.get(status_val, "➖ Out of Scope")
+        status_str = status_emoji_map.get(status_val, "⚪ False Positive")
         
         ctrl_id_parts = f.get("control_id", "").split(" ", 1)
         ctrl_id = ctrl_id_parts[0] if len(ctrl_id_parts) > 0 else ""
@@ -5600,9 +5599,9 @@ with _main_wrap:
                                             placeholder="e.g. Access Control Policy Review"
                                         )
                                     with col_comp_status:
-                                        comp_opts = ["Non-Compliant", "Partially Compliant", "Compliant"]
+                                        comp_opts = ["Non-Compliant", "Compliant", "False Positive"]
                                         curr_status = f_data.get("status", "Compliant") if f_data else "Compliant"
-                                        comp_idx = comp_opts.index(curr_status) if curr_status in comp_opts else 2
+                                        comp_idx = comp_opts.index(curr_status) if curr_status in comp_opts else 1
                                         new_comp = st.selectbox(
                                             "Compliance Status",
                                             comp_opts,
@@ -5845,7 +5844,7 @@ with _main_wrap:
                         emj   = EMJ.get(s, "🟡")
                     display_status = f.get("display_status", audit_status)  # Open / Accepted / Dismissed (workflow state)
                     editing = f.get("editing", False)
-                    status_color_map = {"Open": "#3b82f6", "Accepted": "#22c55e", "Non-Compliant": "#ef4444", "Partially Compliant": "#f97316"}
+                    status_color_map = {"Open": "#3b82f6", "Accepted": "#22c55e", "Non-Compliant": "#ef4444", "False Positive": "#94a3b8"}
                     status_color = status_color_map.get(display_status, "#3b82f6")
 
                     # Derive the auditor workflow status (Open/Accepted)
@@ -5866,7 +5865,7 @@ with _main_wrap:
                     }
                     ev_color = ev_color_map.get(ev_found, "#94a3b8")
 
-                    compliance_badge_color = {"Non-Compliant": "#ef4444", "Partially Compliant": "#f97316", "Compliant": "#22c55e"}.get(audit_status, "#3b82f6")
+                    compliance_badge_color = {"Non-Compliant": "#ef4444", "False Positive": "#94a3b8", "Compliant": "#22c55e"}.get(audit_status, "#3b82f6")
                     if f.get("hallucination_check") == "GROUNDED_WITH_OCR_WARNING":
                         compliance_badge_color = "#eab308"
                 
@@ -5888,7 +5887,7 @@ with _main_wrap:
                                     placeholder="e.g. Access Control Policy Review"
                                 )
                             with col_comp_status:
-                                comp_opts = ["Non-Compliant", "Partially Compliant", "Compliant"]
+                                comp_opts = ["Non-Compliant", "Compliant", "False Positive"]
                                 comp_idx = comp_opts.index(audit_status) if audit_status in comp_opts else 0
                                 new_comp = st.selectbox(
                                     "Compliance Status",

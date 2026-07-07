@@ -217,15 +217,8 @@ def check_consistency(finding):
             finding["evidence_snippet"] = ""
             finding["evidence_quote"] = "NOT_FOUND"
 
-    # FIX 6 — Reverse check: NON_COMPLIANT with a grounded evidence quote is a contradiction.
-    # If the evidence was verified (GROUNDED or GROUNDED_WITH_OCR_WARNING), the control
-    # at minimum demonstrates partial compliance — upgrade to PARTIAL_COMPLIANT.
-    elif status == "NON_COMPLIANT":
-        if evidence and evidence != "NOT_FOUND" and hallucination_check in ("GROUNDED", "GROUNDED_WITH_OCR_WARNING"):
-            finding["status"] = "PARTIAL_COMPLIANT"
-            finding["consistency_fix"] = True
-            print(f"[VALIDATOR] Reverse consistency fix: NON_COMPLIANT with grounded evidence upgraded to PARTIAL_COMPLIANT.", flush=True)
-
+    # Reverse consistency check is disabled because we only keep COMPLIANT and NON_COMPLIANT.
+    # Controls with gaps remain strictly NON_COMPLIANT.
     return finding
 
 
@@ -416,8 +409,8 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         # any keyword evidence related to this control. If it does, the LLM
         # simply failed to quote it — so PARTIAL_COMPLIANT is more accurate.
         if potential_evidence_exists(control_id, document_text):
-            print(f"[VALIDATOR DEBUG] [PARTIAL] {control_id}: LLM returned NOT_FOUND but keyword evidence exists in document. Upgrading to PARTIAL_COMPLIANT.", flush=True)
-            finding["status"] = "PARTIAL_COMPLIANT"
+            print(f"[VALIDATOR DEBUG] [NON_COMPLIANT] {control_id}: LLM returned NOT_FOUND but keyword evidence exists in document. Marking as NON_COMPLIANT and flagging for review.", flush=True)
+            finding["status"] = "NON_COMPLIANT"
             finding["hallucination_check"] = "NOT_FOUND"
             finding["requires_human_review"] = True
             finding["requires_review"] = True
@@ -576,11 +569,11 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         is_compliant_claim = (raw_status_upper == "COMPLIANT" or raw_status_upper == "PARTIAL"
                               or raw_status_upper == "PARTIALLY_COMPLIANT")
         if is_compliant_claim:
-            finding["status"] = "PARTIAL_COMPLIANT"
+            finding["status"] = "NON_COMPLIANT"
             finding["requires_human_review"] = True
             finding["requires_review"] = True
-            finding["validator_note"] = "Grounding failed but model claimed compliant/partial — downgraded to PARTIAL_COMPLIANT"
-            finding["review_note"] = "Grounding validation failed: cited evidence quote was not found in policy document text. Downgraded to PARTIAL_COMPLIANT pending manual verification."
+            finding["validator_note"] = "Grounding failed but model claimed compliant/partial — downgraded to NON_COMPLIANT"
+            finding["review_note"] = "Grounding validation failed: cited evidence quote was not found in policy document text. Downgraded to NON_COMPLIANT pending manual verification."
         else:
             finding["status"] = "NON_COMPLIANT"
             finding["validator_note"] = "Evidence quote not found in document text — rejected"
@@ -621,15 +614,16 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             else:
                 finding["review_note"] = hal_note
 
-    # Get & Normalize status — only three valid outputs: COMPLIANT, PARTIAL_COMPLIANT, NON_COMPLIANT
+    # Get & Normalize status — only three valid outputs: COMPLIANT, NON_COMPLIANT, FALSE_POSITIVE
     status = finding.get("status", "NON_COMPLIANT").upper()
-    if "HUMAN_REVIEW" in status or "HUMAN REVIEW" in status:
-        # Map HUMAN_REVIEW -> PARTIAL_COMPLIANT (uncertain / needs verification)
-        finding["status"] = "PARTIAL_COMPLIANT"
+    if "FALSE_POSITIVE" in status or "FALSE POSITIVE" in status or "OUT_OF_SCOPE" in status or "OUT OF SCOPE" in status:
+        finding["status"] = "FALSE_POSITIVE"
+    elif "HUMAN_REVIEW" in status or "HUMAN REVIEW" in status:
+        finding["status"] = "NON_COMPLIANT"
     elif "NON_COMPLIANT" in status or "NON-COMPLIANT" in status:
         finding["status"] = "NON_COMPLIANT"
     elif "PARTIALLY" in status or "PARTIAL" in status:
-        finding["status"] = "PARTIAL_COMPLIANT"
+        finding["status"] = "NON_COMPLIANT"
     elif "COMPLIANT" in status:
         finding["status"] = "COMPLIANT"
     else:
