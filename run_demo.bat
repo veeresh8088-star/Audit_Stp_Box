@@ -4,21 +4,35 @@ echo ==========================================
 echo    AICyberAuditBox
 echo ==========================================
 
-echo.
-echo [1/3] Checking Ollama (AI Engine)...
-python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 11434))" >nul 2>&1
-if %errorlevel% equ 0 goto :ollama_active
+if "%LLM_BACKEND%"=="llama.cpp" (
+    echo [1/3] Checking llama.cpp (AI Engine)...
+    python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 11434))" >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [ERROR] llama.cpp LLM server is not running on port 11434!
+        exit /b 1
+    )
+    python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 11435))" >nul 2>&1
+    if %errorlevel% neq 0 (
+        echo [ERROR] llama.cpp Embedding server is not running on port 11435!
+        exit /b 1
+    )
+    echo [v] OK: llama.cpp backend is active.
+) else (
+    echo [1/3] Checking Ollama (AI Engine)...
+    python -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('127.0.0.1', 11434))" >nul 2>&1
+    if %errorlevel% equ 0 goto :ollama_active
 
-echo [i] NOTE: Ollama is not running. Starting it automatically...
-start "" /b "%localappdata%\Programs\Ollama\ollama.exe" serve
-echo Waiting for Ollama to initialize...
-timeout /t 6 >nul
-goto :ollama_done
+    echo [i] NOTE: Ollama is not running. Starting it automatically...
+    start "" /b "%localappdata%\Programs\Ollama\ollama.exe" serve
+    echo Waiting for Ollama to initialize...
+    timeout /t 6 >nul
+    goto :ollama_done
 
-:ollama_active
-echo [v] OK: Ollama is active.
+    :ollama_active
+    echo [v] OK: Ollama is active.
 
-:ollama_done
+    :ollama_done
+)
 
 echo.
 echo [2/3] Checking Database (ShaktiDB)...
