@@ -15,7 +15,7 @@ start "Llama LLM Server" /min "C:\Users\HP\Downloads\llama,,ccppp mode\llama-ser
 
 echo.
 echo [3/4] Starting llama-server Embeddings on port 11435 (Nomic Embed)...
-start "Llama Embedding Server" /min "C:\Users\HP\Downloads\llama,,ccppp mode\llama-server.exe" --port 11435 -m "C:\Users\HP\.ollama\models\blobs\sha256-970aa74c0a90ef7482477cf803618e776e173c007bf957f635f1015bfcfef0e6" -t 4 --embedding
+start "Llama Embedding Server" /min "C:\Users\HP\Downloads\llama,,ccppp mode\llama-server.exe" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t 4 --embedding
 
 echo.
 echo Waiting 5 seconds for backend servers to initialize...
