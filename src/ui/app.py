@@ -2418,10 +2418,10 @@ def scan_file_security(uploaded_file):
 def _resolve_ollama_model(model_choice):
     """Map UI model name to Ollama model identifier (restricted to selected models)."""
     MODEL_MAP = {
-        "Qwen 2.5 (7B) - High Performance Auditor/Reasoning":     "qwen2.5:7b",
-        "Gemma 2 (9B) - Advanced Reasoning":                      "gemma2:9b",
-        "Gemma 4 (4B) - Quick Auditor":                           "gemma4:e4b",
-        "Gemma 4 (12B) - Deep Auditor/Reasoning":                 "gemma4:12b",
+        "Gemma 4 (e4b)":                                          "gemma4:e4b",
+        "Qwen 2.5 (7B)":                                          "qwen2.5:7b",
+        "Gemma 2 (9B)":                                           "gemma2:9b",
+        "Gemma 4 (12B)":                                          "gemma4:12b",
     }
     # Exact match first
     if model_choice in MODEL_MAP:
@@ -4231,15 +4231,15 @@ with st.sidebar:
 
 
     if st.session_state.user_role in ("auditor", "auditee"):
-        ai_model = st.session_state.get("selected_ai_model", "Qwen 2.5 (7B) - High Performance Auditor/Reasoning")
+        ai_model = st.session_state.get("selected_ai_model", "Gemma 4 (e4b)")
     else:
         st.divider()
         st.markdown("<div class='section-title-wrapper'>AI Engine Setup</div>", unsafe_allow_html=True)
         ai_model = st.selectbox("Select Offline LLM (via Ollama)", [
-            "Qwen 2.5 (7B) - High Performance Auditor/Reasoning",
-            "Gemma 2 (9B) - Advanced Reasoning",
-            "Gemma 4 (4B) - Quick Auditor",
-            "Gemma 4 (12B) - Deep Auditor/Reasoning"
+            "Gemma 4 (e4b)",
+            "Qwen 2.5 (7B)",
+            "Gemma 2 (9B)",
+            "Gemma 4 (12B)"
         ], label_visibility="collapsed", index=0, key="selected_ai_model")
         st.divider()
 
@@ -4855,7 +4855,7 @@ if run or st.session_state.get("start_analysis_on_next_run"):
                 """, unsafe_allow_html=True)
             
             # Run detection
-            model_id = _resolve_ollama_model(st.session_state.get("selected_ai_model", "Qwen 2.5 (7B) - High Performance Auditor/Reasoning"))
+            model_id = _resolve_ollama_model(st.session_state.get("selected_ai_model", "Gemma 4 (e4b)"))
             context_str = st.session_state.get("context", "").strip()
             scope_ctx = st.session_state.get("scope_detection_context", context_str).strip()
             
