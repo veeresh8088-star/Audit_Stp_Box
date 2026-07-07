@@ -20,7 +20,7 @@ class AuditFindingSchema(BaseModel):
     Pydantic schema representing a structured compliance audit finding.
     Determines compliance status based solely on documented evidence and control coverage.
     """
-    status: Literal["COMPLIANT", "PARTIAL", "PARTIAL_COMPLIANT", "NON_COMPLIANT"] = Field(
+    status: Literal["COMPLIANT", "NON_COMPLIANT", "FALSE_POSITIVE"] = Field(
         description="The compliance status of the control based on the evidence."
     )
     severity: Literal["N/A", "Low", "Medium", "High", "Critical"] = Field(
@@ -50,7 +50,7 @@ class AuditFindingSchema(BaseModel):
     )
     missing_requirements: List[str] = Field(
         default=[],
-        description="Key requirements missing (required for PARTIAL/PARTIAL_COMPLIANT or NON_COMPLIANT, empty for COMPLIANT)."
+        description="Key requirements missing (required for NON_COMPLIANT, empty for COMPLIANT)."
     )
     recommendation: str = Field(
         default="",
@@ -65,26 +65,28 @@ class AuditFindingSchema(BaseModel):
     def enforce_compliance_rule_consistency(self) -> 'AuditFindingSchema':
         """
         Enforces strict compliance auditing consistency rules:
-        1. If status is COMPLIANT, severity must be N/A, and at least one evidence item must be present.
-        2. If status is PARTIAL or NON_COMPLIANT, severity cannot be N/A.
+        1. If status is COMPLIANT or FALSE_POSITIVE, severity must be N/A.
+        2. If status is COMPLIANT, at least one valid evidence quote must be present.
+        3. If status is NON_COMPLIANT, severity cannot be N/A.
         """
         status_val = self.status
         severity_val = self.severity
         evidence_list = self.evidence or []
 
-        # Rule 1: Compliant rules
-        if status_val == "COMPLIANT":
+        # Rule 1: Compliant / False Positive rules
+        if status_val in ("COMPLIANT", "FALSE_POSITIVE"):
             if severity_val != "N/A":
                 object.__setattr__(self, 'severity', 'N/A')
-            if not evidence_list:
-                raise ValueError("Compliance status cannot be set to 'COMPLIANT' if no evidence is found.")
-            # Ensure at least one evidence has a valid quote
-            has_valid_quote = any(e.excerpt and e.excerpt.strip() != "NOT_FOUND" for e in evidence_list)
-            if not has_valid_quote:
-                raise ValueError("Compliance status cannot be set to 'COMPLIANT' if no verbatim evidence quote was found in the evidence excerpts.")
+            if status_val == "COMPLIANT":
+                if not evidence_list:
+                    raise ValueError("Compliance status cannot be set to 'COMPLIANT' if no evidence is found.")
+                # Ensure at least one evidence has a valid quote
+                has_valid_quote = any(e.excerpt and e.excerpt.strip() != "NOT_FOUND" for e in evidence_list)
+                if not has_valid_quote:
+                    raise ValueError("Compliance status cannot be set to 'COMPLIANT' if no verbatim evidence quote was found in the evidence excerpts.")
 
-        # Rule 2: Gaps rules (Non-Compliant or Partial)
-        elif status_val in ("NON_COMPLIANT", "PARTIAL", "PARTIAL_COMPLIANT"):
+        # Rule 2: Gaps rules (Non-Compliant)
+        elif status_val == "NON_COMPLIANT":
             if severity_val == "N/A":
                 object.__setattr__(self, 'severity', 'Medium')
             if not self.business_impact or self.business_impact.strip() in ("", "NOT_FOUND"):

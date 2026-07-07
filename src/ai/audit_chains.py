@@ -20,39 +20,15 @@ Evaluate compliance only from the provided document evidence. Never assume contr
 
 COMPLIANCE DECISION LOGIC:
 
-COMPLIANT:
-Return COMPLIANT only if the provided evidence explicitly demonstrates that the control requirements are fully satisfied.
-Requirements:
-* Strong documentary evidence.
-* No major control requirement is missing.
-* Evidence is sufficient to conclude implementation.
+Determine compliance status based on this two-step process:
 
-PARTIAL_COMPLIANT:
-Return PARTIAL_COMPLIANT when:
-* Some control objectives are demonstrated.
-* Evidence supports only part of the ISO control.
-* Important control requirements are not evidenced.
-* The document demonstrates implementation of some security practices but not enough for full compliance.
+1. APPLICABILITY CHECK
+Evaluate whether the control requirement is applicable or viable to the scope of this document.
+* If the control is NOT applicable (e.g. mobile device security controls when auditing a document that only covers physical server rooms), you MUST return FALSE_POSITIVE.
 
-Example:
-Evidence:
-- MFA login screen
-- AWS IAM authentication
-Missing:
-- Password policy
-- Password complexity
-- Password rotation
-- Account lifecycle
-- Lockout configuration
-Result: PARTIAL_COMPLIANT
-Reason: Evidence demonstrates MFA implementation but does not provide sufficient documentation to verify all Secure Authentication requirements.
-
-NON_COMPLIANT:
-Return NON_COMPLIANT only when:
-* No relevant evidence exists OR
-* Evidence clearly demonstrates failure of the control OR
-* Evidence contradicts ISO requirements.
-Do NOT return NON_COMPLIANT merely because some requirements are missing if meaningful positive evidence exists.
+2. EVIDENCE CHECK (only if the control applies)
+* COMPLIANT: The control applies, and the document contains evidence demonstrating that all requirements of the control are fully satisfied.
+* NON_COMPLIANT: The control applies, but the required evidence is either missing entirely or only partially present (e.g., if there is evidence of MFA but password policy is missing).
 
 AUDITOR REASONING RULES:
 The auditor reasoning must explain:
@@ -185,7 +161,7 @@ Control Objective & Illustrative Evidence Examples (Do NOT treat as a mandatory 
 {feedback_section}
 
 You MUST respond with findings wrapped in XML tags matching this format:
-<status>COMPLIANT | PARTIAL_COMPLIANT | NON_COMPLIANT</status>
+<status>COMPLIANT | NON_COMPLIANT | FALSE_POSITIVE</status>
 <evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
 <control_coverage>percentage_integer</control_coverage>
 <evidence_count>integer</evidence_count>
@@ -221,39 +197,15 @@ Evaluate compliance only from the provided document evidence. Never assume contr
 
 COMPLIANCE DECISION LOGIC:
 
-COMPLIANT:
-Return COMPLIANT only if the provided evidence explicitly demonstrates that the control requirements are fully satisfied.
-Requirements:
-* Strong documentary evidence.
-* No major control requirement is missing.
-* Evidence is sufficient to conclude implementation.
+Determine compliance status based on this two-step process:
 
-PARTIAL_COMPLIANT:
-Return PARTIAL_COMPLIANT when:
-* Some control objectives are demonstrated.
-* Evidence supports only part of the ISO control.
-* Important control requirements are not evidenced.
-* The document demonstrates implementation of some security practices but not enough for full compliance.
+1. APPLICABILITY CHECK
+Evaluate whether the control requirement is applicable or viable to the scope of this document.
+* If the control is NOT applicable (e.g. mobile device security controls when auditing a document that only covers physical server rooms), you MUST return FALSE_POSITIVE.
 
-Example:
-Evidence:
-- MFA login screen
-- AWS IAM authentication
-Missing:
-- Password policy
-- Password complexity
-- Password rotation
-- Account lifecycle
-- Lockout configuration
-Result: PARTIAL_COMPLIANT
-Reason: Evidence demonstrates MFA implementation but does not provide sufficient documentation to verify all Secure Authentication requirements.
-
-NON_COMPLIANT:
-Return NON_COMPLIANT only when:
-* No relevant evidence exists OR
-* Evidence clearly demonstrates failure of the control OR
-* Evidence contradicts ISO requirements.
-Do NOT return NON_COMPLIANT merely because some requirements are missing if meaningful positive evidence exists.
+2. EVIDENCE CHECK (only if the control applies)
+* COMPLIANT: The control applies, and the document contains evidence demonstrating that all requirements of the control are fully satisfied.
+* NON_COMPLIANT: The control applies, but the required evidence is either missing entirely or only partially present (e.g., if there is evidence of MFA but password policy is missing).
 
 AUDITOR REASONING RULES:
 The auditor reasoning must explain:
@@ -387,7 +339,7 @@ CRITIQUE & CORRECT
 3. Generate a refined, compliant finding that satisfies all compliance rules and represents the ground truth.
 
 You MUST respond with findings wrapped in XML tags matching this format:
-<status>COMPLIANT | PARTIAL_COMPLIANT | NON_COMPLIANT</status>
+<status>COMPLIANT | NON_COMPLIANT | FALSE_POSITIVE</status>
 <evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
 <control_coverage>percentage_integer</control_coverage>
 <evidence_count>integer</evidence_count>
@@ -473,12 +425,12 @@ class NativeOllamaChain:
             
             # 1. status
             status = str(data.get("status", "NON_COMPLIANT")).upper().strip()
-            if status in ("COMPLIANT", "PARTIAL", "PARTIAL_COMPLIANT", "NON_COMPLIANT"):
+            if status in ("COMPLIANT", "NON_COMPLIANT", "FALSE_POSITIVE"):
                 normalized["status"] = status
-            elif "PARTIAL_COMPLIANT" in status or "PARTIALLY_COMPLIANT" in status or "PARTIALLY" in status:
-                normalized["status"] = "PARTIAL_COMPLIANT"
-            elif "PARTIAL" in status:
-                normalized["status"] = "PARTIAL"
+            elif "FALSE_POSITIVE" in status or "FALSE POSITIVE" in status or "OUT_OF_SCOPE" in status or "OUT OF SCOPE" in status:
+                normalized["status"] = "FALSE_POSITIVE"
+            elif "PARTIAL_COMPLIANT" in status or "PARTIALLY_COMPLIANT" in status or "PARTIALLY" in status or "PARTIAL" in status:
+                normalized["status"] = "NON_COMPLIANT"
             elif "NON_COMPLIANT" in status or "NON-COMPLIANT" in status or "FAIL" in status:
                 normalized["status"] = "NON_COMPLIANT"
             elif "COMPLIANT" in status or "PASS" in status:
@@ -487,8 +439,8 @@ class NativeOllamaChain:
                 normalized["status"] = "NON_COMPLIANT"
                 
             # 2. severity (DETERMINISTIC ASSIGNMENT: NOT FROM LLM PROMPT)
-            # If status is COMPLIANT, severity is always N/A
-            if normalized["status"] == "COMPLIANT":
+            # If status is COMPLIANT or FALSE_POSITIVE, severity is always N/A
+            if normalized["status"] in ("COMPLIANT", "FALSE_POSITIVE"):
                 normalized["severity"] = "N/A"
             else:
                 # Assign default control severity

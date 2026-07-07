@@ -3383,20 +3383,19 @@ Execution Time: {execution_time_per_control:.2f}s
 
 
 def _enrich_finding_metadata(r, db_chunks):
-    # 1. Map back to UI-expected statuses (only 3 valid outputs)
-    if r.get("status") in ("COMPLIANT",):
+    # 1. Map back to UI-expected statuses (only 3 final outputs: Compliant, Non-Compliant, Out of Scope)
+    status_val = str(r.get("status", "Non-Compliant")).upper().strip()
+    if status_val in ("COMPLIANT",):
         r["status"] = "Compliant"
-    elif r.get("status") in ("PARTIAL", "PARTIAL_COMPLIANT", "PARTIALLY_COMPLIANT", "HUMAN_REVIEW"):
-        r["status"] = "Partially Compliant"
+    elif status_val in ("FALSE_POSITIVE", "FALSE POSITIVE", "OUT_OF_SCOPE", "OUT OF SCOPE"):
+        r["status"] = "Out of Scope"
     else:
-        # Keep existing mapped values, otherwise default to Non-Compliant
-        if r.get("status") not in ("Compliant", "Partially Compliant", "Out of Scope"):
-            r["status"] = "Non-Compliant"
+        r["status"] = "Non-Compliant"
 
     # 2. Enrich with evidence_state (SUFFICIENT / INSUFFICIENT / NO_EVIDENCE)
     if r.get("status") == "Compliant":
         r["evidence_state"] = "SUFFICIENT"
-    elif r.get("status") == "Partially Compliant":
+    elif r.get("status") == "Non-Compliant" and r.get("evidence_quote", "NOT_FOUND") not in ("NOT_FOUND", "", None):
         r["evidence_state"] = "INSUFFICIENT"
     else:
         r["evidence_state"] = "NO_EVIDENCE"
@@ -3559,24 +3558,14 @@ def generate_ollama_reflection(context, file_names_list, selected_sls, draft_fin
                     if "reflection_hallucination_check" in result:
                         result["hallucination_check"] = result["reflection_hallucination_check"]
 
-                    raw_status = result.get("status", "Non-Compliant")
-                    if raw_status in ("Compliant", "Partially Compliant", "Non-Compliant", "Out of Scope", "Out Of Scope", "Partial", "PARTIAL", "COMPLIANT", "NON_COMPLIANT"):
-                        if raw_status in ("Partial", "PARTIAL"):
-                            raw_status = "Partially Compliant"
-                        elif raw_status in ("Out of Scope", "Out Of Scope"):
-                            raw_status = "Out of Scope"
-                        elif raw_status == "COMPLIANT":
-                            raw_status = "Compliant"
-                        elif raw_status == "NON_COMPLIANT":
-                            raw_status = "Non-Compliant"
+                    raw_status = str(result.get("status", "Non-Compliant")).strip()
+                    raw_status_upper = raw_status.upper()
+                    if raw_status_upper in ("COMPLIANT", "RESOLVED"):
+                        raw_status = "Compliant"
+                    elif raw_status_upper in ("FALSE_POSITIVE", "FALSE POSITIVE", "OUT_OF_SCOPE", "OUT OF SCOPE"):
+                        raw_status = "Out of Scope"
                     else:
-                        raw_status = "Compliant" if raw_status == "Resolved" else "Non-Compliant"
-                    # Evidence-found upgrade: if LLM returned Non-Compliant but DID find a real quote,
-                    # ISO 27001 audit rules require at least Partially Compliant (evidence exists but incomplete)
-                    _eq = result.get("evidence_quote", "NOT_FOUND") or "NOT_FOUND"
-                    if raw_status == "Non-Compliant" and _eq not in ("NOT_FOUND", "", None):
-                        raw_status = "Partially Compliant"
-                        print(f"[POST-PROCESS] Status upgraded Non-Compliant -> Partially Compliant (evidence found: '{_eq[:80]}...')")
+                        raw_status = "Non-Compliant"
                     result["status"] = raw_status
 
                     raw_sev = result.get("severity", "P3 Medium")
@@ -3747,23 +3736,15 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             result = None
 
         if result:
-            # Align status names to UI expected formats (3 statuses only)
-            raw_status = result.get("status", "Non-Compliant")
-            if raw_status == "COMPLIANT":
+            # Align status names to UI expected formats (3 final statuses only)
+            raw_status = str(result.get("status", "Non-Compliant")).strip()
+            raw_status_upper = raw_status.upper()
+            if raw_status_upper in ("COMPLIANT", "RESOLVED"):
                 raw_status = "Compliant"
-            elif raw_status in ("PARTIAL", "PARTIAL_COMPLIANT", "PARTIALLY_COMPLIANT", "HUMAN_REVIEW"):
-                raw_status = "Partially Compliant"
-            elif raw_status == "NON_COMPLIANT":
-                raw_status = "Non-Compliant"
-            elif raw_status == "Out of Scope":
+            elif raw_status_upper in ("FALSE_POSITIVE", "FALSE POSITIVE", "OUT_OF_SCOPE", "OUT OF SCOPE"):
                 raw_status = "Out of Scope"
             else:
                 raw_status = "Non-Compliant"
-
-            _eq = result.get("evidence_quote", "NOT_FOUND") or "NOT_FOUND"
-            if raw_status == "Non-Compliant" and _eq not in ("NOT_FOUND", "", None):
-                raw_status = "Partially Compliant"
-
             result["status"] = raw_status
             result["control_id"] = c["control"]
             result["control"] = c["label"]

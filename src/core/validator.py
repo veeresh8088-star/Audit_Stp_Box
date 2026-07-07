@@ -201,13 +201,11 @@ def apply_confidence_gate(finding):
 
 def check_consistency(finding):
     """
-    Auto-corrects status inconsistencies in both directions:
+    Auto-corrects status inconsistencies:
     - COMPLIANT with no evidence → NON_COMPLIANT
-    - NON_COMPLIANT with grounded evidence → PARTIAL_COMPLIANT (Fix 6)
     """
     status = finding.get("status", "NON_COMPLIANT")
     evidence = finding.get("evidence_quote") or "NOT_FOUND"
-    hallucination_check = finding.get("hallucination_check", "")
 
     # Forward check: COMPLIANT must have grounded evidence
     if status == "COMPLIANT":
@@ -217,8 +215,6 @@ def check_consistency(finding):
             finding["evidence_snippet"] = ""
             finding["evidence_quote"] = "NOT_FOUND"
 
-    # Reverse consistency check is disabled because we only keep COMPLIANT and NON_COMPLIANT.
-    # Controls with gaps remain strictly NON_COMPLIANT.
     return finding
 
 
@@ -405,26 +401,28 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     finding["chunk_id"] = None
     
     if evidence_clean == "NOT_FOUND":
-        # FIX 1: Before forcing NON_COMPLIANT, check if the document contains
-        # any keyword evidence related to this control. If it does, the LLM
-        # simply failed to quote it — so PARTIAL_COMPLIANT is more accurate.
+        # Smart NOT_FOUND: check if document contains any keyword evidence related to this control.
         if potential_evidence_exists(control_id, document_text):
-            print(f"[VALIDATOR DEBUG] [NON_COMPLIANT] {control_id}: LLM returned NOT_FOUND but keyword evidence exists in document. Marking as NON_COMPLIANT and flagging for review.", flush=True)
+            print(f"[VALIDATOR DEBUG] [NON_COMPLIANT] {control_id}: LLM returned NOT_FOUND but keyword evidence exists. Marking as NON_COMPLIANT and flagging for review.", flush=True)
             finding["status"] = "NON_COMPLIANT"
             finding["hallucination_check"] = "NOT_FOUND"
             finding["requires_human_review"] = True
             finding["requires_review"] = True
-            finding["validator_note"] = "LLM did not cite evidence, but relevant text was found in the document. Human verification required."
+            finding["validator_note"] = "LLM did not cite evidence, but relevant keywords were found in the document. Human verification required."
             finding["review_note"] = "LLM returned NOT_FOUND for evidence, but keyword-based search found potentially relevant content in the document. Verify manually whether the control is satisfied."
             finding["finding"] = f"Evidence for {control_id} may exist in the document but was not cited by the auditor. Manual verification required."
             finding["severity"] = "P3 Medium"
         else:
-            print(f"[VALIDATOR DEBUG] [FAIL] {control_id}: LLM returned NOT_FOUND evidence and no keywords found. Setting NON_COMPLIANT.", flush=True)
-            finding["status"] = "NON_COMPLIANT"
+            print(f"[VALIDATOR DEBUG] [FALSE_POSITIVE] {control_id}: LLM returned NOT_FOUND evidence and no keywords found. Setting FALSE_POSITIVE.", flush=True)
+            finding["status"] = "FALSE_POSITIVE"
             finding["hallucination_check"] = "NOT_FOUND"
-            finding["validator_note"] = "No evidence provided and no relevant keywords found in document."
-            finding["finding"] = f"Control requirements for {control_id} are completely missing from the policy document."
-            finding["severity"] = "P3 Medium"
+            finding["requires_human_review"] = True
+            finding["requires_review"] = True
+            finding["confidence"] = 1
+            finding["validator_note"] = "Heuristic-based False Positive (no keywords)"
+            finding["review_note"] = "Heuristic-based Out of Scope: No keywords or evidence found in the document. Manually verify if this control is indeed inapplicable."
+            finding["finding"] = f"Control requirements for {control_id} appear to be inapplicable to this policy document context."
+            finding["severity"] = "N/A"
         finding = apply_confidence_gate(finding)
         finding = check_consistency(finding)
         return finding
@@ -641,13 +639,19 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         print(f"[VALIDATOR DEBUG] [WARN] {control_id}: Status changed by Confidence/Consistency gate: {pre_gate_status} -> {post_gate_status}", flush=True)
     print(f"[VALIDATOR DEBUG] FINAL: {control_id} -> Status={finding.get('status')}, Evidence={'YES' if finding.get('evidence_quote') not in ('', 'NOT_FOUND', None) else 'NO'}", flush=True)
     
-    # FIX 2: Ensure recommendation is populated and appropriate for the compliance status.
-    # COMPLIANT controls must never receive "Establish procedures" recommendations.
+    # Ensure severity is N/A for COMPLIANT and FALSE_POSITIVE
     current_status = finding.get("status", "NON_COMPLIANT")
-    if not finding.get("recommendation"):
+    if current_status in ("COMPLIANT", "FALSE_POSITIVE"):
+        finding["severity"] = "N/A"
+
+    # FIX 2: Ensure recommendation is populated and appropriate for the compliance status.
+    if current_status in ("COMPLIANT", "FALSE_POSITIVE"):
         if current_status == "COMPLIANT":
             finding["recommendation"] = "No action required. Continue to maintain current procedures and ensure periodic review of compliance evidence."
         else:
+            finding["recommendation"] = "No recommendation required. This control has been identified as not applicable to the audited document scope."
+    else:
+        if not finding.get("recommendation") or finding.get("recommendation", "").lower().startswith("establish"):
             from src.core.controls_data import USE_CASES
             rec = ""
             for uc in USE_CASES:
@@ -662,9 +666,6 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             if not rec:
                 rec = f"Establish, document, and implement procedures to satisfy {control_id}."
             finding["recommendation"] = rec
-    elif current_status == "COMPLIANT" and finding.get("recommendation", "").lower().startswith("establish"):
-        # FIX 2b: Override incorrect "Establish" recommendation if control is already COMPLIANT
-        finding["recommendation"] = "No action required. Continue to maintain current procedures and ensure periodic review of compliance evidence."
 
     return finding
 

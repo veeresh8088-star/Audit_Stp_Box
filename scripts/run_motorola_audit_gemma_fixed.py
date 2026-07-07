@@ -142,14 +142,14 @@ def generate_pdf(results_quick, results_deep, execution_stats):
     y0 = 134
 
     deep_statuses = [r.get("status") for r in results_deep]
-    compliant_count     = sum(1 for s in deep_statuses if s == "COMPLIANT")
-    partial_count       = sum(1 for s in deep_statuses if s in ("PARTIAL", "PARTIAL_COMPLIANT"))
-    non_compliant_count = sum(1 for s in deep_statuses if s == "NON_COMPLIANT")
+    compliant_count      = sum(1 for s in deep_statuses if s == "COMPLIANT")
+    non_compliant_count  = sum(1 for s in deep_statuses if s == "NON_COMPLIANT")
+    false_positive_count = sum(1 for s in deep_statuses if s == "FALSE_POSITIVE")
 
     metrics = [
         ("Document Evaluated",  "Motorola Solutions Global IRP v2.1"),
         ("Controls Audited",    "ISO 27001: 5.24, 5.25, 5.26, 5.27, 5.28"),
-        ("Compliance Status",   f"{compliant_count} Compliant, {partial_count} Partial, {non_compliant_count} Non-Compliant"),
+        ("Compliance Status",   f"{compliant_count} Compliant, {non_compliant_count} Non-Compliant, {false_positive_count} Out of Scope"),
         ("Quick Audit Time",    f"{execution_stats['quick_total']:.1f} seconds"),
         ("Deep Audit Time",     f"{execution_stats['deep_total']:.1f} seconds"),
         ("AI Model Backend",    "Gemma 4 (4B) via llama-server.exe [Fixed v2]"),
@@ -207,9 +207,8 @@ def generate_pdf(results_quick, results_deep, execution_stats):
 
     status_colors = {
         "COMPLIANT":         ACCENT_GREEN,
-        "PARTIAL":           ACCENT_AMBER,
-        "PARTIAL_COMPLIANT": ACCENT_AMBER,
         "NON_COMPLIANT":     ACCENT_RED,
+        "FALSE_POSITIVE":    (100, 116, 139),  # Slate/Gray for Out of Scope / False Positive
     }
 
     for i in range(len(results_quick)):
