@@ -11,7 +11,7 @@ taskkill /F /IM llama-server.exe /T >nul 2>&1
 
 echo.
 echo [2/4] Starting llama-server LLM on port 11434 (Qwen 2.5 7B)...
-start "Llama LLM Server" /min "C:\Users\HP\Downloads\llama,,ccppp mode\llama-server.exe" --port 11434 -m "C:\Users\HP\.ollama\models\blobs\sha256-2bada8a7450677000f678be90653b85d364de7db25eb5ea54136ada5f3933730" -t 8 -b 512 --flash-attn on
+start "Llama LLM Server" /min "C:\Users\HP\Downloads\llama,,ccppp mode\llama-server.exe" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -t 8 -b 512 --flash-attn on
 
 echo.
 echo [3/4] Starting llama-server Embeddings on port 11435 (Nomic Embed)...
