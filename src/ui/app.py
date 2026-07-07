@@ -5365,7 +5365,7 @@ with _main_wrap:
                         unreviewed_controls.add(ctrl)
 
                 # Unrepresented in-scope controls
-                dismissed_ctrl_ids = {df.get("control_id") or df.get("control") for df in findings if df.get("status") in ("Dismissed", "Rejected")}
+                dismissed_ctrl_ids = {df.get("control_id") or df.get("control") for df in findings if df.get("status") in ("Dismissed", "Rejected", "Out of Scope", "Out Of Scope", "False Positive")}
                 for ctrl in checked_control_ids:
                     if ctrl not in resolved_list and ctrl not in {f.get("control_id") or f.get("control") for f in active_findings}:
                         if ctrl not in dismissed_ctrl_ids:
