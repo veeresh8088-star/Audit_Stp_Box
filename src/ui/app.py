@@ -3745,6 +3745,7 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
                 raw_status = "Out of Scope"
             else:
                 raw_status = "Non-Compliant"
+            _eq = result.get("evidence_quote", "NOT_FOUND") or "NOT_FOUND"
             result["status"] = raw_status
             result["control_id"] = c["control"]
             result["control"] = c["label"]
