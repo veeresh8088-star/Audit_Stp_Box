@@ -151,7 +151,7 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
             mode_prefix = "Quick audit" if state.get("audit_mode") == "Quick" else "Self-correction"
             print(f"[LANGGRAPH] {mode_prefix} failed generation for control {state['control_id']}. Routing to fallback.", flush=True)
             fallback = {
-                "status": "PARTIAL_COMPLIANT",
+                "status": "NON_COMPLIANT",
                 "requires_human_review": True,
                 "requires_review": True,
                 "review_note": f"Failed generation: {state['validation_error']}",
@@ -229,10 +229,10 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
             
         if state["retry_count"] >= 2:
             print(f"[LANGGRAPH VALIDATOR] Hard retry limit reached for control {state['control_id']}. Routing to final save.", flush=True)
-            validated_finding["status"] = "PARTIAL_COMPLIANT"
+            validated_finding["status"] = "NON_COMPLIANT"
             validated_finding["requires_human_review"] = True
             validated_finding["requires_review"] = True
-            validated_finding["review_note"] = f"Failed self-correction (downgraded to PARTIAL_COMPLIANT): {error_msg}"
+            validated_finding["review_note"] = f"Failed self-correction (downgraded to NON_COMPLIANT): {error_msg}"
             return {
                 "validation_error": None,
                 "final_finding": validated_finding
