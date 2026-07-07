@@ -5229,12 +5229,12 @@ with _main_wrap:
         tab_chat, tab_report, tab_docs, tab_submitted, tab_records, tab_logs = None, None, None, None, None, None
     elif st.session_state.user_role == "admin":
         tab_chat, tab_report, tab_records, tab_logs = st.tabs([
-            "AI Assistant", "Audit Report", "Audit Records", "Admin Logs"
+            "AI Assistant", "Audit Records", "Audit Report", "Admin Logs"
         ])
         tab_docs, tab_submitted, tab_upload = None, None, None
     else:
-        tab_chat, tab_report, tab_docs, tab_submitted, tab_records = st.tabs([
-            "AI Assistant", "Audit Report", "Audit Documents", "Submitted Reports", "Audit Records"
+        tab_chat, tab_docs, tab_report, tab_records, tab_submitted = st.tabs([
+            "AI Assistant", "Auditee Documents", "Audit Records", "Audit Report", "Submitted Reports"
         ])
         tab_upload, tab_logs = None, None
 

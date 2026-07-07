@@ -86,8 +86,18 @@ def save_document_chunks(filename, text):
 
             # Fallback split into double newlines chunks (paragraphs)
             # Minimum 8 words (more reliable than 40 chars for ISO policy text)
-            MAX_CHUNK_CHARS = 1200  # hard cap — prevents a single PDF page from eating the token budget
-            paragraphs = [p.strip() for p in text.split('\n\n') if len(p.strip().split()) >= 8]
+            MAX_CHUNK_CHARS = 2000  # raised from 1200 to prevent silent truncation of document sections
+            raw_paragraphs = [p.strip() for p in text.split('\n\n') if len(p.strip().split()) >= 8]
+            
+            # Prevent silent truncation: if any paragraph is longer than 800 characters,
+            # split it by single newlines so it fits cleanly in sliding windows.
+            paragraphs = []
+            for rp in raw_paragraphs:
+                if len(rp) > 800:
+                    sub_paras = [sp.strip() for sp in rp.split('\n') if len(sp.strip().split()) >= 4]
+                    paragraphs.extend(sub_paras)
+                else:
+                    paragraphs.append(rp)
             
             # Fallback to single newline paragraphs if double newline yields no results,
             # or if the split resulted in too few, very long blocks (often happens with pdfplumber text).
@@ -230,6 +240,15 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     else:
         TARGET_CONTEXT_TOKENS = 2500 if is_12b else 4000
         HARD_MAX_CONTEXT_TOKENS = 3000 if is_12b else 5000
+
+    # RAG BYPASS: If the total document text is small (< 35KB, which is ~8,000 tokens),
+    # bypass chunk retrieval entirely and pass the full document text as context.
+    # This guarantees 100% information coverage and prevents chunk-slicing errors.
+    if context and len(context) < 35000:
+        print(f"[RAG BYPASS] Document text is small ({len(context)} chars). Bypassing RAG chunking and passing full text to ensure 100% accuracy.", flush=True)
+        src_file = file_names_list[0] if file_names_list else "Policy Document"
+        metas = [{"source_file": src_file, "chunk_id": "full_document_bypass"}]
+        return context, 1, metas
 
     # 1. Ensure chunks exist for ALL uploaded files
     chunks_count = 0

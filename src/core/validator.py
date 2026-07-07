@@ -201,19 +201,92 @@ def apply_confidence_gate(finding):
 
 def check_consistency(finding):
     """
-    Auto-corrects Compliant status to Non-Compliant if evidence is missing.
+    Auto-corrects status inconsistencies in both directions:
+    - COMPLIANT with no evidence → NON_COMPLIANT
+    - NON_COMPLIANT with grounded evidence → PARTIAL_COMPLIANT (Fix 6)
     """
     status = finding.get("status", "NON_COMPLIANT")
     evidence = finding.get("evidence_quote") or "NOT_FOUND"
-    
+    hallucination_check = finding.get("hallucination_check", "")
+
+    # Forward check: COMPLIANT must have grounded evidence
     if status == "COMPLIANT":
         if not evidence or evidence == "NOT_FOUND":
             finding["status"] = "NON_COMPLIANT"
             finding["consistency_fix"] = True
             finding["evidence_snippet"] = ""
             finding["evidence_quote"] = "NOT_FOUND"
-            
+
+    # FIX 6 — Reverse check: NON_COMPLIANT with a grounded evidence quote is a contradiction.
+    # If the evidence was verified (GROUNDED or GROUNDED_WITH_OCR_WARNING), the control
+    # at minimum demonstrates partial compliance — upgrade to PARTIAL_COMPLIANT.
+    elif status == "NON_COMPLIANT":
+        if evidence and evidence != "NOT_FOUND" and hallucination_check in ("GROUNDED", "GROUNDED_WITH_OCR_WARNING"):
+            finding["status"] = "PARTIAL_COMPLIANT"
+            finding["consistency_fix"] = True
+            print(f"[VALIDATOR] Reverse consistency fix: NON_COMPLIANT with grounded evidence upgraded to PARTIAL_COMPLIANT.", flush=True)
+
     return finding
+
+
+def check_reasoning_hallucination(reasoning, document_text, threshold=0.4):
+    """
+    FIX Q3: Checks whether the auditor's reasoning text contains claims that
+    are not grounded in the actual document. Flags fabricated claims.
+
+    Returns a dict:
+      - "clean": bool — True if reasoning appears well-grounded
+      - "flagged_phrases": list of suspicious phrases not found in doc
+    """
+    if not reasoning or not document_text:
+        return {"clean": True, "flagged_phrases": []}
+
+    import re
+    doc_lower = document_text.lower()
+
+    # Split reasoning into sentences and check each one
+    sentences = re.split(r'(?<=[.!?])\s+', reasoning.strip())
+    flagged = []
+
+    # Phrases that are suspicious if not found in document
+    GENERIC_SAFE_PHRASES = [
+        "iso 27001", "control", "compliance", "evidence", "document",
+        "policy", "procedure", "requirement", "not found", "not evidenced",
+        "does not contain", "no evidence", "gap", "missing", "incident",
+        "security", "organization", "auditor", "finding"
+    ]
+
+    for sentence in sentences:
+        s = sentence.strip().lower()
+        if len(s) < 20:
+            continue
+        # Extract key noun phrases (3+ word spans)
+        words = s.split()
+        if len(words) < 4:
+            continue
+        # Check if sentence makes a positive factual claim ("mentions", "contains", "outlines", "states")
+        claim_verbs = ["mentions", "contains", "outlines", "states", "describes", "includes", "provides", "defines", "details"]
+        has_claim = any(v in s for v in claim_verbs)
+        if not has_claim:
+            continue
+        # If it makes a factual claim, check that at least one key phrase from the sentence appears in the document
+        is_safe = any(phrase in s for phrase in GENERIC_SAFE_PHRASES)
+        if is_safe:
+            continue
+        # Extract 3-word windows and check in document
+        found_in_doc = False
+        for i in range(len(words) - 2):
+            window = " ".join(words[i:i+3])
+            if window in doc_lower:
+                found_in_doc = True
+                break
+        if not found_in_doc:
+            flagged.append(sentence.strip())
+
+    return {
+        "clean": len(flagged) == 0,
+        "flagged_phrases": flagged
+    }
 
 
 def calculate_real_accuracy(findings):
@@ -339,12 +412,26 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     finding["chunk_id"] = None
     
     if evidence_clean == "NOT_FOUND":
-        print(f"[VALIDATOR DEBUG] [FAIL] {control_id}: LLM returned NOT_FOUND evidence. Setting Non-Compliant.", flush=True)
-        finding["status"] = "NON_COMPLIANT"
-        finding["hallucination_check"] = "NOT_FOUND"
-        finding["validator_note"] = "No evidence provided."
-        finding["finding"] = f"Control requirements for {control_id} are completely missing from the policy document."
-        finding["severity"] = "P3 Medium"
+        # FIX 1: Before forcing NON_COMPLIANT, check if the document contains
+        # any keyword evidence related to this control. If it does, the LLM
+        # simply failed to quote it — so PARTIAL_COMPLIANT is more accurate.
+        if potential_evidence_exists(control_id, document_text):
+            print(f"[VALIDATOR DEBUG] [PARTIAL] {control_id}: LLM returned NOT_FOUND but keyword evidence exists in document. Upgrading to PARTIAL_COMPLIANT.", flush=True)
+            finding["status"] = "PARTIAL_COMPLIANT"
+            finding["hallucination_check"] = "NOT_FOUND"
+            finding["requires_human_review"] = True
+            finding["requires_review"] = True
+            finding["validator_note"] = "LLM did not cite evidence, but relevant text was found in the document. Human verification required."
+            finding["review_note"] = "LLM returned NOT_FOUND for evidence, but keyword-based search found potentially relevant content in the document. Verify manually whether the control is satisfied."
+            finding["finding"] = f"Evidence for {control_id} may exist in the document but was not cited by the auditor. Manual verification required."
+            finding["severity"] = "P3 Medium"
+        else:
+            print(f"[VALIDATOR DEBUG] [FAIL] {control_id}: LLM returned NOT_FOUND evidence and no keywords found. Setting NON_COMPLIANT.", flush=True)
+            finding["status"] = "NON_COMPLIANT"
+            finding["hallucination_check"] = "NOT_FOUND"
+            finding["validator_note"] = "No evidence provided and no relevant keywords found in document."
+            finding["finding"] = f"Control requirements for {control_id} are completely missing from the policy document."
+            finding["severity"] = "P3 Medium"
         finding = apply_confidence_gate(finding)
         finding = check_consistency(finding)
         return finding
@@ -397,12 +484,14 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     
     norm_evidence = normalize_text(evidence_clean)
     if norm_evidence and norm_evidence != "not_found":
+        found_in_chunk = False
         if db_chunks:
             for chunk in db_chunks:
                 norm_chunk = normalize_text(chunk.content)
                 if norm_evidence in norm_chunk:
                     grounded_state = "GROUNDED"
                     matched_chunk_id = chunk.id
+                    found_in_chunk = True
                     # Extract source details from metadata_json if present (to map to specific files inside a ZIP)
                     if chunk.metadata_json:
                         try:
@@ -416,7 +505,9 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
                         except Exception:
                             pass
                     break
-        else:
+        
+        # Fallback to checking the full document text (essential when retrieval bypassed chunking for small files)
+        if not found_in_chunk and document_text:
             norm_doc = normalize_text(document_text)
             if norm_evidence in norm_doc:
                 grounded_state = "GROUNDED"
@@ -512,6 +603,24 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         print(f"[VALIDATOR DEBUG] [OK] {control_id}: PASSED all gates! Status: {finding.get('status')}", flush=True)
         finding["validator_note"] = None
 
+    # FIX Q3: Reasoning hallucination check — runs for all findings that passed grounding.
+    # Scans reasoning text for positive factual claims not grounded in the document.
+    reasoning_text = finding.get("reasoning") or finding.get("justification") or ""
+    if reasoning_text and grounded_state in ("GROUNDED", "GROUNDED_WITH_OCR_WARNING"):
+        hallucination_result = check_reasoning_hallucination(reasoning_text, document_text)
+        if not hallucination_result["clean"]:
+            flagged = hallucination_result["flagged_phrases"]
+            print(f"[VALIDATOR DEBUG] [WARN] {control_id}: Reasoning contains {len(flagged)} potentially hallucinated claim(s).", flush=True)
+            finding["reasoning_hallucination_warning"] = True
+            finding["reasoning_flagged_phrases"] = flagged
+            existing_note = finding.get("review_note") or ""
+            hal_note = f"Reasoning hallucination warning: {len(flagged)} claim(s) in the auditor reasoning could not be verified in the document text. Review: {'; '.join(flagged[:2])}"
+            if existing_note:
+                if "hallucination warning" not in existing_note:
+                    finding["review_note"] = f"{existing_note} | {hal_note}"
+            else:
+                finding["review_note"] = hal_note
+
     # Get & Normalize status — only three valid outputs: COMPLIANT, PARTIAL_COMPLIANT, NON_COMPLIANT
     status = finding.get("status", "NON_COMPLIANT").upper()
     if "HUMAN_REVIEW" in status or "HUMAN REVIEW" in status:
@@ -538,22 +647,30 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         print(f"[VALIDATOR DEBUG] [WARN] {control_id}: Status changed by Confidence/Consistency gate: {pre_gate_status} -> {post_gate_status}", flush=True)
     print(f"[VALIDATOR DEBUG] FINAL: {control_id} -> Status={finding.get('status')}, Evidence={'YES' if finding.get('evidence_quote') not in ('', 'NOT_FOUND', None) else 'NO'}", flush=True)
     
-    # Ensure recommendation is populated if it is empty/None
+    # FIX 2: Ensure recommendation is populated and appropriate for the compliance status.
+    # COMPLIANT controls must never receive "Establish procedures" recommendations.
+    current_status = finding.get("status", "NON_COMPLIANT")
     if not finding.get("recommendation"):
-        from src.core.controls_data import USE_CASES
-        rec = ""
-        for uc in USE_CASES:
-            if uc["use_case"] == control_id or uc["label"] == control_id:
-                rec = uc.get("recommendation", "")
-                break
-        if not rec and code:
+        if current_status == "COMPLIANT":
+            finding["recommendation"] = "No action required. Continue to maintain current procedures and ensure periodic review of compliance evidence."
+        else:
+            from src.core.controls_data import USE_CASES
+            rec = ""
             for uc in USE_CASES:
-                if uc["use_case"].startswith(code) or uc["label"].startswith(code):
+                if uc["use_case"] == control_id or uc["label"] == control_id:
                     rec = uc.get("recommendation", "")
                     break
-        if not rec:
-            rec = f"Establish, document, and implement procedures to satisfy {control_id}."
-        finding["recommendation"] = rec
+            if not rec and code:
+                for uc in USE_CASES:
+                    if uc["use_case"].startswith(code) or uc["label"].startswith(code):
+                        rec = uc.get("recommendation", "")
+                        break
+            if not rec:
+                rec = f"Establish, document, and implement procedures to satisfy {control_id}."
+            finding["recommendation"] = rec
+    elif current_status == "COMPLIANT" and finding.get("recommendation", "").lower().startswith("establish"):
+        # FIX 2b: Override incorrect "Establish" recommendation if control is already COMPLIANT
+        finding["recommendation"] = "No action required. Continue to maintain current procedures and ensure periodic review of compliance evidence."
 
     return finding
 

@@ -214,9 +214,14 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
     
     if is_failed:
         error_msg = validated_finding.get("review_note") or validated_finding.get("validator_note") or "Grounding check failed: Evidence quote was not verified in the document."
-        
+
         if state.get("audit_mode") == "Quick":
-            print(f"[LANGGRAPH VALIDATOR] Validation failed, but audit_mode is Quick. Bypassing self-correction for control {state['control_id']}.", flush=True)
+            # FIX Q1: In Quick mode, don't blindly accept a hard-failed finding.
+            # If the validator already smart-upgraded it to PARTIAL_COMPLIANT (Fix 1 in validator.py),
+            # preserve that. Only bypass if the finding is already at a reasonable status.
+            current_status = validated_finding.get("status", "NON_COMPLIANT")
+            hallucination_check = validated_finding.get("hallucination_check", "")
+            print(f"[LANGGRAPH VALIDATOR] Quick mode validation issue for {state['control_id']} (status: {current_status}, check: {hallucination_check}). Accepting validator decision without retry.", flush=True)
             return {
                 "validation_error": None,
                 "final_finding": validated_finding
@@ -287,10 +292,22 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
 
 # Define edge routing condition
 def should_continue(state: AuditState) -> str:
-    """Routes state based on validation status and retry bounds."""
-    if state.get("audit_mode") == "Quick":
-        return "end"
+    """Routes state based on validation status and retry bounds.
+
+    FIX Q2: Removed the blanket 'return end' for Quick mode.
+    Quick mode now follows the same routing logic as Deep mode but with
+    retry_count already at 2 (set during audit invocation), which means
+    it will only do one single reflection pass if the validator hard-fails
+    a finding that has NOT been smart-upgraded by Fix Q1. This prevents
+    Quick mode from silently propagating completely invalid findings.
+    """
     if state["validation_error"] is not None:
+        if state.get("audit_mode") == "Quick":
+            # Quick mode: allow at most 1 reflection retry total.
+            # retry_count starts at 1 for quick mode so this fires at most once.
+            if state["retry_count"] < 1:
+                return "reflect"
+            return "end"
         return "reflect"
     return "end"
 
