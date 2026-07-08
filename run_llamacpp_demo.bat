@@ -21,11 +21,11 @@ if exist "C:\Users\veeresh988V\Desktop\llama\llama-server.exe" (
 
 echo.
 echo [2/4] Starting llama-server LLM on port 11434...
-start "Llama LLM Server" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -t 8 -b 512 --flash-attn on
+start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -t 8 -b 512 --flash-attn on
 
 echo.
 echo [3/4] Starting llama-server Embeddings on port 11435...
-start "Llama Embedding Server" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t 4 --embedding
+start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t 4 --embedding
 
 echo.
 echo Waiting 5 seconds for backend servers to initialize...
