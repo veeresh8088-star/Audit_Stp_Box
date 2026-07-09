@@ -50,6 +50,69 @@ The system implements a custom forensic validator (`src/core/validator.py`) to p
 * **Gate 3 (Fuzzy OCR Grounding)**: Sequence matching fallback for scanned PDF/image OCR data.
 * **Gate 4 (Consistency)**: Overrides LLM output to `NON_COMPLIANT` if the model claims compliance but lists zero verified evidence quotes.
 
+### Audit Workflow, Hallucination Prevention & False Positive Handling:
+
+Below is the detailed flow diagram of the auditing pipeline. It visualizes:
+1. The difference between **Quick Audit** (single-pass analysis with a single retry on fail) and **Deep Audit** (comprehensive multi-phase analysis using self-correction loops).
+2. How the system handles **Hallucination Prevention** (verbatim/fuzzy grounding checks, prompt leak gates, reasoning checks, and fallback downgrades).
+3. How the system handles **False Positives** (applicability checks first, keyword-matching heuristics, smart NOT_FOUND gates, and confidence flags).
+
+```mermaid
+graph TD
+    Start([Start Control Audit]) --> Ingest[RAG Ingestion / Document context retrieval]
+    
+    %% Applicability Check / False Positive Handling
+    Ingest --> AppCheck{Step 1: Check Applicability<br>Does control apply to scope?}
+    AppCheck -- No --> FP[Status: FALSE_POSITIVE<br>Severity: N/A<br>Confidence: 1 if heuristic<br>Flag: Requires Human Review]
+    AppCheck -- Yes --> AuditMode{Step 2: Audit Mode?}
+    
+    %% Quick vs. Deep Audit
+    AuditMode -- Quick Mode --> QuickNode[Execute Draft Generation<br>1-Pass Prompt]
+    AuditMode -- Deep Mode --> DeepNode[Execute LangGraph Loop<br>Multi-Phase Reflection]
+    
+    %% Validator / Hallucination Prevention
+    QuickNode --> ValGate{4-Gate Forensic Validator<br>src/core/validator.py}
+    DeepNode --> ValGate
+    
+    ValGate --> Gate1{Gate 1: Prompt Leak?}
+    Gate1 -- Yes --> Downgrade[Downgrade Status to NON_COMPLIANT<br>Flag: Requires Human Review<br>Reason: Grounding Failure]
+    Gate1 -- No --> Gate2{Gate 2: Verbatim Grounding<br>Is evidence quote word-for-word in doc?}
+    
+    Gate2 -- Yes --> Gate4{Gate 4: Consistency Check<br>Is status COMPLIANT but no quote?}
+    Gate2 -- No --> Gate3{Gate 3: Fuzzy OCR Match<br>Does quote match text with threshold?}
+    
+    Gate3 -- Yes --> Gate4
+    Gate3 -- No --> SmartNotFound{Smart NOT_FOUND Gate<br>Are control keywords present in doc?}
+    
+    %% Smart NOT_FOUND
+    SmartNotFound -- Yes --> SF_NC[Status: NON_COMPLIANT<br>Flag: Requires Human Review<br>Reason: Missing Evidence]
+    SmartNotFound -- No --> SF_FP[Status: FALSE_POSITIVE<br>Confidence: 1<br>Flag: Requires Human Review<br>Reason: Heuristic Inapplicability]
+    
+    %% Consistency / Reasoning Check
+    Gate4 -- Yes/Violated --> Downgrade
+    Gate4 -- No/Valid --> ReasoningCheck{Reasoning Hallucination Checker<br>Are claims verifiable in doc?}
+    ReasoningCheck -- Failed --> Downgrade
+    ReasoningCheck -- Passed --> StatusFinal{Final Status Decision}
+    
+    %% Status decision
+    StatusFinal --> |Control satisfied & evidence present| COMP[Status: COMPLIANT<br>Rec: 'No action required']
+    StatusFinal --> |Evidence partial or missing| NC[Status: NON_COMPLIANT<br>Rec: Gap remediation plan]
+    
+    %% Retry mechanism
+    Downgrade --> LoopDecision{Retry limit reached?}
+    LoopDecision -- No & Deep Mode --> DeepNode
+    LoopDecision -- No & Quick Mode & Retry Count < 1 --> QuickNode
+    LoopDecision -- Yes --> FinalFallback[Force Status to NON_COMPLIANT<br>Flag: Requires Human Review<br>Note: Failed Self-Correction]
+    
+    %% End paths
+    COMP --> End([Save to ShaktiDB & Dashboard])
+    NC --> End
+    FP --> End
+    SF_NC --> End
+    SF_FP --> End
+    FinalFallback --> End
+```
+
 ### Production Accuracy & RAG Optimizations (July 2026 Updates):
 To raise compliance audit accuracy from ~80% to ≥95% for production-grade environments, the following RAG and validator improvements were implemented:
 1. **Ingestion Paragraph Splitter Fix**: Fixed a critical RAG bug where paragraphs longer than 800 characters (such as the list of incident phases in the Motorola plan) were being silently truncated at 1,200 characters during ingestion, causing the latter half of paragraphs to be permanently lost. The splitter now dynamically breaks oversized paragraphs by single newlines `\n` before building RAG windows, preserving 100% of document content.

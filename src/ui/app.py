@@ -17,6 +17,9 @@ import time, json, hashlib, uuid, threading, re, os
 import logging
 from datetime import datetime, timedelta, timezone
 
+is_llamacpp = (os.environ.get("LLM_BACKEND") == "llama.cpp")
+backend_name = "llama.cpp" if is_llamacpp else "Ollama"
+
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 from src.db.database import engine, db_label, ChatMessage, AuditCheckpoint, SessionLocal, force_master, User, AuditReport, EvidenceFile, Finding, AuditRecord, ComplianceScore, DocumentChunk, SystemEvent
@@ -3931,7 +3934,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             pass
         else:
             with _bg_lock:
-                _bg_results[bg_key] = {"error": f"Error contacting Ollama: {str(e)}. Ensure Ollama is active and the selected model is pulled."}
+                _bg_results[bg_key] = {"error": f"Error contacting {backend_name}: {str(e)}. Ensure {backend_name} is active and the selected model is loaded/pulled."}
         _checkpoint_finish(_sid, "failed")
     finally:
         print(f"[_run_ollama_bg] Thread finished. Discarding running key {bg_key}.", flush=True)
@@ -4217,7 +4220,7 @@ with st.sidebar:
     else:
         st.divider()
         st.markdown("<div class='section-title-wrapper'>AI Engine Setup</div>", unsafe_allow_html=True)
-        ai_model = st.selectbox("Select Offline LLM (via Ollama)", [
+        ai_model = st.selectbox(f"Select Offline LLM (via {backend_name})", [
             "Gemma 4 (e4b)",
             "Qwen 2.5 (7B)",
             "Gemma 2 (9B)",
@@ -5281,12 +5284,12 @@ with _main_wrap:
                 st.markdown(f"""
                 <div style='background: linear-gradient(135deg, #2d1616 0%, #0f0505 100%); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 16px; padding: 40px; text-align: center; margin: 20px 0;'>
                     <div style='font-size: 3.5rem; margin-bottom: 16px;'>⚠️</div>
-                    <h3 style='color: #fca5a5; font-weight: 700; margin-bottom: 8px;'>Ollama Service Error</h3>
+                    <h3 style='color: #fca5a5; font-weight: 700; margin-bottom: 8px;'>{backend_name} Service Error</h3>
                     <p style='color: #f87171; max-width: 600px; margin: 0 auto 24px auto; font-size: 0.92rem; line-height: 1.5;'>{err_msg}</p>
                     <div style='background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px; padding: 16px; text-align: left; max-width: 550px; margin: 0 auto; color: #cbd5e1; font-size: 0.85rem;'>
                         <b style='color: #fca5a5;'>How to resolve:</b><br>
-                        1. Verify that the Ollama service is active on your machine by running <code>ollama serve</code> or opening the Ollama application.<br>
-                        2. Ensure you have pulled the selected model by running the <code>pull_models.bat</code> script located in the project directory.<br>
+                        1. Verify that the {backend_name} service is active on your machine (e.g. running <code>run_llamacpp_demo.bat</code> or <code>ollama serve</code>).<br>
+                        2. Ensure you have loaded/pulled the selected model.<br>
                         3. Upload your documents and click <b>▶ Run Analysis</b> to try again.
                     </div>
                 </div>
@@ -6472,7 +6475,7 @@ with _main_wrap:
                 st.progress(prog_pct, text=f"**{prog_pct}%** completed")
                 
             if st.session_state.get("ollama_error"):
-                st.error(f"⚠️ Ollama Service Error: {st.session_state['ollama_error']}. Please click on the **Audit Report** tab to troubleshoot and try again.")
+                st.error(f"⚠️ {backend_name} Service Error: {st.session_state['ollama_error']}. Please click on the **Audit Report** tab to troubleshoot and try again.")
                 
             if len(st.session_state.context) > 0:
                 st.markdown("<div style='background:rgba(59,130,246,0.1); border:1px solid #3b82f6; border-radius:8px; padding:8px 12px; color:#3b82f6; font-size:0.85rem; font-weight:600; margin-bottom:16px'>🔍 Cross-File Intelligence Active · Correlating multiple evidence sources</div>", unsafe_allow_html=True)
@@ -6625,7 +6628,7 @@ with _main_wrap:
                 stop_placeholder.empty()
                 
                 if not full_ans.strip():
-                    full_ans = "⚠️ The local AI engine did not return a response. Please verify that the Ollama service is active on your host machine and that your Llama model is fully downloaded (run `.\\pull_models.bat` to verify)."
+                    full_ans = f"⚠️ The local AI engine did not return a response. Please verify that the {backend_name} service is active on your host machine and that your Llama model is fully downloaded."
                 
                 placeholder.markdown(f"{label_html}<div style='display:flex;justify-content:flex-start;width:100%'><div class='chat-bubble-bot'>{full_ans}</div></div>", unsafe_allow_html=True)
                 st.session_state.chat.append({"role": "assistant", "content": full_ans})

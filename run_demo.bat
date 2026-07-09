@@ -86,4 +86,4 @@ echo [v] Dependencies installed and cached.
 :start_app
 set PYTHONWARNINGS=ignore
 set TRANSFORMERS_NO_ADVISORY_WARNINGS=1
-python -m streamlit run src/ui/app.py --server.port 8501
+python -m streamlit run src/ui/app.py --server.port 8501 --server.address 0.0.0.0
