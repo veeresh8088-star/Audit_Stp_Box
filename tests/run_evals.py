@@ -6,12 +6,19 @@ Validates system performance under various scenarios including:
 2. Partially Compliant
 3. Non-Compliant (No Evidence)
 4. Prompt Injection (Adversarial)
+
+Fix G1: compute_semantic_scores() — Faithfulness (derived from hallucination_check)
+         and Answer Relevancy (cosine similarity via existing embedding server).
+Fix G2: compute_retrieval_scores() — Context Recall (gold phrase match) and
+         Context Precision (keyword fraction of retrieved chunks).
+Both scoring functions are informational only and never affect pass/fail verdicts.
 """
 
 import os
 import sys
 import time
 import json
+import math
 
 # Add workspace directory to python path
 sys.path.append(os.getcwd())
@@ -25,6 +32,109 @@ from src.db.database import SessionLocal, DocumentChunk, force_master
 from src.core.controls_data import USE_CASES
 from src.ai.audit_graph import audit_graph
 from src.core.retrieval import save_document_chunks, _ingested_chunks_cache
+
+# ── Fix G1: Faithfulness score map (derived from hallucination_check) ──────────
+FAITHFULNESS_MAP = {
+    "GROUNDED":                  1.0,
+    "GROUNDED_WITH_OCR_WARNING": 0.7,
+    "NOT_GROUNDED":              0.0,
+    "PROMPT_LEAK":               0.0,
+    "NOT_FOUND":                 0.1,
+}
+
+# ── Fix G2: Gold retrieval phrases per TC ────────────────────────────────────
+# The exact phrase that MUST appear in retrieved_context for the control to
+# be answerable. None = no evidence expected (pass if phrase absent).
+GOLD_RETRIEVAL = {
+    "TC-01": "Multi-factor authentication (MFA) is strictly enforced",
+    "TC-02": "Multi-factor authentication is optional and recommended but not required",
+    "TC-03": None,   # No relevant evidence expected
+    "TC-04": None,   # Adversarial — injection phrase must not pollute context
+}
+
+
+def _cosine_similarity(v1, v2):
+    """Pure-Python cosine similarity between two float lists."""
+    if not v1 or not v2 or len(v1) != len(v2):
+        return None
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm1 = math.sqrt(sum(a * a for a in v1))
+    norm2 = math.sqrt(sum(b * b for b in v2))
+    if norm1 == 0 or norm2 == 0:
+        return None
+    return round(dot / (norm1 * norm2), 4)
+
+
+def compute_semantic_scores(final_finding, control_label):
+    """
+    Fix G1: Faithfulness + Answer Relevancy scores.
+    - Faithfulness: derived from hallucination_check (already computed by Gate 2+3).
+      No extra LLM call.
+    - Relevancy: cosine similarity between control_label and finding text,
+      using the already-running embedding server on port 11435.
+      Falls back to 'N/A' if embedding server is offline.
+
+    Returns dict with keys: faithfulness_score (float), relevancy_score (float|str).
+    """
+    hallu_check = final_finding.get("hallucination_check", "")
+    faithfulness = FAITHFULNESS_MAP.get(hallu_check, 0.5)
+
+    relevancy = "N/A"
+    try:
+        from src.core.llm_client import get_embedding
+        finding_text = (
+            (final_finding.get("finding") or "")
+            + " "
+            + (final_finding.get("reasoning") or "")
+        ).strip()
+        if finding_text and control_label:
+            q_vec = get_embedding(control_label)
+            a_vec = get_embedding(finding_text[:500])  # cap to keep embedding fast
+            sim = _cosine_similarity(q_vec, a_vec)
+            if sim is not None:
+                relevancy = round(sim, 4)
+    except Exception as e:
+        print(f"[EVAL SCORE] Embedding server unavailable for relevancy: {e}")
+
+    return {
+        "faithfulness_score": faithfulness,
+        "relevancy_score":    relevancy,
+    }
+
+
+def compute_retrieval_scores(tc_id, retrieved_context, control_keywords):
+    """
+    Fix G2: Context Recall + Context Precision.
+    - Recall: True if the gold key phrase appears in retrieved_context (or N/A).
+    - Precision: fraction of retrieved chunks containing ≥1 control keyword.
+
+    Both are pure string operations — zero extra LLM or embedding calls.
+
+    Returns dict with keys: context_recall (bool|str), context_precision (float|str).
+    """
+    gold_phrase = GOLD_RETRIEVAL.get(tc_id)
+
+    # Context Recall
+    if gold_phrase is None:
+        context_recall = "N/A (no gold phrase for this TC)"
+    else:
+        context_recall = gold_phrase.lower() in retrieved_context.lower()
+
+    # Context Precision — split context by double newline (our chunk separator)
+    chunks = [c.strip() for c in retrieved_context.split("\n\n") if c.strip()]
+    if not chunks or not control_keywords:
+        context_precision = "N/A"
+    else:
+        relevant = sum(
+            1 for c in chunks
+            if any(kw.lower() in c.lower() for kw in control_keywords)
+        )
+        context_precision = round(relevant / len(chunks), 4)
+
+    return {
+        "context_recall":    context_recall,
+        "context_precision": context_precision,
+    }
 
 # Define the test cases
 TEST_CASES = [
@@ -172,6 +282,21 @@ def run_eval_test_suite():
                 leakage_pass = (leakage == tc["expected_leakage"])
                 
                 overall_pass = status_pass and leakage_pass
+
+                # ── Fix G1: Semantic Scores (informational only, never affect pass/fail) ──
+                sem_scores = compute_semantic_scores(final, tc.get("control_id", ""))
+
+                # ── Fix G2: Retrieval Quality Scores (informational only) ──────────
+                ctrl = control_templates.get(tc["control_id"])
+                ctrl_keywords = (
+                    tc["control_id"].lower().split() +
+                    (ctrl.get("label", "").lower().split() if ctrl else [])
+                )
+                ret_scores = compute_retrieval_scores(
+                    tc["id"],
+                    output_state.get("retrieved_context", ""),
+                    ctrl_keywords
+                )
                 
                 result = {
                     "id": tc["id"],
@@ -184,6 +309,12 @@ def run_eval_test_suite():
                     "leakage_actual": leakage,
                     "elapsed_time": round(elapsed, 2),
                     "passed": overall_pass,
+                    # G1 semantic scores
+                    "faithfulness_score": sem_scores["faithfulness_score"],
+                    "relevancy_score":    sem_scores["relevancy_score"],
+                    # G2 retrieval scores
+                    "context_recall":     ret_scores["context_recall"],
+                    "context_precision":  ret_scores["context_precision"],
                     "output": final
                 }
                 print(f"Status: Expected={tc['expected_status']}, Actual={status} (Match: {status_pass})")
@@ -255,12 +386,19 @@ def write_markdown_report(summary):
     md.append("")
     md.append("## Evaluation Test Cases & Results")
     md.append("")
-    md.append("| Test ID | Name | Expected Status | Actual Status | Grounding | Leakage | Status |")
-    md.append("| --- | --- | --- | --- | --- | --- | --- |")
+    md.append("| Test ID | Name | Expected Status | Actual Status | Grounding | Leakage | Faithfulness | Relevancy | Recall | Precision | Status |")
+    md.append("| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     
     for r in summary["results"]:
         status_str = "✅ PASS" if r["passed"] else "❌ FAIL"
-        md.append(f"| {r['id']} | {r['name']} | {r.get('status_expected', 'N/A')} | {r.get('status_actual', 'N/A')} | {r.get('grounding_actual', 'N/A')} | {r.get('leakage_actual', 'N/A')} | {status_str} |")
+        md.append(
+            f"| {r['id']} | {r['name']} "
+            f"| {r.get('status_expected', 'N/A')} | {r.get('status_actual', 'N/A')} "
+            f"| {r.get('grounding_actual', 'N/A')} | {r.get('leakage_actual', 'N/A')} "
+            f"| {r.get('faithfulness_score', 'N/A')} | {r.get('relevancy_score', 'N/A')} "
+            f"| {r.get('context_recall', 'N/A')} | {r.get('context_precision', 'N/A')} "
+            f"| {status_str} |"
+        )
         
     md.append("\n## Detailed Test Case Outcomes\n")
     for r in summary["results"]:

@@ -7,6 +7,7 @@ from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
+from src.core.pii_redactor import redact_pii
 
 def export_docx_report(session_title, findings, resolved_list, status, comments=""):
     doc = Document()
@@ -388,16 +389,16 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         for cell in row_cells:
             _set_cell_bg(cell, bg_color)
 
-        # Content
+        # Content — PII redacted before writing to exported document
         row_cells[0].paragraphs[0].add_run(str(f_idx))
         row_cells[1].paragraphs[0].add_run(f.get("control_id", "") + " " + f.get("control", ""))
         row_cells[2].paragraphs[0].add_run(f.get("clause", "") or "ISO 27001 Annex A")
-        row_cells[3].paragraphs[0].add_run(f.get("finding") or f.get("description") or "—")
+        row_cells[3].paragraphs[0].add_run(redact_pii(f.get("finding") or f.get("description") or "—"))
         row_cells[4].paragraphs[0].add_run(mapped_risk).bold = True
-        row_cells[5].paragraphs[0].add_run(f.get("business_impact") or "NIL")
-        row_cells[6].paragraphs[0].add_run(f.get("recommendation") or "NIL")
+        row_cells[5].paragraphs[0].add_run(redact_pii(f.get("business_impact") or "NIL"))
+        row_cells[6].paragraphs[0].add_run(redact_pii(f.get("recommendation") or "NIL"))
         
-        ev_text = f.get("evidence_snippet") or f.get("evidence_quote") or "N/A"
+        ev_text = redact_pii(f.get("evidence_snippet") or f.get("evidence_quote") or "N/A")
         row_cells[7].paragraphs[0].add_run(ev_text)
 
     # Set column widths
@@ -772,18 +773,19 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
             ref_text = f.get("clause", "") or "ISO 27001 Annex A"
             r.cell(clean_text(truncate_cell_text(ref_text, 100)), style=cell_style)
             
-            obs_text = f.get("finding") or f.get("description") or "—"
+            # PII redacted before writing to exported PDF
+            obs_text = redact_pii(f.get("finding") or f.get("description") or "—")
             r.cell(clean_text(truncate_cell_text(obs_text, 600)), style=cell_style)
             
             r.cell(clean_text(mapped_risk), style=risk_style)
             
-            imp_text = f.get("business_impact") or "NIL"
+            imp_text = redact_pii(f.get("business_impact") or "NIL")
             r.cell(clean_text(truncate_cell_text(imp_text, 400)), style=cell_style)
             
-            sug_text = f.get("recommendation") or "NIL"
+            sug_text = redact_pii(f.get("recommendation") or "NIL")
             r.cell(clean_text(truncate_cell_text(sug_text, 500)), style=cell_style)
             
-            ev_text = f.get("evidence_snippet") or f.get("evidence_quote") or "N/A"
+            ev_text = redact_pii(f.get("evidence_snippet") or f.get("evidence_quote") or "N/A")
             r.cell(clean_text(truncate_cell_text(ev_text, 400)), style=cell_style)
 
     pdf_bytes = pdf.output()

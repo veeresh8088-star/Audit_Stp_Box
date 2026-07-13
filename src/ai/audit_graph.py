@@ -5,6 +5,7 @@ Implements the LangGraph State Machine for auditing controls.
 Integrates custom validators and retrieval with LangChain ChatOllama.
 """
 
+import time as _time
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, START, END
 from src.ai.audit_models import AuditFindingSchema
@@ -247,6 +248,7 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
     
     # If validation passes cleanly
     print(f"[LANGGRAPH VALIDATOR] Validation passed for control {state['control_id']} (status: {status})", flush=True)
+    _log_execution_event(state, validated_finding)
     return {
         "validation_error": None,
         "final_finding": validated_finding
@@ -344,3 +346,51 @@ def compile_audit_graph():
 
 # Singleton graph instance cached at module load
 audit_graph = compile_audit_graph()
+
+
+# ── Execution Metadata Logger (Fix G4 — Audit Logs) ——————————————————
+def _log_execution_event(state: AuditState, final_finding: Dict[str, Any]) -> None:
+    """
+    Writes a structured execution metadata row to the SystemEvent table after
+    each control is validated. This is a sidecar write — it runs AFTER
+    final_finding is already set and is wrapped in try/except so any DB failure
+    never affects the audit result.
+
+    Captures: control_id, model, backend, audit_mode, retry_count,
+              hallucination_check, final_status, retrieved_context_chars.
+    """
+    try:
+        import json as _json
+        import os as _os
+        from src.db.database import SystemEvent
+
+        meta = {
+            "control_id":              state.get("control_id", ""),
+            "model":                   state.get("ollama_model", ""),
+            "backend":                 _os.environ.get("LLM_BACKEND", "ollama"),
+            "audit_mode":              state.get("audit_mode", "Normal"),
+            "retry_count":             state.get("retry_count", 0),
+            "hallucination_check":     final_finding.get("hallucination_check", ""),
+            "final_status":            final_finding.get("status", ""),
+            "retrieved_context_chars": len(state.get("retrieved_context", "")),
+            "requires_human_review":   final_finding.get("requires_human_review", False),
+        }
+
+        event = SystemEvent(
+            event_type="CONTROL_AUDIT_COMPLETE",
+            actor="SYSTEM",
+            session_id=state.get("bg_key", ""),
+            framework="ISO 27001",
+            meta=_json.dumps(meta),
+            severity="INFO",
+        )
+        session = SessionLocal()
+        try:
+            session.add(event)
+            session.commit()
+        finally:
+            session.close()
+
+    except Exception as _log_err:
+        # Never let a log failure affect the audit result
+        print(f"[AUDIT LOG WARNING] Failed to write execution event: {_log_err}", flush=True)

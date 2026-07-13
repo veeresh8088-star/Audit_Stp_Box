@@ -27,6 +27,7 @@ from src.ui.auth import render_login_gate
 from src.ai import scoping_engine
 from src.core.retrieval import _ingested_chunks_cache, save_document_chunks, _retrieve_rag_context
 from src.core.controls_data import USE_CASES, DEMO_FINDINGS, GAP_RESOLUTION, SCOPE_KEYWORDS
+from src.core.input_guardrail import scan_document as _scan_document
 
 
 # Thread-safe storage for background analysis results and active runs
@@ -4656,6 +4657,40 @@ with st.sidebar:
                     if f.name not in st.session_state.file_registry:
                         try:
                             text = extract_text(f)
+                            # ── Input Guardrail (Fix G5) ─────────────────────
+                            # Run 4-layer structural scan BEFORE ingestion.
+                            # Warn-only: never blocks the upload or audit flow.
+                            try:
+                                _raw_bytes = f.getvalue() if hasattr(f, 'getvalue') else b""
+                                _grd_safe, _grd_reason = _scan_document(f.name, _raw_bytes, text or "")
+                                if not _grd_safe:
+                                    if "guardrail_warnings" not in st.session_state:
+                                        st.session_state.guardrail_warnings = []
+                                    st.session_state.guardrail_warnings.append(
+                                        f"⚠️ Security warning for '{f.name}': {_grd_reason}"
+                                    )
+                                    # Log to SystemEvent for traceability
+                                    try:
+                                        import json as _grd_json
+                                        _grd_event = SystemEvent(
+                                            event_type="INPUT_GUARDRAIL_WARN",
+                                            actor=st.session_state.get("username", "SYSTEM"),
+                                            session_id=str(st.session_state.get("session_id", "")),
+                                            framework="ISO 27001",
+                                            meta=_grd_json.dumps({"file": f.name, "reason": _grd_reason}),
+                                            severity="WARNING",
+                                        )
+                                        _grd_session = SessionLocal()
+                                        try:
+                                            _grd_session.add(_grd_event)
+                                            _grd_session.commit()
+                                        finally:
+                                            _grd_session.close()
+                                    except Exception:
+                                        pass
+                            except Exception as _grd_err:
+                                print(f"[GUARDRAIL WARNING] Scan failed for {f.name}: {_grd_err}", flush=True)
+                            # ─────────────────────────────────────────────────
                             st.session_state.file_registry[f.name] = text
                             save_document_chunks(f.name, text)
                             new_files_added = True
