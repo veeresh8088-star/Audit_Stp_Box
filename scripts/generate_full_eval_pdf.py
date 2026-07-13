@@ -153,12 +153,21 @@ class FullEvalPDF(FPDF):
         self.multi_cell(190 - indent, 5.5, text, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     def draw_diagram_block(self, text):
+        line_h = 4.5
+        padding = 6  # top + bottom breathing room
+        n_lines = text.count("\n") + 1
+        needed_h = n_lines * line_h + padding
+
+        # If the diagram won't fit on the remaining page, start a new one
+        remaining = self.h - self.b_margin - self.get_y()
+        if needed_h > remaining:
+            self.add_page()
+
         self.set_fill_color(*LIGHT_GRAY)
         self.set_text_color(*DARK_TEXT)
         self.set_font("Courier", "", 8.5)
         self.set_x(10)
-        # multi_cell handles printing the block
-        self.multi_cell(190, 4.5, text, fill=True, border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.multi_cell(190, line_h, text, fill=True, border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(3)
 
 def build_pdf():

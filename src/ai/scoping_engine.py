@@ -133,9 +133,10 @@ CONTENT_SIGNALS = {
         "soc ", "security operations"
     ],
     "Access Control Policy": [
-        "access control", "user account", "privilege", "authentication", "password",
+        "logical access", "user account", "privilege", "authentication", "password",
         "identity management", "access rights", "role-based", "rbac", "mfa",
-        "multi-factor", "single sign", "sso", "least privilege"
+        "multi-factor", "single sign", "sso", "least privilege", "user credential",
+        "system account", "login credential"
     ],
     "Technology / IT Security Policy": [
         "endpoint", "antivirus", "malware", "firewall", "encryption", "patch",
@@ -195,14 +196,21 @@ UMBRELLA_EXPANDS_TO = [
 def _apply_content_signals(context_lower: str, doc_types: list) -> list:
     """
     Scan document content for keyword signals and add missing doc types.
-    This is the key fix — catches types the LLM misses from title alone.
+    Enforces word boundaries for short abbreviations (<= 4 chars) to prevent substring false matches.
     """
     doc_types_set = set(doc_types)
     for dtype, keywords in CONTENT_SIGNALS.items():
         for kw in keywords:
-            if kw in context_lower:
-                doc_types_set.add(dtype)
-                break  # one match is enough to add the type
+            # Enforce word boundaries for abbreviations or short terms to prevent matching within words like 'purpose'
+            if len(kw) <= 4 or kw in ["bcp", "drp", "rto", "rpo", "nda", "mfa", "sso", "rbac", "soc"]:
+                pattern = r"\b" + re.escape(kw) + r"\b"
+                if re.search(pattern, context_lower):
+                    doc_types_set.add(dtype)
+                    break
+            else:
+                if kw in context_lower:
+                    doc_types_set.add(dtype)
+                    break
     return list(doc_types_set)
 
 
@@ -235,135 +243,100 @@ def _get_candidate_controls(doc_types):
     return list(candidates)
 
 
-def detect_scope_and_controls(context, ollama_model="qwen2.5:7b"):
+SCOPE_DESCRIPTIONS = {
+    "Access Control Policy": "Logical user access control, login accounts, password policy, multi-factor authentication MFA, single sign-on SSO, role-based access RBAC, privileged accounts",
+    "Asset Management Policy": "Inventory of assets, acceptable use policy AUP, classification of information, data labelling, media disposal, device return, asset lifecycle",
+    "Risk Assessment": "Information security risk assessment, threat identification, vulnerability management, risk treatment plans, management oversight",
+    "Incident Management Policy": "Information security incident management, security events, reporting incident tickets, breach containment, logs, forensic evidence, lessons learned",
+    "Business Continuity Plan": "Business continuity plans, disaster recovery plans, ICT readiness, backup restoration testing, systems redundancy, disruptions",
+    "General Security Policy": "High level information security policy, ISMS framework, roles and responsibilities, management commitment",
+    "HR / People Security Policy": "Background screening, employment terms and conditions, nda confidentiality agreements, awareness training, disciplinary actions, offboarding termination",
+    "Physical Security Policy": "Physical security perimeters, physical entry control, visitor logs, secure offices, camera monitoring, environmental threats, clean desk clear screen",
+    "Technology / IT Security Policy": "Technical IT security, endpoint protection, antivirus malware, firewalls, logs, network segmentation, web filtering, patch management, cryptography encryption",
+    "Supplier / Third Party Policy": "Vendor relationships, supplier contracts, supply chain security, monitoring supplier services, cloud services security",
+    "Development / Secure Coding Policy": "Secure development lifecycle SDLC, secure coding standards, security testing, source code protection, separate dev test prod environments",
+    "Compliance / Legal Policy": "Legal statutory regulatory compliance, intellectual property protection, records retention policy, PII privacy protection, audits"
+}
+
+_category_embeddings_cache = {}
+
+
+def cosine_similarity(v1, v2):
+    """Calculates cosine similarity between two vectors."""
+    if not v1 or not v2:
+        return 0.0
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm_a = sum(a * a for a in v1) ** 0.5
+    norm_b = sum(b * b for b in v2) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def detect_scope_and_controls(context, ollama_model=None):
     """
-    Intelligent LLM-driven scope detection with content-signal fallback.
-
-    Pipeline:
-      1. LLM reads first 3000 chars → returns doc_types list
-      2. Content-signal scan of full document → adds any missed types
-      3. Umbrella-policy check → expands scope if master policy detected
-      4. Returns merged, deduplicated doc_types
-
-    Returns:
-       selected_controls (list): Always empty — app.py applies fallback logic.
-       warning (str): A warning message or None.
-       doc_types (list of strings): The identified document types.
-       ollama_offline (bool): True if Ollama could not be reached.
-     """
+    Zero-LLM deterministic + semantic scope detection.
+    Combines direct keyword signals with fast Nomic embeddings (Option A).
+    """
     start_time = time.time()
-    print(f"\n[{time.strftime('%H:%M:%S')}] [INFO] Starting LLM Scope Detection (model: {ollama_model})...")
+    print(f"\n[{time.strftime('%H:%M:%S')}] [INFO] Starting Dual-Layer Scope Detection (Option A)...")
 
     context_lower = context.lower()
-
-    # Use first 3000 chars for LLM — enough to identify document purpose quickly
-    context_chunk = context[:3000]
-
-    doc_types = []
-    selected_controls = []
+    doc_types_set = set()
     ollama_offline = False
 
-    # ── STEP 1: LLM identifies Document Type(s) and specific controls ─────────
-    scopes_and_controls_str = ""
-    for dtype, controls in DOC_TYPE_MAPPINGS.items():
-        scopes_and_controls_str += f"- {dtype}:\n"
-        for ctrl in controls:
-            scopes_and_controls_str += f"  * {ctrl}\n"
+    # ── LAYER 1: Python Keyword Signals (Instant) ─────────────────────────────
+    doc_types_list = _apply_content_signals(context_lower, [])
+    for dt in doc_types_list:
+        doc_types_set.add(dt)
 
-    step1_prompt = f"""You are an ISO 27001:2022 Cybersecurity Auditor performing document scope classification.
-
-Read the document excerpt below carefully and identify the applicable document scope types and specific controls.
-
-AVAILABLE SCOPES AND THEIR ASSOCIATED CONTROLS:
-{scopes_and_controls_str}
-
-DOCUMENT EXCERPT:
-\"\"\"
-{context_chunk}
-\"\"\"
-
-CLASSIFICATION RULES:
-1. Read the FULL excerpt before deciding — do not stop at the title
-2. A single document can and often does match MULTIPLE scopes and controls
-3. Match based on CONTENT, not just the document title
-4. Be precise: only select a control if the document content directly provides evidence or configuration details for it. Do not select a control if it is only a minor mention or OCR noise.
-5. If the document is about Multi-Factor Authentication (MFA), passwords, or user logins, select "Access Control Policy" as the scope, but only select the specific authentication controls (e.g., "8.5 Secure Authentication", "5.17 Authentication Information") as the controls. Do NOT select physical access controls (e.g. "7.1", "7.2") or source code controls (e.g. "8.4") unless the document explicitly covers them.
-6. CRITICAL: Ignore browser window chrome/UI elements, open browser tab names, URL/search bar texts, search queries, or background desktop icons that may appear in OCR-extracted text (e.g., text like "open Ports on Linux", "What is the comma", "youtube", "signin.aws.amazon.com/oauth"). Focus ONLY on the actual main document text, policy headings, or the core user-interface settings shown in the screenshots.
-
-Return ONLY valid JSON — no explanation, no markdown:
-{{
-  "doc_types": ["scope name 1", "scope name 2"],
-  "selected_controls": ["control name 1", "control name 2"]
-}}"""
-
-    try:
-        print(f"[{time.strftime('%H:%M:%S')}] [INFO] Step 1: LLM detecting document type and controls...")
-        from src.core.llm_client import query_llm
-        res1 = query_llm(
-            prompt=step1_prompt,
-            model=ollama_model,
-            format="json",
-            num_ctx=4096,
-            temperature=0.0,
-            num_thread=8,
-            timeout=120
-        )
+    # ── LAYER 2: Semantic Embedding Match (~50ms) ────────────────────────────
+    # Convert first 800 chars of document to vector
+    doc_snippet = context[:800].strip()
+    if doc_snippet:
         try:
-            first_brace = res1.find('{')
-            last_brace = res1.rfind('}')
-            json_str1 = res1[first_brace:last_brace+1] if first_brace != -1 else res1
-            data1 = json.loads(json_str1)
-            dt_list = data1.get("doc_types", [])
-            doc_types = [dt for dt in dt_list if dt in DOC_TYPE_MAPPINGS]
+            from src.core.llm_client import get_embedding
             
-            # Extract and validate selected controls
-            ctrl_list = data1.get("selected_controls", [])
-            all_allowed_controls = set()
-            for ctrls in DOC_TYPE_MAPPINGS.values():
-                all_allowed_controls.update(ctrls)
-            selected_controls = [c for c in ctrl_list if c in all_allowed_controls]
-            
-            print(f"[{time.strftime('%H:%M:%S')}] [INFO] Step 1 LLM result: {doc_types}, controls: {selected_controls}")
-        except Exception as parse_err:
-            print(f"[{time.strftime('%H:%M:%S')}] [ERROR] Step 1 JSON parse failed: {parse_err}. Raw: {res1}")
-    except Exception as e:
-        ollama_offline = True
-        print(f"[{time.strftime('%H:%M:%S')}] [ERROR] Step 1 LLM call failed: {e}")
+            # 1. Warm up category embeddings cache if empty
+            for cat, desc in SCOPE_DESCRIPTIONS.items():
+                if cat not in _category_embeddings_cache:
+                    _category_embeddings_cache[cat] = get_embedding(desc)
 
-    # Before content signals/umbrella, remember what LLM detected
-    llm_doc_types = set(doc_types)
+            # 2. Get document vector
+            doc_vector = get_embedding(doc_snippet)
 
-    # ── STEP 2: Content-signal scan (catches what LLM missed) ─────────────────
-    before_signals = set(doc_types)
-    doc_types = _apply_content_signals(context_lower, doc_types)
-    added_by_signals = set(doc_types) - before_signals
-    if added_by_signals:
-        print(f"[{time.strftime('%H:%M:%S')}] [INFO] Step 2 Content signals added: {list(added_by_signals)}")
+            # 3. Calculate cosine similarity
+            if doc_vector:
+                print(f"[{time.strftime('%H:%M:%S')}] [INFO] Computing semantic scope matches...")
+                for cat, cat_vector in _category_embeddings_cache.items():
+                    if cat_vector:
+                        sim = cosine_similarity(doc_vector, cat_vector)
+                        if sim >= 0.645:
+                            print(f"   * Semantic Match: {cat} (Similarity: {sim:.3f})")
+                            doc_types_set.add(cat)
+        except Exception as embed_err:
+            print(f"[{time.strftime('%H:%M:%S')}] [WARNING] Semantic scoping failed: {embed_err}")
 
-    # ── STEP 3: Umbrella policy expansion ─────────────────────────────────────
+    doc_types = list(doc_types_set)
+
+    # ── LAYER 3: Umbrella Policy Expansion ────────────────────────────────────
     before_umbrella = set(doc_types)
     doc_types = _check_umbrella_policy(context_lower, doc_types)
     added_by_umbrella = set(doc_types) - before_umbrella
     if added_by_umbrella:
-        print(f"[{time.strftime('%H:%M:%S')}] [INFO] Step 3 Umbrella expansion added: {list(added_by_umbrella)}")
+        print(f"[{time.strftime('%H:%M:%S')}] [INFO] Umbrella expansion added: {list(added_by_umbrella)}")
 
-    # If the LLM returned specific controls, we merge in the candidate controls
-    # of any newly added doc types that the LLM missed.
-    newly_added_types = set(doc_types) - llm_doc_types
-    if newly_added_types and selected_controls:
-        for dt in newly_added_types:
-            for c in DOC_TYPE_MAPPINGS.get(dt, []):
-                if c not in selected_controls:
-                    selected_controls.append(c)
+    # ── LAYER 4: Map doc types to standard controls ──────────────────────────
+    selected_controls = _get_candidate_controls(doc_types)
 
-    # ── STEP 4: Final fallback — if still empty, use all scopes ───────────────
+    # ── LAYER 5: Fallback if empty ────────────────────────────────────────────
     if not doc_types:
         doc_types = list(DOC_TYPE_MAPPINGS.keys())
+        selected_controls = _get_candidate_controls(doc_types)
         print(f"[{time.strftime('%H:%M:%S')}] [WARN] No scopes detected — falling back to ALL scopes")
 
     elapsed = time.time() - start_time
-    print(f"[{time.strftime('%H:%M:%S')}] [SUCCESS] Scope Detection completed in {elapsed:.2f}s")
+    print(f"[{time.strftime('%H:%M:%S')}] [SUCCESS] Scope Detection completed in {elapsed:.4f}s")
     print(f"   Final Doc Types ({len(doc_types)}): {doc_types}")
-    print(f"   Final Selected Controls ({len(selected_controls)}): {selected_controls}")
 
     return selected_controls, None, doc_types, ollama_offline

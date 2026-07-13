@@ -427,6 +427,32 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         finding = check_consistency(finding)
         return finding
 
+    # ── PHYSICAL VS LOGICAL IDENTITY GATING ──
+    if code == "5.16" or "identity management" in control_id.lower():
+        evidence = finding.get("evidence_quote") or "NOT_FOUND"
+        evidence_lower = evidence.lower()
+        if evidence != "NOT_FOUND":
+            physical_terms = ["badge", "keycard", "facility access", "physical entry", "visitor sign-in", "visitor log", "escort", "reception", "breezn", "kastle"]
+            logical_terms = ["account", "active directory", "database", "system", "logical", "provision", "revoke", "termination", "joiner", "leaver", "myid"]
+            
+            has_physical = any(term in evidence_lower for term in physical_terms)
+            has_logical = any(term in evidence_lower for term in logical_terms)
+            
+            # If evidence is purely physical and lacks logical IT terms, reject it
+            if has_physical and not has_logical:
+                print(f"[VALIDATOR DEBUG] [FAIL] {control_id}: REJECTED by Physical Badge domain check!", flush=True)
+                finding["status"] = "NON_COMPLIANT"
+                finding["hallucination_check"] = "NOT_GROUNDED"
+                finding["validator_note"] = "Cited evidence refers to physical badging, which does not satisfy logical identity management."
+                finding["evidence_snippet"] = ""
+                finding["evidence_quote"] = "NOT_FOUND"
+                finding["finding"] = "Control requirements not addressed; cited evidence is restricted to physical facility badging."
+                finding["severity"] = "P3 Medium"
+                finding["finding_is_final"] = True
+                finding = apply_confidence_gate(finding)
+                finding = check_consistency(finding)
+                return finding
+
     # ════════════════════════════════════════
     # GATE 1: Leakage check (always first)
     # ════════════════════════════════════════
