@@ -6060,7 +6060,7 @@ with _main_wrap:
                                         db.add(AuditRecord(
                                             report_id=report.id,
                                             auditor_id=auditor_id,
-                                            status=current_status,
+                                            status=report.status,
                                             comments=comment_str
                                         ))
                                         db.commit()
