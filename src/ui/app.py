@@ -61,7 +61,19 @@ def log_system_event(
             _db.commit()
             _db.close()
     except Exception:
-        pass  # Logging must never crash the app
+        pass
+
+
+def log_dev_latency(message: str):
+    """Appends performance and execution log entries for developer latency tracking."""
+    try:
+        import os
+        import time
+        os.makedirs("data", exist_ok=True)
+        with open("data/audit_run_latency.log", "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {message}\n")
+    except Exception:
+        pass
 
 
 def _sanitize_log_comment(comment: str) -> str:
@@ -3677,7 +3689,9 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
 
     import time
     overall_start_time = time.time()
-    print(f"\n[{time.strftime('%H:%M:%S')}] [INFO] Starting LangGraph ISO 27001 Audit for {total} controls...", flush=True)
+    msg = f"[AUDIT START] Starting LangGraph ISO 27001 Audit for {total} controls (Model: {model_choice}, Mode: {audit_mode})"
+    print(f"\n[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+    log_dev_latency(msg)
 
     # Generate overall context summary
     summary_text = _generate_context_summary(context, ollama_model)
@@ -3686,7 +3700,9 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
 
     for idx, c in enumerate(controls):
         control_start_time = time.time()
-        print(f"[{time.strftime('%H:%M:%S')}]   -> Running LangGraph Control {idx + 1}/{total} ({c['control']})...", flush=True)
+        start_msg = f"-> Running Control {idx + 1}/{total}: {c['control']} ({c['label']})"
+        print(f"[{time.strftime('%H:%M:%S')}]   {start_msg}", flush=True)
+        log_dev_latency(f"[{idx + 1}/{total}] {start_msg}")
 
         if bg_key:
             with _bg_lock:
@@ -3781,7 +3797,10 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             })
 
         control_elapsed = time.time() - control_start_time
-        print(f"[{time.strftime('%H:%M:%S')}]   [SUCCESS] Control {c['control']} completed in {control_elapsed:.2f}s", flush=True)
+        status_res = result.get("status", "Non-Compliant") if result else "Failed"
+        success_msg = f"[SUCCESS] Control {c['control']} completed in {control_elapsed:.2f}s (Result: {status_res})"
+        print(f"[{time.strftime('%H:%M:%S')}]   {success_msg}", flush=True)
+        log_dev_latency(f"[{idx + 1}/{total}] {success_msg}")
 
         # Save partial checkpoint to database so progress is resumeable after crash
         if checkpoint_session_id:
@@ -3826,7 +3845,9 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     all_results = validate_cross_control_duplicates(all_results)
 
     overall_elapsed = time.time() - overall_start_time
-    print(f"[{time.strftime('%H:%M:%S')}] [SUCCESS] LangGraph Audit complete! Total time: {overall_elapsed:.2f} seconds.", flush=True)
+    complete_msg = f"[AUDIT COMPLETE] LangGraph Audit complete! Total time: {overall_elapsed:.2f} seconds."
+    print(f"[{time.strftime('%H:%M:%S')}] [SUCCESS] {complete_msg}", flush=True)
+    log_dev_latency(complete_msg + "\n" + "="*50 + "\n")
 
     resolved_list = [r["control_id"] for r in all_results if r.get("status") == "Compliant"]
     return resolved_list, all_results
@@ -7285,7 +7306,7 @@ with _main_wrap:
                 st.session_state.at_page = 0
 
             # ── TABS FOR SYSTEM EVENTS & AUDIT TRAIL ───────────────────────────────
-            _tab_sys, _tab_at = st.tabs(["System Events", "Audit Trail"])
+            _tab_sys, _tab_at, _tab_dev = st.tabs(["System Events", "Audit Trail", "Developer Logs & Latency"])
 
             # ── LEFT: System Events ────────────────────────────────────────────────
             with _tab_sys:
@@ -7543,6 +7564,45 @@ with _main_wrap:
                         "No audit trail records found in this range."
                         "</div>", unsafe_allow_html=True
                     )
+
+            # ── DEVELOPER LOGS & LATENCY ──────────────────────────────────────────
+            with _tab_dev:
+                st.markdown(
+                    "<div style='background:rgba(30,41,59,0.6);border:1px solid rgba(59,130,246,0.25);"
+                    "border-radius:12px;padding:16px 18px;margin-bottom:14px'>"
+                    "<div style='font-size:1rem;font-weight:700;color:#f8fafc;margin-bottom:2px'>⚙️ Developer Logs &amp; Latency</div>"
+                    "<div style='font-size:0.75rem;color:#64748b'>Tracks actual execution times, database operations, and LLM query latency.</div>"
+                    "</div>",
+                    unsafe_allow_html=True
+                )
+
+                log_path = "data/audit_run_latency.log"
+                import os
+                
+                col_ref_dev, col_clear_dev = st.columns(2)
+                with col_ref_dev:
+                    if st.button("🔄 Refresh Logs", use_container_width=True, key="dev_refresh_btn"):
+                        st.rerun()
+                with col_clear_dev:
+                    if st.button("🗑️ Clear Log File", use_container_width=True, key="dev_clear_btn"):
+                        try:
+                            if os.path.exists(log_path):
+                                os.remove(log_path)
+                            st.toast("🗑️ Developer log file cleared!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed to clear log: {e}")
+
+                if os.path.exists(log_path):
+                    try:
+                        with open(log_path, "r", encoding="utf-8") as f:
+                            logs_content = f.read()
+                        
+                        st.text_area("Audit Terminal Output", value=logs_content, height=450, key="dev_logs_area")
+                    except Exception as e:
+                        st.error(f"Error reading log file: {e}")
+                else:
+                    st.info("No developer logs recorded yet. Run an audit to log latency and terminal outputs!")
 
 
 st.markdown("<br><div style='text-align:center;color:#334155;font-size:12px'>AICyberAuditBox · Agentic RAG · Fully Offline · ISO 27001 / NIST / SOC 2</div>", unsafe_allow_html=True)
