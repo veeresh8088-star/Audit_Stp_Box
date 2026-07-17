@@ -4,7 +4,7 @@ import random
 import threading
 import contextlib
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, text, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, text, Boolean, Float
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 Base = declarative_base()
@@ -86,6 +86,13 @@ class Finding(Base):
     evidence_row_number   = Column(Integer, nullable=True)
     evidence_slide_number = Column(Integer, nullable=True)
     evidence_image_id     = Column(String(200), nullable=True)
+    
+    # Policy / Evidence / Severity matrix fields
+    policy_present        = Column(String(50), default="No", server_default="No")
+    evidence_present      = Column(String(50), default="No", server_default="No")
+    policy_result         = Column(String(100), nullable=True)
+    evidence_result       = Column(String(100), nullable=True)
+    severity_score        = Column(Float, default=0.0, server_default="0.0")
 
 class AuditRecord(Base):
     """Auditor review log containing review outcomes and comments."""
@@ -413,11 +420,16 @@ def reconcile_schemas(engine):
                                     type_str = "TEXT"
                                 elif "DATETIME" in type_str or "TIMESTAMP" in type_str:
                                     type_str = "TIMESTAMP"
+                                elif "FLOAT" in type_str or "REAL" in type_str or "NUMERIC" in type_str:
+                                    type_str = "FLOAT"
                                 
                                 default_clause = ""
                                 if col_obj.default is not None:
-                                    if hasattr(col_obj.default, 'arg') and isinstance(col_obj.default.arg, bool):
-                                        default_clause = f" DEFAULT {'TRUE' if col_obj.default.arg else 'FALSE'}"
+                                    if hasattr(col_obj.default, 'arg'):
+                                        if isinstance(col_obj.default.arg, bool):
+                                            default_clause = f" DEFAULT {'TRUE' if col_obj.default.arg else 'FALSE'}"
+                                        elif isinstance(col_obj.default.arg, (int, float, str)):
+                                            default_clause = f" DEFAULT '{col_obj.default.arg}'"
                                 
                                 alter_sql = f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {type_str}{default_clause}'
                                 print(f"[MIGRATION EXECUTE] {alter_sql}")
@@ -493,11 +505,19 @@ def init_db():
     try:
         with eng_m.connect() as conn:
             conn.execute(text("SELECT 1 FROM users LIMIT 1"))
-        # Database and tables exist, skip bootstrap and reconciliation
+        # Database and tables exist, skip bootstrap but ALWAYS run reconcile_schemas to ensure columns exist
         engine_master = eng_m
         engine_slave1 = eng_s1
         engine_slave2 = eng_s2
         db_label = "ShaktiDB"
+        
+        reconcile_schemas(eng_m)
+        reconcile_schemas(eng_s1)
+        reconcile_schemas(eng_s2)
+        
+        Base.metadata.create_all(bind=eng_m)
+        Base.metadata.create_all(bind=eng_s1)
+        Base.metadata.create_all(bind=eng_s2)
         return eng_m, "ShaktiDB"
     except Exception:
         pass

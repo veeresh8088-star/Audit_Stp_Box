@@ -162,6 +162,9 @@ Control Objective & Illustrative Evidence Examples (Do NOT treat as a mandatory 
 
 You MUST respond with findings wrapped in XML tags matching this format:
 <status>COMPLIANT | NON_COMPLIANT | FALSE_POSITIVE</status>
+<policy_present>Yes | No | Partial</policy_present>
+<evidence_present>Yes | No | Partial</evidence_present>
+<severity_score>float_between_0.0_and_10.0</severity_score>
 <evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
 <control_coverage>percentage_integer</control_coverage>
 <evidence_count>integer</evidence_count>
@@ -179,7 +182,7 @@ You MUST respond with findings wrapped in XML tags matching this format:
     <page>Page Number</page>
     <excerpt>Supporting evidence text / verbatim quote</excerpt>
   </evidence_item>
-</ evidence_items>
+</evidence_items>
 
 Ensure the output contains only the XML tags and no surrounding text.
 """
@@ -340,6 +343,9 @@ CRITIQUE & CORRECT
 
 You MUST respond with findings wrapped in XML tags matching this format:
 <status>COMPLIANT | NON_COMPLIANT | FALSE_POSITIVE</status>
+<policy_present>Yes | No | Partial</policy_present>
+<evidence_present>Yes | No | Partial</evidence_present>
+<severity_score>float_between_0.0_and_10.0</severity_score>
 <evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
 <control_coverage>percentage_integer</control_coverage>
 <evidence_count>integer</evidence_count>
@@ -357,7 +363,7 @@ You MUST respond with findings wrapped in XML tags matching this format:
     <page>Page Number</page>
     <excerpt>Supporting evidence text / verbatim quote</excerpt>
   </evidence_item>
-</ evidence_items>
+</evidence_items>
 
 Ensure the output contains only the XML tags and no surrounding text.
 """
@@ -540,13 +546,37 @@ class NativeOllamaChain:
             # 11. recommendation
             normalized["recommendation"] = str(data.get("recommendation") or data.get("suggested_action") or "")
             
+            # 12. policy_present
+            p_pres = str(data.get("policy_present") or "No").strip().capitalize()
+            if p_pres not in ("Yes", "No", "Partial"):
+                p_pres = "No"
+            normalized["policy_present"] = p_pres
+
+            # 13. evidence_present
+            e_pres = str(data.get("evidence_present") or "No").strip().capitalize()
+            if e_pres not in ("Yes", "No", "Partial"):
+                e_pres = "No"
+            normalized["evidence_present"] = e_pres
+
+            # 14. severity_score
+            try:
+                sev_score_str = str(data.get("severity_score") or "0.0").strip()
+                matches = re.findall(r'\d+\.\d+|\d+', sev_score_str)
+                if matches:
+                    normalized["severity_score"] = float(matches[0])
+                else:
+                    normalized["severity_score"] = 0.0
+            except Exception:
+                normalized["severity_score"] = 0.0
+
             return normalized
 
         # Parse XML helper
         def parse_xml_to_dict(xml_text: str) -> dict:
             parsed_data = {}
             expected_tags = ["status", "evidence_strength", "control_coverage", "evidence_count", 
-                             "business_impact", "remediation_priority", "justification", "recommendation"]
+                             "business_impact", "remediation_priority", "justification", "recommendation",
+                             "policy_present", "evidence_present", "severity_score"]
             
             # Tag Repair Logic (pre-processing unclosed tags)
             repaired_text = xml_text.strip()
@@ -732,6 +762,17 @@ class NativeOllamaChain:
                     "or upload a revised version containing explicit statements regarding this control."
                 )
 
+            # Map severity_score based on default severity for fallback
+            fallback_score = 5.5
+            if control_default_severity == "Critical":
+                fallback_score = 9.5
+            elif control_default_severity == "High":
+                fallback_score = 8.0
+            elif control_default_severity == "Medium":
+                fallback_score = 5.5
+            elif control_default_severity == "Low":
+                fallback_score = 2.0
+
             return AuditFindingSchema(
                 status="NON_COMPLIANT",
                 severity=control_default_severity,
@@ -743,7 +784,10 @@ class NativeOllamaChain:
                 justification=justification,
                 missing_requirements=missing_requirements,
                 recommendation=recommendation,
-                evidence=[]
+                evidence=[],
+                policy_present="No",
+                evidence_present="No",
+                severity_score=fallback_score
             )
 
 def get_generator_chain(model_name: str, url: str = None):

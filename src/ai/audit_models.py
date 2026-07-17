@@ -60,6 +60,18 @@ class AuditFindingSchema(BaseModel):
         default=[],
         description="List of supporting evidence items."
     )
+    policy_present: Literal["Yes", "No", "Partial", "YES", "NO", "PARTIAL"] = Field(
+        default="No",
+        description="Is a documented policy present for this control?"
+    )
+    evidence_present: Literal["Yes", "No", "Partial", "YES", "NO", "PARTIAL"] = Field(
+        default="No",
+        description="Is implementation evidence present for this control?"
+    )
+    severity_score: float = Field(
+        default=0.0,
+        description="Vulnerability score from 0.0 to 10.0"
+    )
 
     @model_validator(mode='after')
     def enforce_compliance_rule_consistency(self) -> 'AuditFindingSchema':
@@ -68,6 +80,7 @@ class AuditFindingSchema(BaseModel):
         1. If status is COMPLIANT or FALSE_POSITIVE, severity must be N/A.
         2. If status is COMPLIANT, at least one valid evidence quote must be present.
         3. If status is NON_COMPLIANT, severity cannot be N/A.
+        4. Map severity based on severity_score if status is NON_COMPLIANT.
         """
         status_val = self.status
         severity_val = self.severity
@@ -87,8 +100,23 @@ class AuditFindingSchema(BaseModel):
 
         # Rule 2: Gaps rules (Non-Compliant)
         elif status_val == "NON_COMPLIANT":
-            if severity_val == "N/A":
-                object.__setattr__(self, 'severity', 'Medium')
+            # Map severity according to user's defined ranges
+            score = self.severity_score
+            mapped_sev = "Medium"
+            if score >= 9.0:
+                mapped_sev = "Critical"
+            elif score >= 7.0:
+                mapped_sev = "High"
+            elif score >= 4.0:
+                mapped_sev = "Medium"
+            elif score >= 0.1:
+                mapped_sev = "Low"
+            else:
+                # Default to Medium if score is 0.0 or not set but status is NON_COMPLIANT
+                mapped_sev = "Medium"
+            
+            object.__setattr__(self, 'severity', mapped_sev)
+
             if not self.business_impact or self.business_impact.strip() in ("", "NOT_FOUND"):
                 object.__setattr__(self, 'business_impact', 'Potential security exposure or compliance gap due to missing controls.')
             if not self.recommendation or self.recommendation.strip() in ("", "NOT_FOUND"):

@@ -17,8 +17,8 @@ import time, json, hashlib, uuid, threading, re, os
 import logging
 from datetime import datetime, timedelta, timezone
 
-is_llamacpp = (os.environ.get("LLM_BACKEND") == "llama.cpp")
-backend_name = "llama.cpp" if is_llamacpp else "Ollama"
+is_llamacpp = True
+backend_name = "llama.cpp"
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 
@@ -639,7 +639,12 @@ def save_findings(uc, findings):
                 evidence_page_number=f.get("evidence_page_number"),
                 evidence_row_number=f.get("evidence_row_number"),
                 evidence_slide_number=f.get("evidence_slide_number"),
-                evidence_image_id=f.get("evidence_image_id")
+                evidence_image_id=f.get("evidence_image_id"),
+                policy_present=f.get("policy_present", "No"),
+                evidence_present=f.get("evidence_present", "No"),
+                policy_result=f.get("policy_result"),
+                evidence_result=f.get("evidence_result"),
+                severity_score=f.get("severity_score", 0.0)
             ))
 
             # Log to AuditorFeedback memory to learn from
@@ -740,7 +745,12 @@ def get_all_audit_reports(role=None):
                 "recommendation": f.recommendation,
                 "reasoning": f.reasoning,
                 "status": f.status,
-                "source_files": f.source_files
+                "source_files": f.source_files,
+                "policy_present": f.policy_present,
+                "evidence_present": f.evidence_present,
+                "policy_result": f.policy_result,
+                "evidence_result": f.evidence_result,
+                "severity_score": f.severity_score
             })
             
         resolved_list = json.loads(r.controls_selected) if r.controls_selected else []
@@ -784,7 +794,12 @@ def get_auditee_reports(user_id):
                 "recommendation": f.recommendation,
                 "reasoning": f.reasoning,
                 "status": f.status,
-                "source_files": f.source_files
+                "source_files": f.source_files,
+                "policy_present": f.policy_present,
+                "evidence_present": f.evidence_present,
+                "policy_result": f.policy_result,
+                "evidence_result": f.evidence_result,
+                "severity_score": f.severity_score
             })
             
         resolved_list = json.loads(r.controls_selected) if r.controls_selected else []
@@ -1699,6 +1714,11 @@ def _checkpoint_create(session_id, bg_key, ai_model, selected_sls, file_names, c
     with force_master():
         db = SessionLocal()
         try:
+            # Mark all other global in-progress or failed checkpoints as discarded
+            db.query(AuditCheckpoint).filter(
+                AuditCheckpoint.status.in_(["in_progress", "failed"])
+            ).update({AuditCheckpoint.status: "discarded"}, synchronize_session=False)
+
             # Remove any stale checkpoint for this session.
             # synchronize_session=False avoids DetachedInstanceError when cached
             # objects are still in the identity map.
@@ -2435,9 +2455,7 @@ def _resolve_ollama_model(model_choice):
     """Map UI model name to Ollama model identifier (restricted to selected models)."""
     MODEL_MAP = {
         "Gemma 4 (e4b)":                                          "gemma4:e4b",
-        "Qwen 2.5 (7B)":                                          "qwen2.5:7b",
-        "Gemma 2 (9B)":                                           "gemma2:9b",
-        "Gemma 4 (12B)":                                          "gemma4:12b",
+        "Gemma 4 (2b)":                                           "gemma-2-2b-it",
     }
     # Exact match first
     if model_choice in MODEL_MAP:
@@ -2452,7 +2470,19 @@ def _resolve_ollama_model(model_choice):
     return "qwen2.5:7b"  # safe default
 
 
-def _build_controls_for_audit(selected_sls):
+def _get_expected_evidence(uc, custom_evidence=None):
+    """Retrieve expected evidence, falling back to framework defaults if no custom Excel mapping exists."""
+    if custom_evidence is not None:
+        return custom_evidence.get(uc["use_case"], uc["expected"])
+    import streamlit as st
+    try:
+        custom_map = st.session_state.get("custom_evidence_mappings", {})
+        return custom_map.get(uc["use_case"], uc["expected"])
+    except Exception:
+        return uc["expected"]
+
+
+def _build_controls_for_audit(selected_sls, custom_evidence=None):
     """Gather control metadata for the selected sl numbers."""
     controls = []
     for uc in USE_CASES:
@@ -2460,7 +2490,7 @@ def _build_controls_for_audit(selected_sls):
             controls.append({
                 "control": uc["use_case"],
                 "label": uc["label"],
-                "expected": uc["expected"],
+                "expected": _get_expected_evidence(uc, custom_evidence),
                 "prompt_hint": uc["prompt_hint"],
                 "severity": uc.get("severity", "MEDIUM"),
                 "standard": uc.get("standard", ""),
@@ -3416,6 +3446,49 @@ def _enrich_finding_metadata(r, db_chunks):
     else:
         r["evidence_state"] = "NO_EVIDENCE"
 
+    # 2b. Map Policy/Evidence present and result statuses
+    r["policy_present"] = r.get("policy_present", "No")
+    r["evidence_present"] = r.get("evidence_present", "No")
+    r["severity_score"] = float(r.get("severity_score", 0.0))
+    
+    if r.get("status") == "Out of Scope":
+        r["policy_result"] = "Out of Scope"
+        r["evidence_result"] = "Out of Scope"
+    else:
+        pol_pres = str(r["policy_present"]).strip().capitalize()
+        evi_pres = str(r["evidence_present"]).strip().capitalize()
+        
+        status_abbr = "Compliant" if r.get("status") == "Compliant" else "Non-Compliant"
+        
+        if pol_pres == "No" and evi_pres == "No":
+            r["policy_result"] = "Both missing"
+            r["evidence_result"] = "Both missing"
+        elif pol_pres == "No":
+            r["policy_result"] = "Policy doc missing"
+            r["evidence_result"] = status_abbr
+        elif evi_pres == "No":
+            r["policy_result"] = status_abbr
+            r["evidence_result"] = "Evidence missing"
+        else:
+            r["policy_result"] = status_abbr
+            r["evidence_result"] = status_abbr
+
+    # 2c. Map severity based on severity_score if status is Non-Compliant
+    if r.get("status") == "Non-Compliant":
+        score = float(r.get("severity_score", 0.0))
+        if score >= 9.0:
+            r["severity"] = "P1 Critical"
+        elif score >= 7.0:
+            r["severity"] = "P2 High"
+        elif score >= 4.0:
+            r["severity"] = "P3 Medium"
+        elif score >= 0.1:
+            r["severity"] = "P4 Low"
+        else:
+            r["severity"] = "P3 Medium"
+    else:
+        r["severity"] = "N/A"
+
     # 3. Initialize default source metadata keys
     r["evidence_source_file"] = None
     r["evidence_source_type"] = None
@@ -3626,7 +3699,7 @@ def generate_ollama_reflection(context, file_names_list, selected_sls, draft_fin
     expected_evidence_map = {}
     for uc in USE_CASES:
         cid = uc["use_case"].split(" ")[0]
-        expected_evidence_map[cid] = [uc["expected"], uc["prompt_hint"]]
+        expected_evidence_map[cid] = [_get_expected_evidence(uc), uc["prompt_hint"]]
 
     from src.core.validator import post_process, validate_cross_control_duplicates
     
@@ -3657,12 +3730,12 @@ def generate_ollama_reflection(context, file_names_list, selected_sls, draft_fin
     return resolved_list, all_results
 
 
-def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep"):
+def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None):
     """Audit controls sequentially using the LangGraph state machine.
     Uses the ISO 27001 Lead Auditor logic and preserves database routing and session checkpoints.
     """
     ollama_model = _resolve_ollama_model(model_choice)
-    controls = _build_controls_for_audit(selected_sls)
+    controls = _build_controls_for_audit(selected_sls, custom_evidence)
 
     scanned_files_str = ", ".join(file_names_list) if file_names_list else "None"
     
@@ -3717,6 +3790,55 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
                     "percent": int((idx / total) * 100)
                 }
 
+        # Target Document Mapping Integration (excel scope uploader)
+        control_context = context
+        control_file_names = file_names_list
+        
+        target_doc_name = None
+        docs_source = custom_docs if custom_docs is not None else {}
+        if not docs_source:
+            import streamlit as st
+            try:
+                docs_source = st.session_state.get("custom_control_documents", {})
+            except Exception:
+                docs_source = {}
+                
+        if docs_source and c["control"] in docs_source:
+            target_doc_name = docs_source[c["control"]]
+            
+        if target_doc_name:
+            # Robust normalized matching to check if any uploaded filename matches
+            def _norm_fn(s):
+                if not s:
+                    return ""
+                # Strip extension and standard punctuation/symbols
+                s_no_ext = os.path.splitext(s)[0]
+                import re
+                return re.sub(r'[^a-z0-9]', '', s_no_ext.lower())
+
+            norm_target = _norm_fn(target_doc_name)
+            matched_files = []
+            for fname in file_names_list:
+                norm_fname = _norm_fn(fname)
+                if norm_target and norm_fname and (norm_target in norm_fname or norm_fname in norm_target):
+                    matched_files.append(fname)
+            if matched_files:
+                control_file_names = matched_files
+                # Retrieve the text of only the matched files
+                reg_source = file_registry if file_registry is not None else {}
+                if not reg_source:
+                    import streamlit as st
+                    try:
+                        reg_source = st.session_state.get("file_registry", {})
+                    except Exception:
+                        reg_source = {}
+                matched_texts = [reg_source.get(fname, "") for fname in matched_files if reg_source.get(fname)]
+                if matched_texts:
+                    control_context = "\n\n".join(matched_texts)
+                print(f"[RAG TARGET FILTER] Control {c['control']} restricted to document '{target_doc_name}'. Filenames: {control_file_names}", flush=True)
+            else:
+                print(f"[RAG TARGET WARNING] Control {c['control']} target document '{target_doc_name}' not found in uploaded list: {file_names_list}", flush=True)
+
         # Assemble graph inputs
         graph_input = {
             "control_id": c["control"],
@@ -3728,8 +3850,8 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             "recommendation": c["recommendation"],
             
             # Context & Config
-            "document_text": context,
-            "file_names_list": file_names_list,
+            "document_text": control_context,
+            "file_names_list": control_file_names,
             "ollama_model": ollama_model,
             "summary_text": summary_text,
             
@@ -3867,7 +3989,7 @@ def ai_chat_stream(system_ctx, user_msg, model_choice):
     except Exception as e:
         yield f"⚠️ Offline Engine not responding: {e}"
 
-def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep"):
+def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None):
     import io
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)
     _sid = session_id or bg_key   # use session_id for checkpoint keying
@@ -3903,6 +4025,18 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             file_names_list.append(name)
         context_str = ctx.strip()
 
+        # Update scanned files to "Reviewing" in database
+        try:
+            with force_master():
+                db_write = SessionLocal()
+                db_write.query(EvidenceFile).filter(
+                    EvidenceFile.filename.in_(file_names_list)
+                ).update({EvidenceFile.status: "Reviewing"}, synchronize_session=False)
+                db_write.commit()
+                db_write.close()
+        except Exception as e:
+            print(f"[PIPELINE] Failed to update active files status to Reviewing: {e}")
+
         # ── Create checkpoint so we can resume if the process crashes ─────────
         from src.core.controls_data import USE_CASES as _UC
         _total_ctrl_count = len([u for u in _UC if u["sl"] in selected_sls_copy])
@@ -3929,7 +4063,8 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         
         resolved_combined, findings_combined = generate_ollama_findings(
             context_str, file_names_list, selected_sls_copy, ai_model, bg_key=bg_key,
-            checkpoint_session_id=_sid, audit_mode=audit_mode
+            checkpoint_session_id=_sid, audit_mode=audit_mode,
+            custom_docs=custom_docs, custom_evidence=custom_evidence, file_registry=file_registry
         )
 
         print(f"[_run_ollama_bg] Success! resolved: {len(resolved_combined)}, findings/results: {len(findings_combined)}", flush=True)
@@ -3948,6 +4083,17 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 "resolved_controls": set(resolved_mapping.keys()),
                 "context": context_str
             }
+        # Update scanned files to "Completed" in database
+        try:
+            with force_master():
+                db_write = SessionLocal()
+                db_write.query(EvidenceFile).filter(
+                    EvidenceFile.filename.in_(file_names_list)
+                ).update({EvidenceFile.status: "Completed"}, synchronize_session=False)
+                db_write.commit()
+                db_write.close()
+        except Exception as e:
+            print(f"[PIPELINE] Failed to update active files status to Completed: {e}")
         _checkpoint_finish(_sid, "completed")
         print(f"[checkpoint] Checkpoint marked complete for session {_sid}", flush=True)
     except Exception as e:
@@ -4244,9 +4390,7 @@ with st.sidebar:
         st.markdown("<div class='section-title-wrapper'>AI Engine Setup</div>", unsafe_allow_html=True)
         ai_model = st.selectbox(f"Select Offline LLM (via {backend_name})", [
             "Gemma 4 (e4b)",
-            "Qwen 2.5 (7B)",
-            "Gemma 2 (9B)",
-            "Gemma 4 (12B)"
+            "Gemma 4 (2b)"
         ], label_visibility="collapsed", index=0, key="selected_ai_model")
         st.divider()
 
@@ -4472,15 +4616,124 @@ with st.sidebar:
             if "scoping_mode" not in st.session_state:
                 st.session_state.scoping_mode = "Manual Scoping"
             
-            default_index = 1 if st.session_state.scoping_mode == "Manual Scoping" else 0
+            scoping_options = ["Automatic AI Scoping", "Manual Scoping", "Upload Excel Scope Document"]
+            try:
+                default_index = scoping_options.index(st.session_state.scoping_mode)
+            except ValueError:
+                default_index = 1
             
             st.session_state.scoping_mode = st.radio(
                 "Scoping Mode",
-                options=["Automatic AI Scoping", "Manual Scoping"],
+                options=scoping_options,
                 index=default_index,
                 label_visibility="collapsed",
                 horizontal=True
             )
+            
+            # --- CUSTOM EXCEL SCOPING UPLOADER ---
+            if st.session_state.scoping_mode == "Upload Excel Scope Document":
+                st.write("")
+                scope_file = st.file_uploader(
+                    "Upload Scope & Evidence Mapping (.xlsx, .xls)",
+                    type=["xlsx", "xls"],
+                    key="scoping_excel_uploader"
+                )
+                if scope_file is not None:
+                    file_id = f"{scope_file.name}_{scope_file.size}"
+                    if st.session_state.get("last_parsed_scope_file") != file_id:
+                        try:
+                            import pandas as pd
+                            import re as _re
+                            
+                            df = pd.read_excel(scope_file)
+                            col_control = None
+                            col_document = None
+                            col_evidence = None
+                            
+                            # Inspect column headers for keywords
+                            for col in df.columns:
+                                col_str = str(col).lower()
+                                if any(k in col_str for k in ("evidence", "expected", "proof")):
+                                    col_evidence = col
+                                elif any(k in col_str for k in ("use_case", "sl", "number")) or "id" in col_str.split() or col_str == "control":
+                                    col_control = col
+                                elif any(k in col_str for k in ("doc", "file", "policy", "source")):
+                                    col_document = col
+                                    
+                            if col_control is None or col_evidence is None:
+                                # Fallback to column index 0 and 1 (or 2 if 3 columns exist)
+                                if len(df.columns) >= 3:
+                                    col_control = df.columns[0]
+                                    col_document = df.columns[1]
+                                    col_evidence = df.columns[2]
+                                elif len(df.columns) >= 2:
+                                    col_control = df.columns[0]
+                                    col_evidence = df.columns[1]
+                                    
+                            if col_control is not None and col_evidence is not None:
+                                custom_evidence = {}
+                                custom_documents = {}
+                                matched_sls = set()
+                                digit_re = _re.compile(r'(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)')
+                                vapt_re = _re.compile(r'(vapt-\d{1,2})', _re.IGNORECASE)
+                                
+                                for _, row in df.iterrows():
+                                    ctrl_val = str(row[col_control]).strip()
+                                    ev_val = str(row[col_evidence]).strip()
+                                    if not ctrl_val or ctrl_val == "nan" or not ev_val or ev_val == "nan":
+                                        continue
+                                        
+                                    matched_uc = None
+                                    # Match standard numeric ID (e.g. 5.15)
+                                    match_id = digit_re.search(ctrl_val)
+                                    # Match VAPT controls (e.g. VAPT-1)
+                                    match_vapt = vapt_re.search(ctrl_val)
+                                    
+                                    if match_vapt:
+                                        target_vapt = match_vapt.group(1).upper()
+                                        for uc in USE_CASES:
+                                            if uc["use_case"].upper().startswith(target_vapt):
+                                                matched_uc = uc
+                                                break
+                                    elif match_id:
+                                        target_id = match_id.group(1)
+                                        for uc in USE_CASES:
+                                            uc_id = uc["use_case"].split(" ")[0]
+                                            if uc_id == target_id:
+                                                matched_uc = uc
+                                                break
+                                    else:
+                                        # Substring match fallback
+                                        for uc in USE_CASES:
+                                            if ctrl_val.lower() in uc["use_case"].lower():
+                                                matched_uc = uc
+                                                break
+                                                
+                                    if matched_uc:
+                                        custom_evidence[matched_uc["use_case"]] = ev_val
+                                        if col_document is not None:
+                                            doc_val = str(row[col_document]).strip()
+                                            if doc_val and doc_val != "nan":
+                                                custom_documents[matched_uc["use_case"]] = doc_val
+                                        matched_sls.add(matched_uc["sl"])
+                                        
+                                if custom_evidence:
+                                    st.session_state.custom_evidence_mappings = custom_evidence
+                                    st.session_state.custom_control_documents = custom_documents
+                                    # Check mapped controls, uncheck the rest
+                                    for uc in USE_CASES:
+                                        st.session_state[f"ctrl_chk_{uc['sl']}"] = (uc["sl"] in matched_sls)
+                                    st.session_state.last_parsed_scope_file = file_id
+                                    st.toast(f"Loaded {len(matched_sls)} controls with custom target documents and expected evidence!", icon="✅")
+                                else:
+                                    st.warning("⚠️ No controls matched standard framework lists. Please verify control ID numbers.")
+                            else:
+                                st.error("❌ Columns for 'Control' and 'Evidence' could not be found.")
+                        except Exception as ex:
+                            st.error(f"❌ Failed to parse Excel: {ex}")
+                else:
+                    if "last_parsed_scope_file" in st.session_state:
+                        del st.session_state.last_parsed_scope_file
     
             if "selected_scopes" not in st.session_state:
                 st.session_state.selected_scopes = []
@@ -4503,7 +4756,7 @@ with st.sidebar:
                 options=list(scoping_engine.DOC_TYPE_MAPPINGS.keys()),
                 key="selected_scopes",
                 label_visibility="collapsed",
-                disabled=(st.session_state.scoping_mode == "Automatic AI Scoping")
+                disabled=(st.session_state.scoping_mode in ("Automatic AI Scoping", "Upload Excel Scope Document"))
             )
     
             if st.session_state.scoping_mode == "Manual Scoping" and st.session_state.selected_scopes != st.session_state.prev_scopes:
@@ -4595,6 +4848,10 @@ with st.sidebar:
                 for warn in st.session_state.auditor_duplicate_warnings:
                     st.warning(warn)
                 st.session_state.auditor_duplicate_warnings = []
+            if "malware_warnings" in st.session_state and st.session_state.malware_warnings:
+                for warn in st.session_state.malware_warnings:
+                    st.error(warn)
+                st.session_state.malware_warnings = []
             
             uploaded = st.file_uploader(
                 "Upload auditor reference documents",
@@ -4625,6 +4882,14 @@ with st.sidebar:
 
                 for f in uploaded:
                     if f.name in st.session_state.processed_uploader_files:
+                        continue
+                    
+                    is_clean, reason = scan_file_security(f)
+                    if not is_clean:
+                        if "malware_warnings" not in st.session_state:
+                            st.session_state.malware_warnings = []
+                        st.session_state.malware_warnings.append(f"❌ Security Alert: Blocked upload of '{f.name}' - {reason}")
+                        st.session_state.processed_uploader_files.add(f.name)
                         continue
 
                     if report is not None:
@@ -4730,8 +4995,13 @@ with st.sidebar:
                 # Rebuild full context from all uploaded files
                 auto_ctx = ""
                 for fname, ftext in st.session_state.file_registry.items():
-                    auto_ctx += f"--- FILE: {fname} ---\n{ftext}\n\n"
+                    if ftext is not None:
+                        auto_ctx += f"--- FILE: {fname} ---\n{ftext}\n\n"
                 st.session_state.context = auto_ctx.strip()
+                
+                # Auto-run trigger
+                if st.session_state.get("auto_run_after_upload", True):
+                    st.session_state.start_analysis_on_next_run = True
                 st.rerun()
 
 
@@ -4847,6 +5117,8 @@ if run or st.session_state.get("start_analysis_on_next_run"):
         all_ev = db.query(EvidenceFile).all()
         loaded_any = False
         import io
+        
+        # 1. Load any checked files from history
         for ev in all_ev:
             if st.session_state.get(f"doc_chk_{ev.id}", False):
                 names = [n.strip() for n in st.session_state.get("last_uploaded_names", "").split(",") if n.strip()]
@@ -4854,21 +5126,71 @@ if run or st.session_state.get("start_analysis_on_next_run"):
                     names.append(ev.filename)
                 st.session_state.last_uploaded_names = ", ".join(names)
                 
-                if ev.filename not in st.session_state.file_registry:
+                if ev.filename not in st.session_state.file_registry or st.session_state.file_registry.get(ev.filename) is None:
                     if os.path.exists(ev.file_path):
-                        with open(ev.file_path, "rb") as fb:
+                        with st.spinner(f"Extracting text from history file '{ev.filename}'..."):
+                            with open(ev.file_path, "rb") as fb:
+                                fb_bytes = fb.read()
+                            class _NB(io.BytesIO):
+                                def __init__(self, val, name):
+                                    super().__init__(val); self.name = name
+                            text = extract_text(_NB(fb_bytes, ev.filename))
+                            st.session_state.file_registry[ev.filename] = text
+                            save_document_chunks(ev.filename, text)
+                            loaded_any = True
+
+        # 2. Process any pending lazy-loaded files from sidebar upload
+        for fname in list(st.session_state.file_registry.keys()):
+            if st.session_state.file_registry[fname] is None:
+                # Find matching record in DB to get the path
+                ev_rec = db.query(EvidenceFile).filter(
+                    EvidenceFile.filename == fname
+                ).order_by(EvidenceFile.id.desc()).first()
+                
+                if ev_rec and os.path.exists(ev_rec.file_path):
+                    with st.spinner(f"Ingesting and performing OCR on '{fname}'..."):
+                        with open(ev_rec.file_path, "rb") as fb:
                             fb_bytes = fb.read()
                         class _NB(io.BytesIO):
                             def __init__(self, val, name):
                                 super().__init__(val); self.name = name
-                        text = extract_text(_NB(fb_bytes, ev.filename))
-                        st.session_state.file_registry[ev.filename] = text
-                        save_document_chunks(ev.filename, text)
+                        text = extract_text(_NB(fb_bytes, fname))
+                        
+                        # Run guardrails
+                        try:
+                            _grd_safe, _grd_reason = _scan_document(fname, fb_bytes, text or "")
+                            if not _grd_safe:
+                                if "guardrail_warnings" not in st.session_state:
+                                    st.session_state.guardrail_warnings = []
+                                st.session_state.guardrail_warnings.append(
+                                    f"⚠️ Security warning for '{fname}': {_grd_reason}"
+                                )
+                                try:
+                                    import json as _grd_json
+                                    _grd_event = SystemEvent(
+                                        event_type="INPUT_GUARDRAIL_WARN",
+                                        actor=st.session_state.get("username", "SYSTEM"),
+                                        session_id=str(st.session_state.get("session_id", "")),
+                                        framework="ISO 27001",
+                                        meta=_grd_json.dumps({"file": fname, "reason": _grd_reason}),
+                                        severity="WARNING",
+                                    )
+                                    db.add(_grd_event)
+                                    db.commit()
+                                except Exception:
+                                    pass
+                        except Exception as _grd_err:
+                            print(f"[GUARDRAIL WARNING] Scan failed for {fname}: {_grd_err}", flush=True)
+                            
+                        st.session_state.file_registry[fname] = text
+                        save_document_chunks(fname, text)
                         loaded_any = True
-        if loaded_any:
+
+        if loaded_any or any(v is None for v in st.session_state.file_registry.values()):
             auto_ctx = ""
             for fn, ft in st.session_state.file_registry.items():
-                auto_ctx += f"--- FILE: {fn} ---\n{ft}\n\n"
+                if ft is not None:
+                    auto_ctx += f"--- FILE: {fn} ---\n{ft}\n\n"
             st.session_state.context = auto_ctx.strip()
     except Exception as e:
         print(f"[PIPELINE] Error auto-loading checked files: {e}")
@@ -5038,7 +5360,10 @@ if run or st.session_state.get("start_analysis_on_next_run"):
                 args=(bg_key, files_data, set(selected_sls), ai_model),
                 kwargs={
                     "session_id": st.session_state.active_chat_id,
-                    "audit_mode": st.session_state.get("audit_mode", "Deep")
+                    "audit_mode": st.session_state.get("audit_mode", "Deep"),
+                    "custom_docs": dict(st.session_state.get("custom_control_documents", {})),
+                    "custom_evidence": dict(st.session_state.get("custom_evidence_mappings", {})),
+                    "file_registry": dict(st.session_state.get("file_registry", {}))
                 },
                 daemon=True
             )
@@ -5069,7 +5394,7 @@ if not _resumable:
 if _resumable and _resumable.session_id not in _bg_running:
     _done  = _resumable.completed_batches
     _total_b = (_resumable.total_controls + _resumable.batch_size - 1) // max(_resumable.batch_size, 1)
-    _pct   = int((_done / max(_total_b, 1)) * 100)
+    _pct   = max(0, min(100, int((_done / max(_total_b, 1)) * 100)))
     _saved = len(json.loads(_resumable.partial_results_json or "[]"))
 
     st.markdown(f"""
@@ -5145,7 +5470,7 @@ if _resumable and _resumable.session_id not in _bg_running:
                     with _bg_lock:
                         _bg_store["progress"][bg_key] = {
                             "text": f"⚡ Resuming from batch {_done + 1}/{_total_b}...",
-                            "percent": int((_done / max(_total_b, 1)) * 100)
+                            "percent": max(0, min(100, int((_done / max(_total_b, 1)) * 100)))
                         }
                     new_resolved, new_findings = generate_ollama_findings(
                         context_str, file_names, pending_sls, model,
@@ -5197,6 +5522,273 @@ if _resumable and _resumable.session_id not in _bg_running:
     if _col_dis.button("Discard", use_container_width=True, key="discard_checkpoint_btn"):
         _checkpoint_finish(_resumable.session_id, "discarded")
         st.rerun()
+
+@st.fragment(run_every=timedelta(seconds=5))
+def _render_document_viewer_fragment(doc_view_scope_select):
+    db = SessionLocal()
+    try:
+        target_role = "auditee" if st.session_state.user_role == "auditor" else st.session_state.user_role
+        with force_master():
+            results = db.query(EvidenceFile, AuditReport, User).join(
+                AuditReport, EvidenceFile.report_id == AuditReport.id
+            ).join(
+                User, AuditReport.auditee_id == User.id
+            ).filter(
+                User.role == target_role
+            ).all()
+        
+        # Filter results by selected view scope
+        if doc_view_scope_select == "Auditee Submitted Documents":
+            results = [r for r in results if not r[0].is_auditor_uploaded]
+        else:
+            results = [r for r in results if r[0].is_auditor_uploaded]
+    except Exception as e:
+        results = []
+        st.error(f"Error querying evidence files: {e}")
+    finally:
+        db.close()
+
+    if not results:
+        if doc_view_scope_select == "Auditor Private Documents":
+            st.info("No private auditor documents have been uploaded yet.")
+        else:
+            st.info("No documents have been uploaded by auditees yet.")
+        return
+
+    # Collect all files flat for the bulk action
+    import os, io
+    all_ev_files = []
+    grouped = {}
+    for ev, rep, usr in results:
+        auditee_name = usr.username if usr else "Anonymous / External"
+        rep_title = rep.session_title if rep else f"Report ID {ev.report_id}"
+        rep_id = ev.report_id
+        if auditee_name not in grouped:
+            grouped[auditee_name] = {}
+        if (rep_id, rep_title) not in grouped[auditee_name]:
+            grouped[auditee_name][(rep_id, rep_title)] = []
+        grouped[auditee_name][(rep_id, rep_title)].append(ev)
+        all_ev_files.append(ev)
+
+    already_loaded = set(st.session_state.get("file_registry", {}).keys())
+    col_selall, col_deselall, col_load = st.columns([2, 2, 3])
+    if col_selall.button("☑ Select All", use_container_width=True, key="docs_select_all"):
+        for ev in all_ev_files:
+            st.session_state[f"doc_chk_{ev.id}"] = True
+        st.rerun()
+    if col_deselall.button("☐ Deselect All", use_container_width=True, key="docs_desel_all"):
+        for ev in all_ev_files:
+            st.session_state[f"doc_chk_{ev.id}"] = False
+        st.rerun()
+
+    selected_ev = [ev for ev in all_ev_files if st.session_state.get(f"doc_chk_{ev.id}", False)]
+    load_lbl = f"Upload {len(selected_ev)} Selected for Analysis" if selected_ev else "Upload Selected for Analysis"
+    if col_load.button(load_lbl, type="primary", use_container_width=True,
+                       key="docs_bulk_load", disabled=(len(selected_ev) == 0)):
+        class _NB(io.BytesIO):
+            def __init__(self, val, name):
+                super().__init__(val); self.name = name
+        if "file_registry" not in st.session_state:
+            st.session_state.file_registry = {}
+        loaded, failed = [], []
+        
+        selected_auditee_ids = set()
+        for ev in selected_ev:
+            for r_ev, r_rep, r_usr in results:
+                if r_ev.id == ev.id and r_usr:
+                    selected_auditee_ids.add(r_usr.id)
+        if len(selected_auditee_ids) == 1:
+            target_auditee_id = list(selected_auditee_ids)[0]
+            with force_master():
+                db_write = SessionLocal()
+                active_rep = db_write.query(AuditReport).filter(AuditReport.session_id == st.session_state.active_chat_id).first()
+                if active_rep:
+                    active_rep.auditee_id = target_auditee_id
+                    db_write.commit()
+                db_write.close()
+                
+        for ev in selected_ev:
+            if not os.path.exists(ev.file_path):
+                failed.append(ev.filename); continue
+            try:
+                with open(ev.file_path, "rb") as fb:
+                    fb_bytes = fb.read()
+                text = extract_text(_NB(fb_bytes, ev.filename))
+                st.session_state.file_registry[ev.filename] = text
+                save_document_chunks(ev.filename, text)
+                names = [n.strip() for n in st.session_state.get("last_uploaded_names", "").split(",") if n.strip()]
+                if ev.filename not in names:
+                    names.append(ev.filename)
+                st.session_state.last_uploaded_names = ", ".join(names)
+                loaded.append(ev.filename)
+                try:
+                    with force_master():
+                        _db_stat = SessionLocal()
+                        _ev_obj = _db_stat.query(EvidenceFile).filter(EvidenceFile.id == ev.id).first()
+                        if _ev_obj and _ev_obj.status in (None, 'Pending', ''):
+                            _ev_obj.status = 'Reviewing'
+                            _db_stat.commit()
+                        _db_stat.close()
+                except Exception:
+                    pass
+            except Exception as ex:
+                failed.append(f"{ev.filename} ({ex})")
+        
+        auto_ctx = ""
+        for fn, ft in st.session_state.file_registry.items():
+            auto_ctx += f"--- FILE: {fn} ---\n{ft}\n\n"
+        st.session_state.context = auto_ctx.strip()
+        if loaded:
+            st.toast(f"✅ Loaded {len(loaded)} file(s) into active analysis!")
+        if failed:
+            st.warning(f"⚠️ Could not load: {', '.join(failed)}")
+        st.rerun()
+
+    st.markdown("---")
+
+    _SESSION_STATUSES = ["Pending", "Reviewing", "Completed", "Closed"]
+    _STATUS_COLORS = {
+        "Pending":   "#64748b",
+        "Reviewing": "#f97316",
+        "Completed": "#22c55e",
+        "Closed":    "#3b82f6",
+        "Draft":     "#64748b",
+    }
+
+    for auditee_name, reports_dict in grouped.items():
+        st.markdown(f"""
+        <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(30, 41, 59, 0.4) 100%);
+                    border: 1px solid rgba(59, 130, 246, 0.2);
+                    border-radius: 12px;
+                    padding: 12px 18px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    backdrop-filter: blur(8px);">
+            <div style="font-size: 1.5rem; background: rgba(59, 130, 246, 0.15); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(59, 130, 246, 0.35); color: #60a5fa;">👤</div>
+            <div>
+                <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; font-weight: 700;">Active Auditee Scope</div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">{auditee_name}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        for (rep_id, rep_title), files in reports_dict.items():
+            with st.container(border=True):
+                st.markdown(f"##### 📋 {rep_title}")
+                st.markdown("<div style='height: 1px; background: linear-gradient(to right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.01)); margin: 12px 0;'></div>", unsafe_allow_html=True)
+
+                auditee_files = [f for f in files if not f.is_auditor_uploaded]
+                auditor_files = [f for f in files if f.is_auditor_uploaded]
+                
+                sec_files = []
+                for f in auditee_files:
+                    sec_files.append((f, False))
+                if auditor_files:
+                    sec_files.append((None, True))
+                    for f in auditor_files:
+                        sec_files.append((f, False))
+                        
+                for idx_sub, (f, is_sub_hdr) in enumerate(sec_files):
+                    if is_sub_hdr:
+                        st.markdown("<div style='font-size:0.85rem;color:#a78bfa;font-weight:700;margin-top:12px;margin-bottom:8px;'>📁 Auditor Analyzed Documents (Private)</div>", unsafe_allow_html=True)
+                        continue
+                    is_loaded = f.filename in already_loaded
+                    chk_key = f"doc_chk_{f.id}"
+                    col_chk, col_name, col_status, col_down = st.columns([0.8, 5.2, 2.5, 1.5])
+                    with col_chk:
+                        st.checkbox(
+                            f"Select {f.filename}",
+                            key=chk_key,
+                            value=st.session_state.get(chk_key, False),
+                            help="Select to include in bulk load",
+                            label_visibility="collapsed"
+                        )
+                    with col_name:
+                        loaded_badge = (f" <span style='font-size:0.7rem;background:#22c55e22;"
+                                        f"border:1px solid #22c55e;color:#22c55e;padding:1px 6px;"
+                                        f"border-radius:8px;font-weight:700;'>✓ Loaded</span>"
+                                        if is_loaded else "")
+                        aud_badge = (f" <span style='font-size:0.7rem;background:#a78bfa22;"
+                                     f"border:1px solid #a78bfa;color:#a78bfa;padding:1px 6px;"
+                                     f"border-radius:8px;font-weight:700;'>Auditor Analyzed</span>"
+                                     if f.is_auditor_uploaded else "")
+                        st.markdown(
+                            f"📄 **{f.filename}**{loaded_badge}{aud_badge}  \n"
+                            f"<small style='color:#64748b;'>Uploaded: {f.uploaded_at.strftime('%Y-%m-%d %H:%M')}</small>",
+                            unsafe_allow_html=True
+                        )
+                    with col_status:
+                        _current_doc_status = f.status if f.status else "Pending"
+                        if _current_doc_status not in _SESSION_STATUSES:
+                            _current_doc_status = "Pending"
+                        
+                        if st.session_state.user_role == "auditor":
+                            new_doc_status = st.selectbox(
+                                "Status",
+                                _SESSION_STATUSES,
+                                index=_SESSION_STATUSES.index(_current_doc_status),
+                                key=f"doc_status_{f.id}",
+                                label_visibility="collapsed"
+                            )
+                            if new_doc_status != _current_doc_status:
+                                try:
+                                    with force_master():
+                                        _dbs = SessionLocal()
+                                        _f_obj = _dbs.query(EvidenceFile).filter(EvidenceFile.id == f.id).first()
+                                        if _f_obj:
+                                            _f_obj.status = new_doc_status
+                                            _dbs.commit()
+                                        _dbs.close()
+                                    st.toast(f"✅ Status of '{f.filename}' updated to **{new_doc_status}**")
+                                    st.rerun()
+                                except Exception as _se:
+                                    st.error(f"Failed to update status: {_se}")
+                        else:
+                            _sc = _STATUS_COLORS.get(_current_doc_status, "#64748b")
+                            st.markdown(
+                                f"<div style='display:flex;align-items:center;margin-top:6px;'>"
+                                f"<span style='font-size:0.72rem;background:{_sc}22;border:1px solid {_sc};"
+                                f"color:{_sc};padding:2px 8px;border-radius:10px;font-weight:700'>"
+                                f"● {_current_doc_status}</span></div>",
+                                unsafe_allow_html=True
+                            )
+                    with col_down:
+                        if os.path.exists(f.file_path):
+                            with open(f.file_path, "rb") as file_b:
+                                file_bytes = file_b.read()
+                            st.download_button(
+                                label="⬇",
+                                data=file_bytes,
+                                file_name=f.filename,
+                                key=f"doc_down_{f.id}",
+                                use_container_width=True,
+                                help=f"Download {f.filename}"
+                            )
+
+
+@st.fragment(run_every=timedelta(seconds=3))
+def _render_running_progress(bg_key):
+    with _bg_lock:
+        prog_data = _bg_store["progress"].get(bg_key, "Deep AI Scanning In Progress...")
+    if isinstance(prog_data, dict):
+        prog_msg = prog_data.get("text", "")
+        prog_pct = max(0, min(100, int(prog_data.get("percent", 0))))
+    else:
+        prog_msg = prog_data
+        prog_pct = 0
+    st.markdown(f"""
+    <div style='display: flex; justify-content: center; align-items: center; min-height: 200px; flex-direction: column;'>
+        <div class='custom-spinner'></div>
+        <div style='color: #60a5fa; font-weight: 600; font-size: 0.95rem; margin-top: 16px;'>{prog_msg}</div>
+        <style>
+            .custom-spinner {{ border: 4px solid rgba(59, 130, 246, 0.1); border-top: 4px solid #3b82f6; border-radius: 50%; width: 48px; height: 48px; animation: spin_loader 1s linear infinite; }}
+            @keyframes spin_loader {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+        </style>
+    </div>
+    """, unsafe_allow_html=True)
+    st.progress(prog_pct, text=f"**{prog_pct}%** completed")
+
 
 @st.fragment(run_every=timedelta(seconds=3))
 def _check_bg_analysis():
@@ -5254,8 +5846,8 @@ def _check_bg_analysis():
                                     EvidenceFile.filename.in_(_scanned_names)
                                 ).all()
                                 for _scan_ev in _scan_rows:
-                                    if _scan_ev.status in (None, "", "Pending"):
-                                        _scan_ev.status = "Reviewing"
+                                    if _scan_ev.status in (None, "", "Pending", "Reviewing"):
+                                        _scan_ev.status = "Completed"
                                 _db_scan.commit()
                                 _db_scan.close()
                     except Exception:
@@ -5289,51 +5881,7 @@ with _main_wrap:
                 is_currently_running = st.session_state.active_chat_id in _bg_running
             
             if is_currently_running:
-                with _bg_lock:
-                    prog_data = _bg_store["progress"].get(st.session_state.active_chat_id, "Deep AI Scanning In Progress...")
-                if isinstance(prog_data, dict):
-                    prog_msg = prog_data.get("text", "")
-                    prog_pct = prog_data.get("percent", 0)
-                else:
-                    prog_msg = prog_data
-                    prog_pct = 0
-                st.markdown(f"""
-                <div style='display: flex; justify-content: center; align-items: center; min-height: 200px; flex-direction: column;'>
-                    <div class='custom-spinner'></div>
-                    <div style='color: #60a5fa; font-weight: 600; font-size: 0.95rem; margin-top: 16px;'>{prog_msg}</div>
-                    <style>
-                        .custom-spinner {{ border: 4px solid rgba(59, 130, 246, 0.1); border-top: 4px solid #3b82f6; border-radius: 50%; width: 48px; height: 48px; animation: spin_loader 1s linear infinite; }}
-                        @keyframes spin_loader {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-                    </style>
-                </div>
-                """, unsafe_allow_html=True)
-                st.progress(prog_pct, text=f"**{prog_pct}%** completed")
-                
-                if st.button("🔄 Refresh Status", key="btn_manual_refresh", use_container_width=True):
-                    st.rerun()
-                    
-                import streamlit.components.v1 as components
-                components.html(
-                    """
-                    <script>
-                    setTimeout(function() {
-                        const buttons = window.parent.document.querySelectorAll('button');
-                        let refreshBtn = null;
-                        for (const btn of buttons) {
-                            if (btn.innerText && btn.innerText.includes('Refresh Status')) {
-                                refreshBtn = btn;
-                                break;
-                            }
-                        }
-                        if (refreshBtn) {
-                            refreshBtn.click();
-                        }
-                    }, 3000);
-                    </script>
-                    """,
-                    height=0,
-                    width=0
-                )
+                _render_running_progress(st.session_state.active_chat_id)
             
             elif st.session_state.get("ollama_error"):
                 err_msg = st.session_state["ollama_error"]
@@ -5592,6 +6140,39 @@ with _main_wrap:
                                         format_func=lambda x: f"{sev_colors.get(x,'')} {x}"
                                     )
 
+                                    # Row 2b: Policy / Evidence Presence & Severity Score
+                                    col_p_pres, col_e_pres, col_sev_score = st.columns(3)
+                                    with col_p_pres:
+                                        p_opts = ["Yes", "No", "Partial"]
+                                        curr_p_pres = f_data.get("policy_present", "Yes") if f_data else "Yes"
+                                        p_idx = p_opts.index(curr_p_pres) if curr_p_pres in p_opts else 0
+                                        new_p_pres = st.selectbox(
+                                            "Policy Present",
+                                            p_opts,
+                                            index=p_idx,
+                                            key=f"comp_p_pres_edit_{ctrl}"
+                                        )
+                                    with col_e_pres:
+                                        e_opts = ["Yes", "No", "Partial"]
+                                        curr_e_pres = f_data.get("evidence_present", "Yes") if f_data else "Yes"
+                                        e_idx = e_opts.index(curr_e_pres) if curr_e_pres in e_opts else 0
+                                        new_e_pres = st.selectbox(
+                                            "Evidence Present",
+                                            e_opts,
+                                            index=e_idx,
+                                            key=f"comp_e_pres_edit_{ctrl}"
+                                        )
+                                    with col_sev_score:
+                                        curr_sev_score = float(f_data.get("severity_score", 0.0)) if f_data else 0.0
+                                        new_sev_score = st.number_input(
+                                            "Severity Score",
+                                            min_value=0.0,
+                                            max_value=10.0,
+                                            value=curr_sev_score,
+                                            step=0.1,
+                                            key=f"comp_sev_score_edit_{ctrl}"
+                                        )
+
                                     # Row 3: Finding Details
                                     new_finding = st.text_area(
                                         "Finding Details",
@@ -5632,10 +6213,56 @@ with _main_wrap:
                                     col_save, col_cancel = st.columns([2, 1])
                                     with col_save:
                                         if st.button("💾 Save Changes", key=f"comp_save_edit_{ctrl}", type="primary", use_container_width=True):
+                                            # Sync slider and severity score
+                                            if new_comp in ("Compliant", "False Positive", "Out of Scope"):
+                                                resolved_sev = "N/A"
+                                                resolved_score = 0.0
+                                            else:
+                                                resolved_sev = new_sev
+                                                resolved_score = new_sev_score
+                                                old_sev = f_data.get("severity", "P3 Medium") if f_data else "P3 Medium"
+                                                if new_sev != old_sev:
+                                                    if new_sev == "P1 Critical": resolved_score = 9.5
+                                                    elif new_sev == "P2 High": resolved_score = 8.0
+                                                    elif new_sev == "P3 Medium": resolved_score = 5.5
+                                                    elif new_sev == "P4 Low": resolved_score = 2.0
+                                                else:
+                                                    if new_sev_score >= 9.0: resolved_sev = "P1 Critical"
+                                                    elif new_sev_score >= 7.0: resolved_sev = "P2 High"
+                                                    elif new_sev_score >= 4.0: resolved_sev = "P3 Medium"
+                                                    elif new_sev_score >= 0.1: resolved_sev = "P4 Low"
+
+                                            # Helper to build policy/evidence result text
+                                            if new_comp == "Out of Scope":
+                                                pol_res = "Out of Scope"
+                                                evi_res = "Out of Scope"
+                                            else:
+                                                pol_pres_cap = str(new_p_pres).strip().capitalize()
+                                                evi_pres_cap = str(new_e_pres).strip().capitalize()
+                                                status_abbr = "Compliant" if new_comp == "Compliant" else "Non-Compliant"
+                                                
+                                                if pol_pres_cap == "No" and evi_pres_cap == "No":
+                                                    pol_res = "Both missing"
+                                                    evi_res = "Both missing"
+                                                elif pol_pres_cap == "No":
+                                                    pol_res = "Policy doc missing"
+                                                    evi_res = status_abbr
+                                                elif evi_pres_cap == "No":
+                                                    pol_res = status_abbr
+                                                    evi_res = "Evidence missing"
+                                                else:
+                                                    pol_res = status_abbr
+                                                    evi_res = status_abbr
+
                                             found = False
                                             for orig_f in st.session_state.findings:
                                                 if orig_f.get("control_id") == ctrl or orig_f.get("control") == ctrl:
-                                                    orig_f["severity"]         = new_sev
+                                                    orig_f["severity"]         = resolved_sev
+                                                    orig_f["severity_score"]   = resolved_score
+                                                    orig_f["policy_present"]   = new_p_pres
+                                                    orig_f["evidence_present"] = new_e_pres
+                                                    orig_f["policy_result"]    = pol_res
+                                                    orig_f["evidence_result"]  = evi_res
                                                     orig_f["control"]          = new_ctrl
                                                     orig_f["status"]           = new_comp
                                                     orig_f["finding"]          = new_finding
@@ -5649,7 +6276,12 @@ with _main_wrap:
                                                 st.session_state.findings.append({
                                                     "control_id": ctrl,
                                                     "control": new_ctrl,
-                                                    "severity": new_sev,
+                                                    "severity": resolved_sev,
+                                                    "severity_score": resolved_score,
+                                                    "policy_present": new_p_pres,
+                                                    "evidence_present": new_e_pres,
+                                                    "policy_result": pol_res,
+                                                    "evidence_result": evi_res,
                                                     "status": new_comp,
                                                     "finding": new_finding,
                                                     "recommendation": new_rec,
@@ -5680,13 +6312,35 @@ with _main_wrap:
                                 is_aud_file = source_files in auditor_uploaded_filenames
                                 aud_badge = " <span style='font-size:0.7rem;background:#a78bfa22;border:1px solid #a78bfa;color:#a78bfa;padding:1px 6px;border-radius:8px;font-weight:700;'>Auditor Analyzed</span>" if is_aud_file else ""
 
+                                pol_res = f_data.get("policy_result", "Compliant") if f_data else "Compliant"
+                                evi_res = f_data.get("evidence_result", "Compliant") if f_data else "Compliant"
+                                sev_score = f_data.get("severity_score", 0.0) if f_data else 0.0
+                                
+                                def get_result_badge(val):
+                                    v = str(val).strip()
+                                    if v in ("Compliant", "C"):
+                                        return f"<span style='font-size:0.75rem; background:#22c55e22; border:1px solid #22c55e; color:#22c55e; padding:2px 8px; border-radius:6px; font-weight:600;'>{v}</span>"
+                                    elif "missing" in v.lower():
+                                        return f"<span style='font-size:0.75rem; background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:2px 8px; border-radius:6px; font-weight:600;'>{v}</span>"
+                                    else:
+                                        return f"<span style='font-size:0.75rem; background:#f9731622; border:1px solid #f97316; color:#f97316; padding:2px 8px; border-radius:6px; font-weight:600;'>{v}</span>"
+                                
+                                pol_badge = get_result_badge(pol_res)
+                                evi_badge = get_result_badge(evi_res)
+                                sev_score_html = f"<span style='font-size:0.75rem; background:#94a3b822; border:1px solid #94a3b8; color:#94a3b8; padding:2px 8px; border-radius:6px; font-weight:700;'>Score: {sev_score:.1f}</span>"
+
                                 st.markdown(f"""<div style='background:rgba(34,197,94,0.07);border:1px solid #22c55e;border-left:5px solid #22c55e;border-radius:10px;padding:18px 22px;margin:10px 0;color:#f8fafc'>
 <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>
 <div><span style='font-size:1.2rem'>{uc_icon}</span><b style='color:#22c55e;font-size:1rem;margin-left:6px'>RESOLVED</b><span style='color:#94a3b8;margin-left:8px;font-size:0.85rem'>{uc_standard}</span></div>
 <span style='font-size:0.72rem;background:#22c55e;color:#0a0a0a;padding:2px 10px;border-radius:12px;font-weight:700'>✓ COMPLIANT</span>
 </div>
 <div style='font-size:1.05rem;font-weight:600;color:#e2e8f0;margin-bottom:4px'>{uc_label}</div>
-<div style='font-size:0.82rem;color:#94a3b8;margin-bottom:10px'><b>Control:</b> {ctrl}</div>
+<div style='font-size:0.82rem;color:#94a3b8;margin-bottom:6px'><b>Control:</b> {ctrl}</div>
+<div style='margin-bottom:8px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;'>
+<span style='font-size:0.8rem; color:#cbd5e1;'><b>Policy:</b> {pol_badge}</span>
+<span style='font-size:0.8rem; color:#cbd5e1;'><b>Evidence:</b> {evi_badge}</span>
+{sev_score_html}
+</div>
 <div style='border-top:1px dashed #334155;padding-top:10px;margin-top:4px'>
 <div style='font-size:0.82rem;color:#86efac;margin-bottom:6px'><b>✅ Expected Evidence:</b> {uc_expected}</div>
 <div style='font-size:0.82rem;color:#86efac;margin-bottom:10px'><b>→ AI Assessment:</b> Evidence satisfies the requirements for this control.</div>
@@ -5874,6 +6528,38 @@ with _main_wrap:
                                 format_func=lambda x: f"{sev_colors.get(x,'')} {x}"
                             )
 
+                            # Row 2b: Policy / Evidence Presence & Severity Score
+                            col_p_pres, col_e_pres, col_sev_score = st.columns(3)
+                            with col_p_pres:
+                                p_opts = ["Yes", "No", "Partial"]
+                                curr_p_pres = f.get("policy_present", "No")
+                                p_idx = p_opts.index(curr_p_pres) if curr_p_pres in p_opts else 1
+                                new_p_pres = st.selectbox(
+                                    "Policy Present",
+                                    p_opts,
+                                    index=p_idx,
+                                    key=f"p_pres_edit_{idx}"
+                                )
+                            with col_e_pres:
+                                e_opts = ["Yes", "No", "Partial"]
+                                curr_e_pres = f.get("evidence_present", "No")
+                                e_idx = e_opts.index(curr_e_pres) if curr_e_pres in e_opts else 1
+                                new_e_pres = st.selectbox(
+                                    "Evidence Present",
+                                    e_opts,
+                                    index=e_idx,
+                                    key=f"e_pres_edit_{idx}"
+                                )
+                            with col_sev_score:
+                                new_sev_score = st.number_input(
+                                    "Severity Score",
+                                    min_value=0.0,
+                                    max_value=10.0,
+                                    value=float(f.get("severity_score", 0.0)),
+                                    step=0.1,
+                                    key=f"sev_score_edit_{idx}"
+                                )
+
                             # Row 3: Finding Details
                             new_finding = st.text_area(
                                 "Finding Details",
@@ -5914,9 +6600,31 @@ with _main_wrap:
                             col_save, col_cancel = st.columns([2, 1])
                             with col_save:
                                 if st.button("💾 Save Changes", key=f"save_edit_{idx}", type="primary", use_container_width=True):
+                                    # Sync slider and severity score
+                                    if new_comp in ("Compliant", "False Positive", "Out of Scope"):
+                                        resolved_sev = "N/A"
+                                        resolved_score = 0.0
+                                    else:
+                                        resolved_sev = new_sev
+                                        resolved_score = new_sev_score
+                                        old_sev = f.get("severity", "P3 Medium")
+                                        if new_sev != old_sev:
+                                            if new_sev == "P1 Critical": resolved_score = 9.5
+                                            elif new_sev == "P2 High": resolved_score = 8.0
+                                            elif new_sev == "P3 Medium": resolved_score = 5.5
+                                            elif new_sev == "P4 Low": resolved_score = 2.0
+                                        else:
+                                            if new_sev_score >= 9.0: resolved_sev = "P1 Critical"
+                                            elif new_sev_score >= 7.0: resolved_sev = "P2 High"
+                                            elif new_sev_score >= 4.0: resolved_sev = "P3 Medium"
+                                            elif new_sev_score >= 0.1: resolved_sev = "P4 Low"
+
                                     for orig_f in st.session_state.findings:
                                         if orig_f.get("control_id") == f.get("control_id") and orig_f["finding"] == f["finding"]:
-                                            orig_f["severity"]         = new_sev
+                                            orig_f["severity"]         = resolved_sev
+                                            orig_f["severity_score"]   = resolved_score
+                                            orig_f["policy_present"]   = new_p_pres
+                                            orig_f["evidence_present"] = new_e_pres
                                             orig_f["control"]          = new_ctrl
                                             orig_f["status"]           = new_comp
                                             orig_f["finding"]          = new_finding
@@ -5925,6 +6633,28 @@ with _main_wrap:
                                             orig_f["source_files"]     = new_ev_loc
                                             orig_f["evidence_snippet"] = new_ev_snip
                                             orig_f["editing"]          = False
+
+                                            # Recalculate results
+                                            if new_comp == "Out of Scope":
+                                                orig_f["policy_result"] = "Out of Scope"
+                                                orig_f["evidence_result"] = "Out of Scope"
+                                            else:
+                                                pol_pres_cap = str(new_p_pres).strip().capitalize()
+                                                evi_pres_cap = str(new_e_pres).strip().capitalize()
+                                                status_abbr = "Compliant" if new_comp == "Compliant" else "Non-Compliant"
+                                                
+                                                if pol_pres_cap == "No" and evi_pres_cap == "No":
+                                                    orig_f["policy_result"] = "Both missing"
+                                                    orig_f["evidence_result"] = "Both missing"
+                                                elif pol_pres_cap == "No":
+                                                    orig_f["policy_result"] = "Policy doc missing"
+                                                    orig_f["evidence_result"] = status_abbr
+                                                elif evi_pres_cap == "No":
+                                                    orig_f["policy_result"] = status_abbr
+                                                    orig_f["evidence_result"] = "Evidence missing"
+                                                else:
+                                                    orig_f["policy_result"] = status_abbr
+                                                    orig_f["evidence_result"] = status_abbr
                                     save_current_findings_snapshot()
                                     st.rerun()
                             with col_cancel:
@@ -5958,6 +6688,24 @@ with _main_wrap:
                         is_aud_file = sf_name in auditor_uploaded_filenames
                         aud_badge = " <span style='font-size:0.7rem;background:#a78bfa22;border:1px solid #a78bfa;color:#a78bfa;padding:1px 6px;border-radius:8px;font-weight:700;'>Auditor Analyzed</span>" if is_aud_file else ""
 
+                        pol_res = f.get("policy_result", "Non-Compliant") or "Non-Compliant"
+                        evi_res = f.get("evidence_result", "Non-Compliant") or "Non-Compliant"
+                        sev_score = f.get("severity_score", 0.0) or 0.0
+                        
+                        def get_result_badge(val):
+                            v = str(val).strip()
+                            if v in ("Compliant", "C"):
+                                return f"<span style='font-size:0.75rem; background:#22c55e22; border:1px solid #22c55e; color:#22c55e; padding:2px 8px; border-radius:6px; font-weight:600;'>{v}</span>"
+                            elif "missing" in v.lower():
+                                return f"<span style='font-size:0.75rem; background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:2px 8px; border-radius:6px; font-weight:600;'>{v}</span>"
+                            else:
+                                return f"<span style='font-size:0.75rem; background:#f9731622; border:1px solid #f97316; color:#f97316; padding:2px 8px; border-radius:6px; font-weight:600;'>{v}</span>"
+                                
+                        pol_badge = get_result_badge(pol_res)
+                        evi_badge = get_result_badge(evi_res)
+                        sev_score_color = "#ef4444" if sev_score >= 9.0 else ("#f97316" if sev_score >= 7.0 else ("#eab308" if sev_score >= 4.0 else ("#22c55e" if sev_score >= 0.1 else "#94a3b8")))
+                        sev_score_html = f"<span style='font-size:0.75rem; background:{sev_score_color}22; border:1px solid {sev_score_color}; color:{sev_score_color}; padding:2px 8px; border-radius:6px; font-weight:700;'>Score: {sev_score:.1f}</span>"
+
                         st.markdown(f"""
                         <div class='{css}' style='margin-bottom:0px; border-bottom-left-radius:0px; border-bottom-right-radius:0px;'>
                           <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;'>
@@ -5969,6 +6717,11 @@ with _main_wrap:
                           </div>
                           <div style='font-size:0.8rem; color:#64748b; margin-bottom:4px;'><b>Control ID:</b> {control_id}</div>
                           <div style='margin-top:4px; margin-bottom:8px;'><b>Control:</b> {f.get('control','')}</div>
+                          <div style='margin-bottom:8px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;'>
+                            <span style='font-size:0.8rem; color:#cbd5e1;'><b>Policy:</b> {pol_badge}</span>
+                            <span style='font-size:0.8rem; color:#cbd5e1;'><b>Evidence:</b> {evi_badge}</span>
+                            {sev_score_html}
+                          </div>
                           <div style='margin-bottom:4px;'>
                             <span style='font-size:0.75rem; background:{ev_color}22; border:1px solid {ev_color}; color:{ev_color}; padding:2px 9px; border-radius:8px; font-weight:600;'>🔍 {ev_found}</span>
                           </div>
@@ -6219,7 +6972,41 @@ with _main_wrap:
                         "Auditor Comment":   f.get("comment", "")
                     } for f in active_findings]
                     csv_data = _dict_list_to_csv(_export_rows)
-                    st.download_button("Export Report CSV", csv_data, "iso27001_audit_report.csv", use_container_width=True)
+                    st.download_button("📊 Export Report CSV", csv_data, "iso27001_audit_report.csv", use_container_width=True)
+                    
+                    from src.ui.report_exporter import export_docx_report, export_pdf_report
+                    
+                    docx_data = export_docx_report(
+                        session_title=selected_standard,
+                        findings=findings,
+                        resolved_list=resolved_list,
+                        status=st.session_state.get("audit_status", "Draft"),
+                        comments=st.session_state.get("auditor_comments", "")
+                    )
+                    st.download_button(
+                        label="⬇️ Export Report DOCX",
+                        data=docx_data,
+                        file_name=f"{selected_standard.replace(' ', '_')}_Report.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                        key="active_docx_export_btn"
+                    )
+                    
+                    pdf_data = export_pdf_report(
+                        session_title=selected_standard,
+                        findings=findings,
+                        resolved_list=resolved_list,
+                        status=st.session_state.get("audit_status", "Draft"),
+                        comments=st.session_state.get("auditor_comments", "")
+                    )
+                    st.download_button(
+                        label="📄 Export Report PDF",
+                        data=pdf_data,
+                        file_name=f"{selected_standard.replace(' ', '_')}_Report.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="active_pdf_export_btn"
+                    )
 
     if tab_docs is not None:
         with tab_docs:
@@ -6238,255 +7025,7 @@ with _main_wrap:
             else:
                 st.info("Browse evidence files uploaded by auditees. Check one or more files and click **Load Selected for Analysis** to import them into your active scan session.")
 
-            db = SessionLocal()
-            try:
-                target_role = "auditee" if st.session_state.user_role == "auditor" else st.session_state.user_role
-                with force_master():
-                    results = db.query(EvidenceFile, AuditReport, User).join(
-                        AuditReport, EvidenceFile.report_id == AuditReport.id
-                    ).join(
-                        User, AuditReport.auditee_id == User.id
-                    ).filter(
-                        User.role == target_role
-                    ).all()
-                
-                # Filter results by selected view scope
-                if doc_view_scope_select == "Auditee Submitted Documents":
-                    results = [r for r in results if not r[0].is_auditor_uploaded]
-                else:
-                    results = [r for r in results if r[0].is_auditor_uploaded]
-            except Exception as e:
-                results = []
-                st.error(f"Error querying evidence files: {e}")
-            finally:
-                db.close()
-
-            if not results:
-                if doc_view_scope_select == "Auditor Private Documents":
-                    st.info("No private auditor documents have been uploaded yet.")
-                else:
-                    st.info("No documents have been uploaded by auditees yet.")
-            else:
-                # ── Collect all files flat for the bulk action ──────────────────
-                import os, io
-                all_ev_files = []  # list of EvidenceFile ORM objects
-                grouped = {}
-                for ev, rep, usr in results:
-                    auditee_name = usr.username if usr else "Anonymous / External"
-                    rep_title = rep.session_title if rep else f"Report ID {ev.report_id}"
-                    rep_id = ev.report_id
-                    if auditee_name not in grouped:
-                        grouped[auditee_name] = {}
-                    if (rep_id, rep_title) not in grouped[auditee_name]:
-                        grouped[auditee_name][(rep_id, rep_title)] = []
-                    grouped[auditee_name][(rep_id, rep_title)].append(ev)
-                    all_ev_files.append(ev)
-
-                # ── Global select-all + bulk load bar ──────────────────────────
-                already_loaded = set(st.session_state.get("file_registry", {}).keys())
-                col_selall, col_deselall, col_load = st.columns([2, 2, 3])
-                if col_selall.button("☑ Select All", use_container_width=True, key="docs_select_all"):
-                    for ev in all_ev_files:
-                        st.session_state[f"doc_chk_{ev.id}"] = True
-                    st.rerun()
-                if col_deselall.button("☐ Deselect All", use_container_width=True, key="docs_desel_all"):
-                    for ev in all_ev_files:
-                        st.session_state[f"doc_chk_{ev.id}"] = False
-                    st.rerun()
-
-                selected_ev = [ev for ev in all_ev_files if st.session_state.get(f"doc_chk_{ev.id}", False)]
-                load_lbl = f"Upload {len(selected_ev)} Selected for Analysis" if selected_ev else "Upload Selected for Analysis"
-                if col_load.button(load_lbl, type="primary", use_container_width=True,
-                                   key="docs_bulk_load", disabled=(len(selected_ev) == 0)):
-                    class _NB(io.BytesIO):
-                        def __init__(self, val, name):
-                            super().__init__(val); self.name = name
-                    if "file_registry" not in st.session_state:
-                        st.session_state.file_registry = {}
-                    loaded, failed = [], []
-                    
-                    # Auto-link active report to the auditee of selected files
-                    selected_auditee_ids = set()
-                    for ev in selected_ev:
-                        for r_ev, r_rep, r_usr in results:
-                            if r_ev.id == ev.id and r_usr:
-                                selected_auditee_ids.add(r_usr.id)
-                    if len(selected_auditee_ids) == 1:
-                        target_auditee_id = list(selected_auditee_ids)[0]
-                        with force_master():
-                            db_write = SessionLocal()
-                            active_rep = db_write.query(AuditReport).filter(AuditReport.session_id == st.session_state.active_chat_id).first()
-                            if active_rep:
-                                active_rep.auditee_id = target_auditee_id
-                                db_write.commit()
-                            db_write.close()
-                            
-                    for ev in selected_ev:
-                        if not os.path.exists(ev.file_path):
-                            failed.append(ev.filename); continue
-                        try:
-                            with open(ev.file_path, "rb") as fb:
-                                fb_bytes = fb.read()
-                            text = extract_text(_NB(fb_bytes, ev.filename))
-                            st.session_state.file_registry[ev.filename] = text
-                            save_document_chunks(ev.filename, text)
-                            names = [n.strip() for n in st.session_state.get("last_uploaded_names", "").split(",") if n.strip()]
-                            if ev.filename not in names:
-                                names.append(ev.filename)
-                            st.session_state.last_uploaded_names = ", ".join(names)
-                            loaded.append(ev.filename)
-                            # Auto-set document status to Reviewing
-                            try:
-                                with force_master():
-                                    _db_stat = SessionLocal()
-                                    _ev_obj = _db_stat.query(EvidenceFile).filter(EvidenceFile.id == ev.id).first()
-                                    if _ev_obj and _ev_obj.status in (None, 'Pending', ''):
-                                        _ev_obj.status = 'Reviewing'
-                                        _db_stat.commit()
-                                    _db_stat.close()
-                            except Exception:
-                                pass
-                        except Exception as ex:
-                            failed.append(f"{ev.filename} ({ex})")
-                    # rebuild context
-                    auto_ctx = ""
-                    for fn, ft in st.session_state.file_registry.items():
-                        auto_ctx += f"--- FILE: {fn} ---\n{ft}\n\n"
-                    st.session_state.context = auto_ctx.strip()
-                    if loaded:
-                        st.toast(f"✅ Loaded {len(loaded)} file(s) into active analysis!")
-                    if failed:
-                        st.warning(f"⚠️ Could not load: {', '.join(failed)}")
-                    st.rerun()
-
-                st.markdown("---")
-
-                # ── Per-file rows with checkboxes ──────────────────────────────
-                _SESSION_STATUSES = ["Pending", "Reviewing", "Completed", "Closed"]
-                _STATUS_COLORS    = {
-                    "Pending":   "#64748b",
-                    "Reviewing": "#f97316",
-                    "Completed": "#22c55e",
-                    "Closed":    "#3b82f6",
-                    "Draft":     "#64748b",
-                }
-
-                for auditee_name, reports_dict in grouped.items():
-                    st.markdown(f"""
-                    <div style="background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, rgba(30, 41, 59, 0.4) 100%);
-                                border: 1px solid rgba(59, 130, 246, 0.2);
-                                border-radius: 12px;
-                                padding: 12px 18px;
-                                margin-bottom: 20px;
-                                display: flex;
-                                align-items: center;
-                                gap: 12px;
-                                backdrop-filter: blur(8px);">
-                        <div style="font-size: 1.5rem; background: rgba(59, 130, 246, 0.15); border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(59, 130, 246, 0.35); color: #60a5fa;">👤</div>
-                        <div>
-                            <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.05em; color: #94a3b8; font-weight: 700;">Active Auditee Scope</div>
-                            <div style="font-size: 1.1rem; font-weight: 700; color: #f8fafc;">{auditee_name}</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    for (rep_id, rep_title), files in reports_dict.items():
-                        with st.container(border=True):
-
-                            # ── Session header: title ─
-                            st.markdown(f"##### 📋 {rep_title}")
-
-                            st.markdown("<div style='height: 1px; background: linear-gradient(to right, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.01)); margin: 12px 0;'></div>", unsafe_allow_html=True)
-
-                            # ── Per-file rows (grouped by auditee vs auditor uploaded) ──
-                            auditee_files = [f for f in files if not f.is_auditor_uploaded]
-                            auditor_files = [f for f in files if f.is_auditor_uploaded]
-                            
-                            sec_files = []
-                            for f in auditee_files:
-                                sec_files.append((f, False))
-                            if auditor_files:
-                                sec_files.append((None, True))
-                                for f in auditor_files:
-                                    sec_files.append((f, False))
-                                    
-                            for idx, (f, is_sub_hdr) in enumerate(sec_files):
-                                if is_sub_hdr:
-                                    st.markdown("<div style='font-size:0.85rem;color:#a78bfa;font-weight:700;margin-top:12px;margin-bottom:8px;'>📁 Auditor Analyzed Documents (Private)</div>", unsafe_allow_html=True)
-                                    continue
-                                is_loaded = f.filename in already_loaded
-                                chk_key = f"doc_chk_{f.id}"
-                                col_chk, col_name, col_status, col_down = st.columns([0.8, 5.2, 2.5, 1.5])
-                                with col_chk:
-                                    st.checkbox(
-                                        f"Select {f.filename}",
-                                        key=chk_key,
-                                        value=st.session_state.get(chk_key, False),
-                                        help="Select to include in bulk load",
-                                        label_visibility="collapsed"
-                                    )
-                                with col_name:
-                                    loaded_badge = (" <span style='font-size:0.7rem;background:#22c55e22;"
-                                                    "border:1px solid #22c55e;color:#22c55e;padding:1px 6px;"
-                                                    "border-radius:8px;font-weight:700;'>✓ Loaded</span>"
-                                                    if is_loaded else "")
-                                    aud_badge = (" <span style='font-size:0.7rem;background:#a78bfa22;"
-                                                 "border:1px solid #a78bfa;color:#a78bfa;padding:1px 6px;"
-                                                 "border-radius:8px;font-weight:700;'>Auditor Analyzed</span>"
-                                                 if f.is_auditor_uploaded else "")
-                                    st.markdown(
-                                        f"📄 **{f.filename}**{loaded_badge}{aud_badge}  \n"
-                                        f"<small style='color:#64748b;'>Uploaded: {f.uploaded_at.strftime('%Y-%m-%d %H:%M')}</small>",
-                                        unsafe_allow_html=True
-                                    )
-                                with col_status:
-                                    _current_doc_status = f.status if f.status else "Pending"
-                                    if _current_doc_status not in _SESSION_STATUSES:
-                                        _current_doc_status = "Pending"
-                                    
-                                    if st.session_state.user_role == "auditor":
-                                        new_doc_status = st.selectbox(
-                                            "Status",
-                                            _SESSION_STATUSES,
-                                            index=_SESSION_STATUSES.index(_current_doc_status),
-                                            key=f"doc_status_{f.id}",
-                                            label_visibility="collapsed"
-                                        )
-                                        if new_doc_status != _current_doc_status:
-                                            try:
-                                                with force_master():
-                                                    _dbs = SessionLocal()
-                                                    _f_obj = _dbs.query(EvidenceFile).filter(EvidenceFile.id == f.id).first()
-                                                    if _f_obj:
-                                                        _f_obj.status = new_doc_status
-                                                        _dbs.commit()
-                                                    _dbs.close()
-                                                st.toast(f"✅ Status of '{f.filename}' updated to **{new_doc_status}**")
-                                                st.rerun()
-                                            except Exception as _se:
-                                                st.error(f"Failed to update status: {_se}")
-                                    else:
-                                        _sc = _STATUS_COLORS.get(_current_doc_status, "#64748b")
-                                        st.markdown(
-                                            f"<div style='display:flex;align-items:center;margin-top:6px;'>"
-                                            f"<span style='font-size:0.72rem;background:{_sc}22;border:1px solid {_sc};"
-                                            f"color:{_sc};padding:2px 8px;border-radius:10px;font-weight:700'>"
-                                            f"● {_current_doc_status}</span></div>",
-                                            unsafe_allow_html=True
-                                        )
-                                with col_down:
-                                    if os.path.exists(f.file_path):
-                                        with open(f.file_path, "rb") as file_b:
-                                            file_bytes = file_b.read()
-                                        st.download_button(
-                                            label="⬇️",
-                                            data=file_bytes,
-                                            file_name=f.filename,
-                                            key=f"down_{f.id}_{idx}",
-                                            use_container_width=True,
-                                            help="Download this file"
-                                        )
-                                    else:
-                                        st.caption("⚠️ missing")
+            _render_document_viewer_fragment(doc_view_scope_select)
 
     # tab_independent completely removed
 
@@ -6517,7 +7056,7 @@ with _main_wrap:
                     prog_data = _bg_store["progress"].get(st.session_state.active_chat_id, "Deep AI Scanning In Progress...")
                 if isinstance(prog_data, dict):
                     prog_msg = prog_data.get("text", "")
-                    prog_pct = prog_data.get("percent", 0)
+                    prog_pct = max(0, min(100, int(prog_data.get("percent", 0))))
                 else:
                     prog_msg = prog_data
                     prog_pct = 0
@@ -6752,6 +7291,10 @@ with _main_wrap:
                     for warn in st.session_state.duplicate_warnings:
                         st.warning(warn)
                     st.session_state.duplicate_warnings = []
+                if "auditee_malware_warnings" in st.session_state and st.session_state.auditee_malware_warnings:
+                    for warn in st.session_state.auditee_malware_warnings:
+                        st.error(warn)
+                    st.session_state.auditee_malware_warnings = []
 
                 st.markdown("**Add Evidence Files**")
                 st.markdown(
@@ -6793,6 +7336,14 @@ with _main_wrap:
                     dups = []
                     for uf in uploaded_files:
                         if uf.name in st.session_state.processed_tab_files:
+                            continue
+                        
+                        is_clean, reason = scan_file_security(uf)
+                        if not is_clean:
+                            if "auditee_malware_warnings" not in st.session_state:
+                                st.session_state.auditee_malware_warnings = []
+                            st.session_state.auditee_malware_warnings.append(f"❌ Security Alert: Blocked upload of '{uf.name}' - {reason}")
+                            st.session_state.processed_tab_files.add(uf.name)
                             continue
 
                         # ── Per-session subfolder prevents cross-session filename collisions ──
@@ -7010,7 +7561,7 @@ with _main_wrap:
                             
                             with col_act:
                                 is_current = r['session_id'] == st.session_state.active_chat_id
-                                col_btn1, col_btn2, col_btn3 = st.columns(3)
+                                col_btn1, col_btn2, col_btn3, col_btn4 = st.columns(4)
                                 with col_btn1:
                                     if is_current:
                                         st.button("Selected", key=f"active_rep_{idx}", disabled=True, use_container_width=True)
@@ -7048,6 +7599,23 @@ with _main_wrap:
                                         use_container_width=True
                                     )
                                 with col_btn3:
+                                    from src.ui.report_exporter import export_pdf_report
+                                    pdf_data = export_pdf_report(
+                                        session_title=r['session_title'],
+                                        findings=r['findings'],
+                                        resolved_list=r['resolved_list'],
+                                        status=r['audit_status'],
+                                        comments=r['auditor_comments']
+                                    )
+                                    st.download_button(
+                                        label="📄 PDF",
+                                        data=pdf_data,
+                                        file_name=f"{r['session_title'].replace(' ', '_')}_Report.pdf",
+                                        mime="application/pdf",
+                                        key=f"pdf_rep_{idx}",
+                                        use_container_width=True
+                                    )
+                                with col_btn4:
                                     _del_confirm_key = f"del_confirm_{r['session_id']}"
                                     if not st.session_state.get(_del_confirm_key, False):
                                         if st.button("🗑️", key=f"del_rep_{idx}", use_container_width=True,

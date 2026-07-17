@@ -11,4 +11,14 @@ Deployment_details.md
 *details*.md
 *EXCLUDE*
 scratch/
-.deps_installed
+*.gguf
+*.pkl
+*.xlsx
+*.pptx
+*.zip
+data/evidence/
+data/sqlite/
+data/audit_runs/
+data/*.txt
+data/*.docx
+data/*.pdf

@@ -15,7 +15,17 @@ from src.db.database import SessionLocal, DocumentChunk, force_master
 
 # Global cache for chunks ingested during upload processing
 _ingested_chunks_cache = {}
+
+import pickle
+CACHE_FILE = os.path.join(os.path.dirname(__file__), ".embeddings_cache.pkl")
 _chunk_embeddings_cache = {}
+if os.path.exists(CACHE_FILE):
+    try:
+        with open(CACHE_FILE, "rb") as f:
+            _chunk_embeddings_cache = pickle.load(f)
+        print(f"[EMBEDDING CACHE] Loaded {len(_chunk_embeddings_cache)} persistent embeddings from cache.", flush=True)
+    except Exception as e:
+        print(f"[EMBEDDING CACHE] Warning: failed to load persistent cache: {e}", flush=True)
 
 # Configurable defaults for retrieval
 DEFAULT_TOP_K = {
@@ -241,10 +251,13 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
         TARGET_CONTEXT_TOKENS = 2500 if is_12b else 4000
         HARD_MAX_CONTEXT_TOKENS = 3000 if is_12b else 5000
 
-    # RAG BYPASS: If the total document text is small (< 35KB, which is ~8,000 tokens),
+    # RAG BYPASS: If the total document text is small,
     # bypass chunk retrieval entirely and pass the full document text as context.
     # This guarantees 100% information coverage and prevents chunk-slicing errors.
-    if context and len(context) < 35000:
+    bypass_limit = 35000
+    if backend in ("llama.cpp", "llamacpp"):
+        bypass_limit = 12000  # Keep within 4096 token context limit
+    if context and len(context) < bypass_limit:
         print(f"[RAG BYPASS] Document text is small ({len(context)} chars). Bypassing RAG chunking and passing full text to ensure 100% accuracy.", flush=True)
         src_file = file_names_list[0] if file_names_list else "Policy Document"
         metas = [{"source_file": src_file, "chunk_id": "full_document_bypass"}]
@@ -403,6 +416,14 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
             for key, vector in results:
                 if vector is not None:
                     embeddings_store[key] = vector
+            
+            # Persist the newly generated embeddings cache to disk
+            try:
+                with open(CACHE_FILE, "wb") as f:
+                    pickle.dump(embeddings_store, f)
+            except Exception as e:
+                print(f"[EMBEDDING CACHE] Warning: failed to save persistent cache: {e}", flush=True)
+
             if status_text is not None:
                 try:
                     status_text.empty()

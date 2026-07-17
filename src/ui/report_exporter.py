@@ -77,7 +77,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     sub_p = doc.add_paragraph()
     sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     sub_p.paragraph_format.space_after = Pt(10)
-    run_sub = sub_p.add_run("Engagement letter: SEBI/HO/ITD/ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023")
+    run_sub = sub_p.add_run("Engagement letter: [Engagement Reference / Date]")
     run_sub.font.name = "Arial"
     run_sub.font.size = Pt(10)
     run_sub.font.color.rgb = _rgb(100, 116, 139)
@@ -85,7 +85,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     # Dates
     date_p1 = doc.add_paragraph()
     date_p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run_d1 = date_p1.add_run("Date of the Agreement: 15 September 2023.")
+    run_d1 = date_p1.add_run("Date of the Agreement: [Agreement Date]")
     run_d1.font.name = "Arial"
     run_d1.font.size = Pt(10)
     
@@ -112,12 +112,8 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     firm_p = doc.add_paragraph()
     firm_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run_firm = firm_p.add_run(
-        "Digital Age Strategies Pvt Ltd\n"
-        "# 28, “Om Arcade” 2nd & 3rd Floors, Thimmappa Reddy Layout,\n"
-        "Hulimavu, Bannerghatta Road, Bangalore - 560076\n"
-        "Ph: +91-80-26484636, 49568066, 26485148, 41503825, 41218560\n"
-        "Mobile: 9448088666 / 9448055711\n"
-        "Email: audit@digitalage.co.in, dinesh.shastri@digitalage.co.in"
+        "[Auditor Firm Name]\n"
+        "[Address Block / Contact Info]"
     )
     run_firm.font.size = Pt(9.5)
     run_firm.font.color.rgb = _rgb(100, 116, 139)
@@ -131,11 +127,11 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     tbl_prep.style = 'Table Grid'
     prep_data = [
         ("Document Title", f"Information Security Audit {session_title}"),
-        ("Engagement Letter Ref", "SEBI/HO/ITD/ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023"),
-        ("Date of the Agreement", "15 September 2023"),
+        ("Engagement Letter Ref", "[Engagement Letter Ref]"),
+        ("Date of the Agreement", "[Date of Agreement]"),
         ("Date of Document", datetime.now().strftime("%dth %B %Y")),
         ("Version", "1.0"),
-        ("Prepared By", "Digital Age Strategies Pvt Ltd")
+        ("Prepared By", "[Auditor Firm Name]")
     ]
     for r_idx, (label, val) in enumerate(prep_data):
         c1, c2 = tbl_prep.rows[r_idx].cells
@@ -184,17 +180,17 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     _set_cell_borders(c2)
     _set_cell_borders(c3)
     _set_cell_borders(c4)
-    c1.paragraphs[0].add_run("SEBI ITD Team")
-    c2.paragraphs[0].add_run("SEBI")
-    c3.paragraphs[0].add_run("ITD Division Officers")
-    c4.paragraphs[0].add_run("itd@sebi.gov.in")
+    c1.paragraphs[0].add_run("[Recipient Name]")
+    c2.paragraphs[0].add_run("the Organization")
+    c3.paragraphs[0].add_run("[Recipient Designation]")
+    c4.paragraphs[0].add_run("[Recipient Email]")
 
     # ── DETAILS OF AUDITEE ─────────────────────────────────────────────────────
     _add_section_heading("Details of Auditee:")
     tbl_auditee = doc.add_table(rows=3, cols=3)
     tbl_auditee.style = 'Table Grid'
     auditee_data = [
-        ("1", "Name of Organization", "Securities and Exchange Board of India"),
+        ("1", "Name of Organization", "[Auditee Organization]"),
         ("2", "Audit Area", f"IS Audit of {session_title}"),
         ("3", "Location", "Mumbai, India")
     ]
@@ -232,7 +228,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     _add_section_heading("Disclaimer:")
     disc_p = doc.add_paragraph()
     disc_p.add_run(
-        "This document is highly confidential and sensitive and is meant for circulation only to authorized people within SEBI and Digital Age Strategies Pvt. Ltd. "
+        "This document is highly confidential and sensitive and is meant for circulation only to authorized people within the Organization and Digital Age Strategies Pvt. Ltd. "
         "It is understood that disclosure in part or full of the contents or any information derived from the report to unauthorized personnel is strictly prohibited."
     ).italic = True
 
@@ -241,9 +237,9 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     # ── REFERENCES ────────────────────────────────────────────────────────────
     _add_section_heading("References:")
     refs = [
-        "SEBI’s RFP (Request for Proposal) no. SEBI/ITD/HO/VAPT/2023/03/01 for Certification of SEBI ISMS under ISO 27001 Standard, Conducting IT Systems Audit and Cybersecurity Audit in SEBI",
+        "the Organization’s RFP (Request for Proposal) no. the Organization/ITD/HO/VAPT/2023/03/01 for Certification of the Organization ISMS under ISO 27001 Standard, Conducting IT Systems Audit and Cybersecurity Audit in the Organization",
         "Information Technology Audit issued by Comptroller and Auditor General (CAG) of India",
-        "Engagement Letter No SEBI/HO/ITD/ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023",
+        "Engagement Letter No the Organization/HO/ITD/ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023",
         "CIS_Controls_v8"
     ]
     for ref in refs:
@@ -266,15 +262,15 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     # ── TEXT SECTIONS ─────────────────────────────────────────────────────────
     _add_section_heading("Introduction:")
     doc.add_paragraph(
-        "The Securities and Exchange Board of India was established on April 12, 1992 accordance with the provisions of the Securities and Exchange Board of India Act, 1992 to protect the interests of investors in securities and to promote the development of, and to regulate the securities market.\n\n"
-        "As per the directions from SEBI vide PO Ref No: SEBI/ HO ITD/ ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023, we have conducted Audit of Attendance System Application as mentioned above. Our observations are based on situation prevailing at the time of visit, which might have undergone changes since then. Our findings are based on the scope given to us and best Our Practices."
+        "The [Auditee Organization] was established on April 12, 1992 accordance with the provisions of the [Auditee Organization] Act, 1992 to protect the interests of investors in securities and to promote the development of, and to regulate the securities market.\n\n"
+        "As per the directions from the Organization vide PO Ref No: the Organization/ HO ITD/ ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023, we have conducted Audit of Attendance System Application as mentioned above. Our observations are based on situation prevailing at the time of visit, which might have undergone changes since then. Our findings are based on the scope given to us and best Our Practices."
     )
 
     _add_section_heading("Scope:")
     doc.add_paragraph(
         "The scope in the RFP broadly covers the major control areas against which the operations/ LOBs needs to be audited and indicative list of operations/ LOBs to be audited. The RFP Scope is reproduced in below two sections for ready reference.\n\n"
         "Control Areas that cover RFP Requirements:\n"
-        "Personnel Security, Access Management, Data Backup and recovery Controls, Application Security, Network Communication Security, Business Continuity Management / BCP Controls, Implementation Audit, Fault Isolation audit (in the event of any incident), Integration compliance, Configuration Audit, Change Management, Insurance Audit, Performance Audit, Monitoring the utilization of IT resources, Capacity planning including projection of business volumes IT (S/W, H/W & N/W) Assets, Licenses & maintenance contracts, Disposal of Equipment, Media, etc., Implementation of approved IT policies of SEBI."
+        "Personnel Security, Access Management, Data Backup and recovery Controls, Application Security, Network Communication Security, Business Continuity Management / BCP Controls, Implementation Audit, Fault Isolation audit (in the event of any incident), Integration compliance, Configuration Audit, Change Management, Insurance Audit, Performance Audit, Monitoring the utilization of IT resources, Capacity planning including projection of business volumes IT (S/W, H/W & N/W) Assets, Licenses & maintenance contracts, Disposal of Equipment, Media, etc., Implementation of approved IT policies of the Organization."
     )
 
     _add_section_heading("Audit Process:")
@@ -285,14 +281,14 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
 
     _add_section_heading("Audit Methodology.")
     doc.add_paragraph(
-        "We have conducted audit as per the broad scope given to us. Our methodology will cover, in general, IS Audit practices, RBI, CERT-In, ISACA, COBIT, IT Act 2000/2008 guidelines and the guidelines & procedures prescribed in various Circulars issued by SEBI. "
-        "The objective of the audit is to verify compliance and to safeguard the interests of SEBI in connection with implementation of various technologies and related guidelines of the SEBI. Thus, findings are based on the scope given to us and best Practices to be followed."
+        "We have conducted audit as per the broad scope given to us. Our methodology will cover, in general, IS Audit practices, RBI, CERT-In, ISACA, COBIT, IT Act 2000/2008 guidelines and the guidelines & procedures prescribed in various Circulars issued by the Organization. "
+        "The objective of the audit is to verify compliance and to safeguard the interests of the Organization in connection with implementation of various technologies and related guidelines of the the Organization. Thus, findings are based on the scope given to us and best Practices to be followed."
     )
 
     _add_section_heading("Definition of Risk Classifications:")
     doc.add_paragraph(
         "The risk of an audit finding is determined by assessing the potential negative impact and the probability that it materializes. Audit findings are classified into four risk classifications. These risk categories assist management in identification, prioritization and implementation of audit recommendations. When the practice is normal as per the guidelines / best practices, the same has been classified as 'OK/ Complied'.\n\n"
-        "High Risks: Non-adherence to SEBI and Government Guidelines, Policies Approved by Competent Authority, ICT is not as per standard, high threat probabilities. These risks are so significant that Management should determine any exposure to date and without delay effect an agreed program for their immediate and permanent resolution in order to provide assurance that they will not recur in the future.\n\n"
+        "High Risks: Non-adherence to the Organization and Government Guidelines, Policies Approved by Competent Authority, ICT is not as per standard, high threat probabilities. These risks are so significant that Management should determine any exposure to date and without delay effect an agreed program for their immediate and permanent resolution in order to provide assurance that they will not recur in the future.\n\n"
         "Medium Risks: These risks are important and management should quickly develop action plans that will ensure timely and permanent resolution of the weaknesses noted. These are potential weaknesses in control or security, which could develop into an exposure. This should be addressed at the earliest opportunity.\n\n"
         "Low Risk: These risks are not material in the context of current levels of activity but management should be aware of them and ensure they are resolved as soon as possible as they may become material if activities increase.\n\n"
         "OK/ ACCEPTED: This is normal and good practice. It is as per the guidelines / best practices. The observations categorized as 'ACCEPTED' need no action."
@@ -373,16 +369,22 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
             
         # Get severity/risk mapping
         st_val = f.get("status", "Non-Compliant")
+        sev_score = f.get("severity_score", 0.0) or 0.0
         if st_val == "Compliant":
             mapped_risk = "Accepted"
+            risk_text = "Accepted"
         else:
             sev = f.get("severity", "P3 Medium")
             if "1" in sev or "Critical" in sev or "High" in sev:
                 mapped_risk = "High"
+                risk_label = "Critical" if "Critical" in sev or sev_score >= 9.0 else "High"
             elif "2" in sev or "Medium" in sev:
                 mapped_risk = "Medium"
+                risk_label = "Medium"
             else:
                 mapped_risk = "Low"
+                risk_label = "Low"
+            risk_text = f"{risk_label} ({sev_score:.1f})"
 
         # Shading by risk
         bg_color = {"High": "FEE2E2", "Medium": "FEFCE8", "Low": "EFF6FF", "Accepted": "F0FDF4"}.get(mapped_risk, "FFFFFF")
@@ -394,7 +396,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         row_cells[1].paragraphs[0].add_run(f.get("control_id", "") + " " + f.get("control", ""))
         row_cells[2].paragraphs[0].add_run(f.get("clause", "") or "ISO 27001 Annex A")
         row_cells[3].paragraphs[0].add_run(redact_pii(f.get("finding") or f.get("description") or "—"))
-        row_cells[4].paragraphs[0].add_run(mapped_risk).bold = True
+        row_cells[4].paragraphs[0].add_run(risk_text).bold = True
         row_cells[5].paragraphs[0].add_run(redact_pii(f.get("business_impact") or "NIL"))
         row_cells[6].paragraphs[0].add_run(redact_pii(f.get("recommendation") or "NIL"))
         
@@ -465,12 +467,12 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     
     pdf.set_font("Helvetica", "I", 9.5)
     pdf.set_text_color(100, 116, 139)
-    pdf.cell(0, 6, clean_text("Engagement letter: SEBI/HO/ITD/ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.cell(0, 6, clean_text("Engagement letter: [Engagement Reference / Date]"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.ln(5)
     
     pdf.set_font("Helvetica", "", 10)
     pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 6, clean_text("Date of the Agreement: 15 September 2023."), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.cell(0, 6, clean_text("Date of the Agreement: [Agreement Date]"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.cell(0, 6, clean_text(f"Date of Document: {datetime.now().strftime('%dth %B %Y')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.ln(25)
     
@@ -486,7 +488,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     pdf.set_text_color(100, 116, 139)
     pdf.multi_cell(0, 4.5, 
         clean_text(
-            "Digital Age Strategies Pvt Ltd\n"
+            "[Auditor Firm Name]\n"
             "# 28, \"Om Arcade\" 2nd & 3rd Floors, Thimmappa Reddy Layout,\n"
             "Hulimavu, Bannerghatta Road, Bangalore - 560076\n"
             "Ph: +91-80-26484636, 49568066, 26485148, 41503825, 41218560\n"
@@ -511,11 +513,11 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     
     prep_data = [
         ["Document Title", f"Information Security Audit {session_title}"],
-        ["Engagement Letter Ref", "SEBI/HO/ITD/ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023"],
-        ["Date of the Agreement", "15 September 2023"],
+        ["Engagement Letter Ref", "[Engagement Letter Ref]"],
+        ["Date of the Agreement", "[Date of Agreement]"],
         ["Date of Document", datetime.now().strftime("%dth %B %Y")],
         ["Version", "1.0"],
-        ["Prepared By", "Digital Age Strategies Pvt Ltd"]
+        ["Prepared By", "[Auditor Firm Name]"]
     ]
     with pdf.table(col_widths=(60, 130), text_align="L") as table:
         for row in prep_data:
@@ -546,15 +548,15 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         hdr.cell("Email Id", style=hdr_style)
         
         row = table.row()
-        row.cell("SEBI ITD Team")
-        row.cell("SEBI")
-        row.cell("ITD Division Officers")
-        row.cell("itd@sebi.gov.in")
+        row.cell("[Recipient Name]")
+        row.cell("the Organization")
+        row.cell("[Recipient Designation]")
+        row.cell("[Recipient Email]")
         
     # Details of Auditee (Table 4)
     section_title("Details of Auditee:")
     auditee_data = [
-        ["1", "Name of Organization", "Securities and Exchange Board of India"],
+        ["1", "Name of Organization", "[Auditee Organization]"],
         ["2", "Audit Area", f"IS Audit of {session_title}"],
         ["3", "Location", "Mumbai, India"]
     ]
@@ -584,7 +586,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     pdf.set_text_color(51, 65, 85)
     pdf.multi_cell(0, 5, 
         clean_text(
-            "This document is highly confidential and sensitive and is meant for circulation only to authorized people within SEBI and Digital Age Strategies Pvt. Ltd. "
+            "This document is highly confidential and sensitive and is meant for circulation only to authorized people within the Organization and Digital Age Strategies Pvt. Ltd. "
             "It is understood that disclosure in part or full of the contents or any information derived from the report to unauthorized personnel is strictly prohibited."
         ),
         new_x=XPos.LMARGIN, new_y=YPos.NEXT
@@ -595,9 +597,9 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     section_title("References:")
     pdf.set_font("Helvetica", "", 9.5)
     refs = [
-        "SEBI’s RFP (Request for Proposal) no. SEBI/ITD/HO/VAPT/2023/03/01 for Certification of SEBI ISMS under ISO 27001 Standard, Conducting IT Systems Audit and Cybersecurity Audit in SEBI",
+        "the Organization’s RFP (Request for Proposal) no. the Organization/ITD/HO/VAPT/2023/03/01 for Certification of the Organization ISMS under ISO 27001 Standard, Conducting IT Systems Audit and Cybersecurity Audit in the Organization",
         "Information Technology Audit issued by Comptroller and Auditor General (CAG) of India",
-        "Engagement Letter No SEBI/HO/ITD/ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023",
+        "Engagement Letter No the Organization/HO/ITD/ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023",
         "CIS_Controls_v8"
     ]
     for ref in refs:
@@ -626,8 +628,8 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     pdf.set_text_color(15, 23, 42)
     pdf.multi_cell(0, 5, 
         clean_text(
-            "The Securities and Exchange Board of India was established on April 12, 1992 accordance with the provisions of the Securities and Exchange Board of India Act, 1992 to protect the interests of investors in securities and to promote the development of, and to regulate the securities market.\n\n"
-            "As per the directions from SEBI vide PO Ref No: SEBI/ HO ITD/ ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023, we have conducted Audit of Attendance System Application as mentioned above. Our observations are based on situation prevailing at the time of visit, which might have undergone changes since then. Our findings are based on the scope given to us and best Our Practices."
+            "The [Auditee Organization] was established on April 12, 1992 accordance with the provisions of the [Auditee Organization] Act, 1992 to protect the interests of investors in securities and to promote the development of, and to regulate the securities market.\n\n"
+            "As per the directions from the Organization vide PO Ref No: the Organization/ HO ITD/ ITD_VIAP/P/OW/2023/0000031833/1 dated 8.8.2023, we have conducted Audit of Attendance System Application as mentioned above. Our observations are based on situation prevailing at the time of visit, which might have undergone changes since then. Our findings are based on the scope given to us and best Our Practices."
         ),
         new_x=XPos.LMARGIN, new_y=YPos.NEXT
     )
@@ -638,7 +640,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         clean_text(
             "The scope in the RFP broadly covers the major control areas against which the operations/ LOBs needs to be audited and indicative list of operations/ LOBs to be audited. The RFP Scope is reproduced in below two sections for ready reference.\n\n"
             "Control Areas that cover RFP Requirements:\n"
-            "Personnel Security, Access Management, Data Backup and recovery Controls, Application Security, Network Communication Security, Business Continuity Management / BCP Controls, Implementation Audit, Fault Isolation audit (in the event of any incident), Integration compliance, Configuration Audit, Change Management, Insurance Audit, Performance Audit, Monitoring the utilization of IT resources, Capacity planning including projection of business volumes IT (S/W, H/W & N/W) Assets, Licenses & maintenance contracts, Disposal of Equipment, Media, etc., Implementation of approved IT policies of SEBI."
+            "Personnel Security, Access Management, Data Backup and recovery Controls, Application Security, Network Communication Security, Business Continuity Management / BCP Controls, Implementation Audit, Fault Isolation audit (in the event of any incident), Integration compliance, Configuration Audit, Change Management, Insurance Audit, Performance Audit, Monitoring the utilization of IT resources, Capacity planning including projection of business volumes IT (S/W, H/W & N/W) Assets, Licenses & maintenance contracts, Disposal of Equipment, Media, etc., Implementation of approved IT policies of the Organization."
         ),
         new_x=XPos.LMARGIN, new_y=YPos.NEXT
     )
@@ -657,8 +659,8 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     section_title("Audit Methodology.")
     pdf.multi_cell(0, 5,
         clean_text(
-            "We have conducted audit as per the broad scope given to us. Our methodology will cover, in general, IS Audit practices, RBI, CERT-In, ISACA, COBIT, IT Act 2000/2008 guidelines and the guidelines & procedures prescribed in various Circulars issued by SEBI. "
-            "The objective of the audit is to verify compliance and to safeguard the interests of SEBI in connection with implementation of various technologies and related guidelines of the SEBI. Thus, findings are based on the scope given to us and best Practices to be followed."
+            "We have conducted audit as per the broad scope given to us. Our methodology will cover, in general, IS Audit practices, RBI, CERT-In, ISACA, COBIT, IT Act 2000/2008 guidelines and the guidelines & procedures prescribed in various Circulars issued by the Organization. "
+            "The objective of the audit is to verify compliance and to safeguard the interests of the Organization in connection with implementation of various technologies and related guidelines of the the Organization. Thus, findings are based on the scope given to us and best Practices to be followed."
         ),
         new_x=XPos.LMARGIN, new_y=YPos.NEXT
     )
@@ -668,7 +670,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     pdf.multi_cell(0, 5,
         clean_text(
             "The risk of an audit finding is determined by assessing the potential negative impact and the probability that it materializes. Audit findings are classified into four risk classifications. These risk categories assist management in identification, prioritization and implementation of audit recommendations. When the practice is normal as per the guidelines / best practices, the same has been classified as 'OK/ Complied'.\n\n"
-            "High Risks: Non-adherence to SEBI and Government Guidelines, Policies Approved by Competent Authority, ICT is not as per standard, high threat probabilities. These risks are so significant that Management should determine any exposure to date and without delay effect an agreed program for their immediate and permanent resolution in order to provide assurance that they will not recur in the future.\n\n"
+            "High Risks: Non-adherence to the Organization and Government Guidelines, Policies Approved by Competent Authority, ICT is not as per standard, high threat probabilities. These risks are so significant that Management should determine any exposure to date and without delay effect an agreed program for their immediate and permanent resolution in order to provide assurance that they will not recur in the future.\n\n"
             "Medium Risks: These risks are important and management should quickly develop action plans that will ensure timely and permanent resolution of the weaknesses noted. These are potential weaknesses in control or security, which could develop into an exposure. This should be addressed at the earliest opportunity.\n\n"
             "Low Risk: These risks are not material in the context of current levels of activity but management should be aware of them and ensure they are resolved as soon as possible as they may become material if activities increase.\n\n"
             "OK/ ACCEPTED: This is normal and good practice. It is as per the guidelines / best practices. The observations categorized as 'ACCEPTED' need no action."
@@ -735,16 +737,22 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
             
             # Map risk
             st_val = f.get("status", "Non-Compliant")
+            sev_score = f.get("severity_score", 0.0) or 0.0
             if st_val == "Compliant":
                 mapped_risk = "Accepted"
+                risk_text = "Accepted"
             else:
                 sev = f.get("severity", "P3 Medium")
                 if "1" in sev or "Critical" in sev or "High" in sev:
                     mapped_risk = "High"
+                    risk_label = "Critical" if "Critical" in sev or sev_score >= 9.0 else "High"
                 elif "2" in sev or "Medium" in sev:
                     mapped_risk = "Medium"
+                    risk_label = "Medium"
                 else:
                     mapped_risk = "Low"
+                    risk_label = "Low"
+                risk_text = f"{risk_label} ({sev_score:.1f})"
                     
             # Color coding
             bg_color = {
@@ -777,7 +785,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
             obs_text = redact_pii(f.get("finding") or f.get("description") or "—")
             r.cell(clean_text(truncate_cell_text(obs_text, 600)), style=cell_style)
             
-            r.cell(clean_text(mapped_risk), style=risk_style)
+            r.cell(clean_text(risk_text), style=risk_style)
             
             imp_text = redact_pii(f.get("business_impact") or "NIL")
             r.cell(clean_text(truncate_cell_text(imp_text, 400)), style=cell_style)

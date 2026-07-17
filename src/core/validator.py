@@ -33,8 +33,21 @@ def normalize_text(text):
     # Standardize smart quotes / single quotes
     text = text.replace('“', '"').replace('”', '"').replace('‘', "'").replace('’', "'")
     # Standardize dashes
-    text = text.replace('–', '-').replace('—', '-')
     return text.strip().lower()
+
+
+def clean_alphanumeric(text):
+    """
+    Strips all punctuation, symbols, and formatting, leaving only lowercase letters, digits, and spaces.
+    Used as a robust fallback for grounding checks when encoding issues or smart quotes are present.
+    """
+    if not text:
+        return ""
+    import re
+    text = text.lower()
+    text = re.sub(r'[^a-z0-9\s]', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
 
 
 def check_prompt_leakage(evidence, hints, threshold=0.75):
@@ -177,6 +190,14 @@ def map_new_schema_to_legacy(finding):
     # 7. recommendation mapping
     mapped["recommendation"] = finding.get("recommendation") or ""
     
+    # 8. policy/evidence/severity mapping
+    mapped["policy_present"] = finding.get("policy_present", "No")
+    mapped["evidence_present"] = finding.get("evidence_present", "No")
+    try:
+        mapped["severity_score"] = float(finding.get("severity_score", 0.0))
+    except Exception:
+        mapped["severity_score"] = 0.0
+        
     return mapped
 
 
@@ -408,24 +429,42 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             finding["hallucination_check"] = "NOT_FOUND"
             finding["requires_human_review"] = True
             finding["requires_review"] = True
+            finding["finding"] = f"Business Impact: Unable to automatically verify control {control_id} due to unstructured document context. Manual verification is recommended to ensure compliance. | Missing Requirements: Manual document validation required for control {control_id}."
+            finding["recommendation"] = f"Manually review the policy document for references to control {control_id}, or upload a revised version containing explicit statements regarding this control."
+            finding["reasoning"] = f"The system did not locate clear, structured statements in the document relating to control {control_id}."
             finding["validator_note"] = "LLM did not cite evidence, but relevant keywords were found in the document. Human verification required."
             finding["review_note"] = "LLM returned NOT_FOUND for evidence, but keyword-based search found potentially relevant content in the document. Verify manually whether the control is satisfied."
-            finding["finding"] = f"Evidence for {control_id} may exist in the document but was not cited by the auditor. Manual verification required."
-            finding["severity"] = "P3 Medium"
+            finding["status"] = "NON_COMPLIANT"
+            finding["requires_human_review"] = True
+            finding["requires_review"] = True
+            
+            # Resolve to default control severity from controls database
+            from src.core.controls_data import USE_CASES
+            uc_severity = "MEDIUM"
+            for uc in USE_CASES:
+                if uc["use_case"] == control_id or uc["label"] == control_id or uc["use_case"].startswith(control_id):
+                    uc_severity = uc.get("severity", "MEDIUM")
+                    break
+            severity_map = {
+                "CRITICAL": "P1 Critical",
+                "HIGH": "P2 High",
+                "MEDIUM": "P3 Medium",
+                "LOW": "P4 Low"
+            }
+            finding["severity"] = severity_map.get(uc_severity.upper(), "P3 Medium")
+            return finding
         else:
-            print(f"[VALIDATOR DEBUG] [FALSE_POSITIVE] {control_id}: LLM returned NOT_FOUND evidence and no keywords found. Setting FALSE_POSITIVE.", flush=True)
-            finding["status"] = "FALSE_POSITIVE"
+            print(f"[VALIDATOR DEBUG] [NON_COMPLIANT] {control_id}: LLM returned NOT_FOUND evidence and no keywords found (Out of Scope). Setting NON_COMPLIANT.", flush=True)
+            finding["status"] = "NON_COMPLIANT"
             finding["hallucination_check"] = "NOT_FOUND"
             finding["requires_human_review"] = True
             finding["requires_review"] = True
             finding["confidence"] = 1
-            finding["validator_note"] = "Heuristic-based False Positive (no keywords)"
-            finding["review_note"] = "Heuristic-based Out of Scope: No keywords or evidence found in the document. Manually verify if this control is indeed inapplicable."
+            finding["validator_note"] = "Heuristic-based Out of Scope (no keywords) mapped to NON_COMPLIANT"
+            finding["review_note"] = "Heuristic-based Out of Scope: No keywords or evidence found in the document. Mapped to NON_COMPLIANT per scoping rules."
             finding["finding"] = f"Control requirements for {control_id} appear to be inapplicable to this policy document context."
             finding["severity"] = "N/A"
-        finding = apply_confidence_gate(finding)
-        finding = check_consistency(finding)
-        return finding
+            return finding
 
     # ── PHYSICAL VS LOGICAL IDENTITY GATING ──
     if code == "5.16" or "identity management" in control_id.lower():
@@ -528,6 +567,41 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             norm_doc = normalize_text(document_text)
             if norm_evidence in norm_doc:
                 grounded_state = "GROUNDED"
+            else:
+                # Fallback: check via alphanumeric-only match to handle smart quote / encoding differences
+                alpha_evidence = clean_alphanumeric(evidence_clean)
+                alpha_doc = clean_alphanumeric(document_text)
+                if alpha_evidence and alpha_evidence in alpha_doc:
+                    grounded_state = "GROUNDED"
+                    print(f"[VALIDATOR] Grounding matched via alphanumeric fallback for control {control_id}", flush=True)
+                else:
+                    # Look for the longest prefix of the quote (word by word) that exists in the document
+                    words = evidence_clean.split()
+                    found_prefix = False
+                    for i in range(len(words), 5, -1):  # Check down to minimum of 6 words
+                        prefix = " ".join(words[:i])
+                        norm_prefix = normalize_text(prefix)
+                        if norm_prefix in norm_doc:
+                            evidence_clean = prefix
+                            finding["evidence_quote"] = prefix
+                            finding["evidence_snippet"] = prefix
+                            norm_evidence = norm_prefix
+                            grounded_state = "GROUNDED"
+                            found_prefix = True
+                            print(f"[VALIDATOR] Longest matching quote prefix accepted: '{prefix}'", flush=True)
+                            break
+                        else:
+                            alpha_prefix = clean_alphanumeric(prefix)
+                            if alpha_prefix and alpha_prefix in alpha_doc:
+                                evidence_clean = prefix
+                                finding["evidence_quote"] = prefix
+                                finding["evidence_snippet"] = prefix
+                                norm_evidence = norm_prefix
+                                grounded_state = "GROUNDED"
+                                found_prefix = True
+                                print(f"[VALIDATOR] Longest matching quote prefix accepted (alphanumeric): '{prefix}'", flush=True)
+                                break
+
 
     # ════════════════════════════════════════
     # GATE 3: Fuzzy OCR Grounding Fallback
@@ -640,14 +714,16 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
 
     # Get & Normalize status — only three valid outputs: COMPLIANT, NON_COMPLIANT, FALSE_POSITIVE
     status = finding.get("status", "NON_COMPLIANT").upper()
-    if "FALSE_POSITIVE" in status or "FALSE POSITIVE" in status or "OUT_OF_SCOPE" in status or "OUT OF SCOPE" in status:
+    if "FALSE_POSITIVE" in status or "FALSE POSITIVE" in status:
         finding["status"] = "FALSE_POSITIVE"
+    elif "OUT_OF_SCOPE" in status or "OUT OF SCOPE" in status:
+        finding["status"] = "NON_COMPLIANT"  # Out of Scope maps to NON_COMPLIANT
     elif "HUMAN_REVIEW" in status or "HUMAN REVIEW" in status:
         finding["status"] = "NON_COMPLIANT"
     elif "NON_COMPLIANT" in status or "NON-COMPLIANT" in status:
         finding["status"] = "NON_COMPLIANT"
     elif "PARTIALLY" in status or "PARTIAL" in status:
-        finding["status"] = "NON_COMPLIANT"
+        finding["status"] = "FALSE_POSITIVE"  # Gap / Partial Evidence maps to FALSE_POSITIVE
     elif "COMPLIANT" in status:
         finding["status"] = "COMPLIANT"
     else:
@@ -665,10 +741,35 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         print(f"[VALIDATOR DEBUG] [WARN] {control_id}: Status changed by Confidence/Consistency gate: {pre_gate_status} -> {post_gate_status}", flush=True)
     print(f"[VALIDATOR DEBUG] FINAL: {control_id} -> Status={finding.get('status')}, Evidence={'YES' if finding.get('evidence_quote') not in ('', 'NOT_FOUND', None) else 'NO'}", flush=True)
     
-    # Ensure severity is N/A for COMPLIANT and FALSE_POSITIVE
+    # Ensure severity is N/A for COMPLIANT and FALSE_POSITIVE, otherwise resolve based on severity_score
     current_status = finding.get("status", "NON_COMPLIANT")
     if current_status in ("COMPLIANT", "FALSE_POSITIVE"):
         finding["severity"] = "N/A"
+    else:
+        score = float(finding.get("severity_score", 0.0))
+        if score >= 9.0:
+            finding["severity"] = "P1 Critical"
+        elif score >= 7.0:
+            finding["severity"] = "P2 High"
+        elif score >= 4.0:
+            finding["severity"] = "P3 Medium"
+        elif score >= 0.1:
+            finding["severity"] = "P4 Low"
+        else:
+            # Fallback to default control severity
+            from src.core.controls_data import USE_CASES
+            uc_severity = "MEDIUM"
+            for uc in USE_CASES:
+                if uc["use_case"] == control_id or uc["label"] == control_id or uc["use_case"].startswith(control_id):
+                    uc_severity = uc.get("severity", "MEDIUM")
+                    break
+            severity_map = {
+                "CRITICAL": "P1 Critical",
+                "HIGH": "P2 High",
+                "MEDIUM": "P3 Medium",
+                "LOW": "P4 Low"
+            }
+            finding["severity"] = severity_map.get(uc_severity.upper(), "P3 Medium")
 
     # FIX 2: Ensure recommendation is populated and appropriate for the compliance status.
     if current_status in ("COMPLIANT", "FALSE_POSITIVE"):

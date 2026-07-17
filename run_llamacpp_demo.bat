@@ -6,8 +6,10 @@ echo ==================================================
 
 echo.
 echo [1/4] Stopping any existing Ollama or llama-server processes...
-taskkill /F /IM ollama.exe /T >nul 2>&1
-taskkill /F /IM llama-server.exe /T >nul 2>&1
+taskkill /F /IM ollama* /T >nul 2>&1
+taskkill /F /IM llama-server* /T >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11434 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11435 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
 
 echo.
 set "LLAMA_SERVER_EXE="
@@ -20,7 +22,7 @@ if exist "C:\Users\veeresh988V\Desktop\llama\llama-server.exe" (
 )
 
 echo [2/4] Starting llama-server LLM on port 11434...
-start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 4096 -t 8 -b 512 --flash-attn on
+start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 8192 -t 8 -b 512 --flash-attn on
 
 echo.
 echo [3/4] Starting llama-server Embeddings on port 11435...
