@@ -367,7 +367,10 @@ _replicate_worker.start()
 
 def replicate_changes():
     """Asynchronously triggers database replication to slave engines."""
-    global _replication_pending_flag
+    global _replication_pending_flag, engine_master
+    # No-op for SQLite
+    if engine_master is not None and engine_master.dialect.name == "sqlite":
+        return
     with _replication_flag_lock:
         if _replication_pending_flag:
             return
@@ -484,33 +487,64 @@ def reconcile_schemas(engine):
 def init_db():
     global engine_master, engine_slave1, engine_slave2, db_label
     
-    # Initialize connection engines for the master and slave databases first (lazy connections)
-    eng_m = create_engine(
-        "postgresql://postgres:ShakthiDB%402026@localhost:15234/shakthidb_master",
-        connect_args={"connect_timeout": 3},
-        pool_pre_ping=True
-    )
-    eng_s1 = create_engine(
-        "postgresql://postgres:ShakthiDB%402026@localhost:15234/shakthidb_slave1",
-        connect_args={"connect_timeout": 3},
-        pool_pre_ping=True
-    )
-    eng_s2 = create_engine(
-        "postgresql://postgres:ShakthiDB%402026@localhost:15234/shakthidb_slave2",
-        connect_args={"connect_timeout": 3},
-        pool_pre_ping=True
-    )
-
-    # Quick check if database and tables already exist and are initialized
     try:
-        with eng_m.connect() as conn:
-            conn.execute(text("SELECT 1 FROM users LIMIT 1"))
-        # Database and tables exist, skip bootstrap but ALWAYS run reconcile_schemas to ensure columns exist
-        engine_master = eng_m
-        engine_slave1 = eng_s1
-        engine_slave2 = eng_s2
-        db_label = "ShaktiDB"
+        # Initialize connection engines for the master and slave databases first (lazy connections)
+        eng_m = create_engine(
+            "postgresql://postgres:ShakthiDB%402026@localhost:15234/shakthidb_master",
+            connect_args={"connect_timeout": 3},
+            pool_pre_ping=True
+        )
+        eng_s1 = create_engine(
+            "postgresql://postgres:ShakthiDB%402026@localhost:15234/shakthidb_slave1",
+            connect_args={"connect_timeout": 3},
+            pool_pre_ping=True
+        )
+        eng_s2 = create_engine(
+            "postgresql://postgres:ShakthiDB%402026@localhost:15234/shakthidb_slave2",
+            connect_args={"connect_timeout": 3},
+            pool_pre_ping=True
+        )
+
+        # Quick check if database and tables already exist and are initialized
+        try:
+            with eng_m.connect() as conn:
+                conn.execute(text("SELECT 1 FROM users LIMIT 1"))
+            # Database and tables exist, skip bootstrap but ALWAYS run reconcile_schemas to ensure columns exist
+            engine_master = eng_m
+            engine_slave1 = eng_s1
+            engine_slave2 = eng_s2
+            db_label = "ShaktiDB"
+            
+            reconcile_schemas(eng_m)
+            reconcile_schemas(eng_s1)
+            reconcile_schemas(eng_s2)
+            
+            Base.metadata.create_all(bind=eng_m)
+            Base.metadata.create_all(bind=eng_s1)
+            Base.metadata.create_all(bind=eng_s2)
+            return eng_m, "ShaktiDB"
+        except Exception:
+            pass
+
+        # Fallback: Bootstrapping and schema creation
+        # Connect to the default 'shakthidb' database on port 15234 to bootstrap databases if they do not exist
+        try:
+            bootstrap_eng = create_engine(
+                "postgresql://postgres:ShakthiDB%402026@localhost:15234/shakthidb",
+                connect_args={"connect_timeout": 3},
+                pool_pre_ping=True
+            )
+            with bootstrap_eng.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
+                for db_name in ["shakthidb_master", "shakthidb_slave1", "shakthidb_slave2"]:
+                    try:
+                        c.execute(text(f"CREATE DATABASE {db_name}"))
+                    except Exception:
+                        pass
+            bootstrap_eng.dispose()
+        except Exception as bootstrap_err:
+            print(f"[DATABASE BOOTSTRAP WARNING] Could not bootstrap databases: {bootstrap_err}")
         
+        # Reconcile schemas and create tables on all engines
         reconcile_schemas(eng_m)
         reconcile_schemas(eng_s1)
         reconcile_schemas(eng_s2)
@@ -518,82 +552,87 @@ def init_db():
         Base.metadata.create_all(bind=eng_m)
         Base.metadata.create_all(bind=eng_s1)
         Base.metadata.create_all(bind=eng_s2)
+        
+        engine_master = eng_m
+        engine_slave1 = eng_s1
+        engine_slave2 = eng_s2
+        db_label = "ShaktiDB"
+        
+        # Run user role migration
+        try:
+            migrated = False
+            with eng_m.begin() as conn:
+                # Rename 'reviewer' role to 'auditee'
+                res = conn.execute(text("SELECT count(*) FROM users WHERE role = 'reviewer'")).scalar()
+                if res and res > 0:
+                    conn.execute(text("UPDATE users SET role = 'auditee' WHERE role = 'reviewer'"))
+                    migrated = True
+            if migrated:
+                replicate_changes()
+        except Exception as e:
+            print(f"[INIT DB MIGRATION WARNING] Failed to migrate user roles: {e}")
+            
+        # Seed default admin if missing or if totp_secret is empty
+        try:
+            import hashlib
+            admin_pw_hash = hashlib.sha256(b"admin123").hexdigest()
+            admin_seeded_or_updated = False
+            with eng_m.begin() as conn:
+                admin = conn.execute(text("SELECT id, totp_secret FROM users WHERE username = 'admin'")).first()
+                if not admin:
+                    conn.execute(
+                        text("INSERT INTO users (username, password_hash, role, totp_secret) VALUES ('admin', :pw_hash, 'admin', 'ADMI2FASHRDSECRT')"),
+                        {"pw_hash": admin_pw_hash}
+                    )
+                    admin_seeded_or_updated = True
+                    print("[INIT DB] Seeded default admin user with TOTP secret.")
+                elif not admin[1]:  # admin.totp_secret is index 1
+                    conn.execute(
+                        text("UPDATE users SET totp_secret = 'ADMI2FASHRDSECRT' WHERE username = 'admin'")
+                    )
+                    admin_seeded_or_updated = True
+                    print("[INIT DB] Updated default admin user with TOTP secret.")
+            if admin_seeded_or_updated:
+                replicate_changes()
+        except Exception as e:
+            print(f"[INIT DB ADMIN SEEDING WARNING] Failed to seed default admin: {e}")
+            
         return eng_m, "ShaktiDB"
-    except Exception:
-        pass
 
-    # Fallback: Bootstrapping and schema creation
-    # Connect to the default 'shakthidb' database on port 15234 to bootstrap databases if they do not exist
-    try:
-        bootstrap_eng = create_engine(
-            "postgresql://postgres:ShakthiDB%402026@localhost:15234/shakthidb",
-            connect_args={"connect_timeout": 3},
-            pool_pre_ping=True
+    except Exception as pg_err:
+        print(f"[DATABASE WARNING] PostgreSQL/ShaktiDB is offline or unreachable: {pg_err}. Auto-switching to local SQLite fallback database...", flush=True)
+        os.makedirs("data/sqlite", exist_ok=True)
+        sqlite_path = "data/sqlite/shakthidb_sqlite.db"
+        eng_sqlite = create_engine(
+            f"sqlite:///{sqlite_path}",
+            connect_args={"timeout": 15}
         )
-        with bootstrap_eng.connect().execution_options(isolation_level="AUTOCOMMIT") as c:
-            for db_name in ["shakthidb_master", "shakthidb_slave1", "shakthidb_slave2"]:
-                try:
-                    c.execute(text(f"CREATE DATABASE {db_name}"))
-                except Exception:
-                    pass
-        bootstrap_eng.dispose()
-    except Exception as bootstrap_err:
-        print(f"[DATABASE BOOTSTRAP WARNING] Could not bootstrap databases: {bootstrap_err}")
-    
-    # Reconcile schemas and create tables on all engines
-    reconcile_schemas(eng_m)
-    reconcile_schemas(eng_s1)
-    reconcile_schemas(eng_s2)
-    
-    Base.metadata.create_all(bind=eng_m)
-    Base.metadata.create_all(bind=eng_s1)
-    Base.metadata.create_all(bind=eng_s2)
-    
-    engine_master = eng_m
-    engine_slave1 = eng_s1
-    engine_slave2 = eng_s2
-    db_label = "ShaktiDB"
-    
-    # Run user role migration
-    try:
-        migrated = False
-        with eng_m.begin() as conn:
-            # Rename 'reviewer' role to 'auditee'
-            res = conn.execute(text("SELECT count(*) FROM users WHERE role = 'reviewer'")).scalar()
-            if res and res > 0:
-                conn.execute(text("UPDATE users SET role = 'auditee' WHERE role = 'reviewer'"))
-                migrated = True
-        if migrated:
-            replicate_changes()
-    except Exception as e:
-        print(f"[INIT DB MIGRATION WARNING] Failed to migrate user roles: {e}")
+        try:
+            with eng_sqlite.connect() as conn:
+                conn.execute(text("PRAGMA journal_mode=WAL;"))
+        except Exception:
+            pass
+        Base.metadata.create_all(bind=eng_sqlite)
+        engine_master = eng_sqlite
+        engine_slave1 = eng_sqlite
+        engine_slave2 = eng_sqlite
+        db_label = "SQLite (Fallback)"
         
-    # Seed default admin if missing or if totp_secret is empty
-    try:
-        import hashlib
-        admin_pw_hash = hashlib.sha256(b"admin123").hexdigest()
-        admin_seeded_or_updated = False
-        with eng_m.begin() as conn:
-            admin = conn.execute(text("SELECT id, totp_secret FROM users WHERE username = 'admin'")).first()
-            if not admin:
-                conn.execute(
-                    text("INSERT INTO users (username, password_hash, role, totp_secret) VALUES ('admin', :pw_hash, 'admin', 'ADMI2FASHRDSECRT')"),
-                    {"pw_hash": admin_pw_hash}
-                )
-                admin_seeded_or_updated = True
-                print("[INIT DB] Seeded default admin user with TOTP secret.")
-            elif not admin[1]:  # admin.totp_secret is index 1
-                conn.execute(
-                    text("UPDATE users SET totp_secret = 'ADMI2FASHRDSECRT' WHERE username = 'admin'")
-                )
-                admin_seeded_or_updated = True
-                print("[INIT DB] Updated default admin user with TOTP secret.")
-        if admin_seeded_or_updated:
-            replicate_changes()
-    except Exception as e:
-        print(f"[INIT DB ADMIN SEEDING WARNING] Failed to seed default admin: {e}")
-        
-    return eng_m, "ShaktiDB"
+        try:
+            import hashlib
+            admin_pw_hash = hashlib.sha256(b"admin123").hexdigest()
+            with eng_sqlite.begin() as conn:
+                admin = conn.execute(text("SELECT id FROM users WHERE username = 'admin'")).first()
+                if not admin:
+                    conn.execute(
+                        text("INSERT INTO users (username, password_hash, role, totp_secret) VALUES ('admin', :pw_hash, 'admin', 'ADMI2FASHRDSECRT')"),
+                        {"pw_hash": admin_pw_hash}
+                    )
+                    print("[INIT DB SQLite] Seeded default admin user with TOTP secret in SQLite fallback.", flush=True)
+        except Exception as seed_err:
+            print(f"[INIT DB SQLite WARNING] Failed to seed SQLite admin: {seed_err}", flush=True)
+            
+        return eng_sqlite, "SQLite (Fallback)"
 
 # Initialize single global connection layout
 engine, db_label = init_db()
@@ -601,8 +640,10 @@ engine, db_label = init_db()
 # ── ROUTING SESSION & SYNCHRONOUS REPLICATION ────────────────────────────────
 class RoutingSession(Session):
     def get_bind(self, mapper=None, clause=None, **kw):
-        global promoted_master_engine
-        
+        global promoted_master_engine, engine_master
+        if engine_master is not None and engine_master.dialect.name == "sqlite":
+            return engine_master
+            
         # Identify if current statement is a WRITE operation
         is_write = False
         if self._flushing:

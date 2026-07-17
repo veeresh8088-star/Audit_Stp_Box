@@ -3734,6 +3734,8 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     """Audit controls sequentially using the LangGraph state machine.
     Uses the ISO 27001 Lead Auditor logic and preserves database routing and session checkpoints.
     """
+    import os
+    os.environ["RAG_RERANK_MODE"] = "quick" if "quick" in str(audit_mode).lower() else "deep"
     ollama_model = _resolve_ollama_model(model_choice)
     controls = _build_controls_for_audit(selected_sls, custom_evidence)
 
@@ -4562,6 +4564,8 @@ with st.sidebar:
             _cnt = _std_counts.get(selected_standard, 0)
             st.caption(f"📌 **{selected_standard}** maps to **{_cnt}** ISO 27001 controls (cross-walk subset).")
 
+
+
         if selected_standard == "All Standards":
             filtered_use_cases = USE_CASES
         else:
@@ -4607,6 +4611,7 @@ with st.sidebar:
                 key="audit_mode_radio"
             )
             st.session_state.audit_mode = "Deep" if "Full" in audit_mode_ui else "Quick"
+            st.caption("ℹ️ **Quick** mode uses a lightweight 80MB cross-encoder (Single-pass). **Deep** mode runs a high-precision 278MB model with reflection loops.")
             st.divider()
 
         # 🔍 SCOPE DETECTION

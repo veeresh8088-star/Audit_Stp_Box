@@ -1,0 +1,8 @@
+Burp Suite Professional - Web Application Security Scan
+Target: https://172.201.152.88/api/login
+
+Issue: Missing Secure/HttpOnly Flags on Session Cookies
+Severity: Medium
+Confidence: Certain
+Description: The web application sets session cookies without the 'Secure' and 'HttpOnly' flags. Attackers can steal these cookies via Cross-Site Scripting (XSS) or man-in-the-middle attacks.
+Remediation: Configure all session cookies with the 'Secure' and 'HttpOnly' flags in the Set-Cookie headers.

@@ -27,6 +27,38 @@ if os.path.exists(CACHE_FILE):
     except Exception as e:
         print(f"[EMBEDDING CACHE] Warning: failed to load persistent cache: {e}", flush=True)
 
+# Cross-Encoder lazy-loading variables
+_RERANKER_MODEL = None
+_RERANKER_ACTIVE_MODE = None
+
+def get_reranker(mode="quick"):
+    """Lazy-loads and caches the selected Cross-Encoder model.
+    Toggles loaded models dynamically to prevent excessive RAM usage.
+    """
+    global _RERANKER_MODEL, _RERANKER_ACTIVE_MODE
+    
+    # Map friendly modes to Hugging Face models
+    model_name = "cross-encoder/ms-marco-MiniLM-L-6-v2" if mode == "quick" else "BAAI/bge-reranker-base"
+    
+    if _RERANKER_MODEL is None or _RERANKER_ACTIVE_MODE != mode:
+        # If another model is active, unload it first to protect RAM
+        if _RERANKER_MODEL is not None:
+            print(f"[RERANKER] Unloading active model '{_RERANKER_ACTIVE_MODE}' to free memory...", flush=True)
+            _RERANKER_MODEL = None
+            import gc
+            gc.collect()
+            
+        try:
+            from sentence_transformers import CrossEncoder
+            print(f"[RERANKER] Loading model '{model_name}' (Mode: {mode.upper()}). First run will download file...", flush=True)
+            _RERANKER_MODEL = CrossEncoder(model_name, max_length=512)
+            _RERANKER_ACTIVE_MODE = mode
+            print(f"[RERANKER] Model '{model_name}' loaded successfully.", flush=True)
+        except Exception as e:
+            print(f"[RERANKER ERROR] Failed to load CrossEncoder model '{model_name}': {e}", flush=True)
+            
+    return _RERANKER_MODEL
+
 # Configurable defaults for retrieval
 DEFAULT_TOP_K = {
     "pdf": 12,
@@ -74,24 +106,47 @@ def save_document_chunks(filename, text):
             cached_chunks = _ingested_chunks_cache.get(filename)
             if cached_chunks:
                 chunks_saved = 0
-                for idx, (content, metadata) in enumerate(cached_chunks):
-                    # Generate a stable chunk_id
-                    chunk_id = hashlib.md5(f"{filename}_{idx}_{content}".encode('utf-8')).hexdigest()[:8]
-                    metadata["chunk_id"] = f"chunk_{chunk_id}"
-                    
-                    db_chunk = DocumentChunk(
-                        filename=filename,
-                        chunk_index=idx,
-                        content=content,
-                        metadata_json=json.dumps(metadata),
-                        source_file=metadata.get("source_file"),
-                        source_type=metadata.get("source_type"),
-                        chunk_id=metadata.get("chunk_id")
-                    )
-                    session.add(db_chunk)
-                    chunks_saved += 1
+                for idx, (p_content, metadata) in enumerate(cached_chunks):
+                    # Split custom chunk content (Parent) into child sentences
+                    sentences = []
+                    raw_s = re.split(r'(?<=[.!?])\s+', p_content)
+                    for s in raw_s:
+                        s_strip = s.strip()
+                        if len(s_strip.split()) >= 4:
+                            sentences.append(s_strip)
+                    if not sentences:
+                        sentences = [p_content]
+                        
+                    for s_idx, sentence in enumerate(sentences):
+                        child_metadata = dict(metadata)
+                        child_metadata["parent_context"] = p_content
+                        child_metadata["sentence_index"] = s_idx
+                        
+                        # Prepend context to the sentence vector to maintain scoping context
+                        child_content = sentence
+                        if metadata.get("section_heading"):
+                            child_content = f"[{metadata['section_heading']}] {child_content}"
+                        elif metadata.get("slide_title"):
+                            child_content = f"[{metadata['slide_title']}] {child_content}"
+                        elif metadata.get("sheet_name"):
+                            child_content = f"[{metadata['sheet_name']}] {child_content}"
+                            
+                        chunk_id = hashlib.md5(f"{filename}_{idx}_{s_idx}_{child_content}".encode('utf-8')).hexdigest()[:8]
+                        child_metadata["chunk_id"] = f"chunk_{chunk_id}"
+                        
+                        db_chunk = DocumentChunk(
+                            filename=filename,
+                            chunk_index=chunks_saved,
+                            content=child_content,
+                            metadata_json=json.dumps(child_metadata),
+                            source_file=child_metadata.get("source_file"),
+                            source_type=child_metadata.get("source_type"),
+                            chunk_id=child_metadata.get("chunk_id")
+                        )
+                        session.add(db_chunk)
+                        chunks_saved += 1
                 session.commit()
-                print(f"[RAG] Successfully stored {chunks_saved} custom cached chunks with metadata for '{filename}' in database.")
+                print(f"[RAG] Successfully stored {chunks_saved} pointwise parent-child custom cached chunks for '{filename}' in database.")
                 return
 
             # Fallback split into double newlines chunks (paragraphs)
@@ -169,6 +224,8 @@ def save_document_chunks(filename, text):
                         
                 window_paras = [p for _, p in window_data]
                 p_text = "\n\n".join(window_paras)
+                # Keep raw parent context without section wrapper in metadata if we want it clean
+                p_parent = p_text
                 if window_section:
                     p_text = f"[{window_section}]\n{p_text}"
                 # Hard cap: split oversized chunks (e.g. dense PDF pages) at sentence boundaries
@@ -178,33 +235,53 @@ def save_document_chunks(filename, text):
                     if cut == -1:
                         cut = MAX_CHUNK_CHARS
                     p_text = p_text[:cut + 1].strip()
+                    p_parent = p_text
+
+                # Split parent context into child sentences
+                sentences = []
+                raw_s = re.split(r'(?<=[.!?])\s+', p_text)
+                for s in raw_s:
+                    s_strip = s.strip()
+                    if len(s_strip.split()) >= 4:
+                        sentences.append(s_strip)
+                if not sentences:
+                    sentences = [p_text]
+
+                for s_idx, sentence in enumerate(sentences):
+                    _, ext = os.path.splitext(filename.lower())
+                    SUPPORTED_TYPES_LOCAL = {
+                        ".pdf": "pdf",   ".docx": "docx", ".doc": "docx",
+                        ".txt": "txt",   ".xlsx": "xlsx",  ".xls": "xlsx",
+                        ".csv": "csv",   ".pptx": "pptx",  ".ppt": "pptx",
+                        ".png": "image", ".jpg": "image",   ".jpeg": "image"
+                    }
+                    src_type = SUPPORTED_TYPES_LOCAL.get(ext, ext.lstrip(".") if ext else "txt")
                     
-                _, ext = os.path.splitext(filename.lower())
-                SUPPORTED_TYPES_LOCAL = {
-                    ".pdf": "pdf",   ".docx": "docx", ".doc": "docx",
-                    ".txt": "txt",   ".xlsx": "xlsx",  ".xls": "xlsx",
-                    ".csv": "csv",   ".pptx": "pptx",  ".ppt": "pptx",
-                    ".png": "image", ".jpg": "image",   ".jpeg": "image"
-                }
-                src_type = SUPPORTED_TYPES_LOCAL.get(ext, ext.lstrip(".") if ext else "txt")
-                metadata = {
-                    "source_file": filename,
-                    "source_type": src_type,
-                    "section_heading": window_section,
-                    "chunk_id": f"chunk_fallback_{idx}"
-                }
-                
-                chunk = DocumentChunk(
-                    filename=filename,
-                    chunk_index=idx,
-                    content=p_text,
-                    metadata_json=json.dumps(metadata),
-                    source_file=metadata.get("source_file"),
-                    source_type=metadata.get("source_type"),
-                    chunk_id=metadata.get("chunk_id")
-                )
-                session.add(chunk)
-                chunks_saved += 1
+                    child_metadata = {
+                        "source_file": filename,
+                        "source_type": src_type,
+                        "section_heading": window_section,
+                        "parent_context": p_parent,
+                        "sentence_index": s_idx,
+                        "chunk_id": f"chunk_fallback_{idx}_{s_idx}"
+                    }
+                    
+                    child_content = sentence
+                    # If the split sentence doesn't have the section prefix, add it to help vector retrieval
+                    if window_section and not sentence.startswith('['):
+                        child_content = f"[{window_section}] {sentence}"
+                        
+                    chunk = DocumentChunk(
+                        filename=filename,
+                        chunk_index=chunks_saved,
+                        content=child_content,
+                        metadata_json=json.dumps(child_metadata),
+                        source_file=child_metadata.get("source_file"),
+                        source_type=child_metadata.get("source_type"),
+                        chunk_id=child_metadata.get("chunk_id")
+                    )
+                    session.add(chunk)
+                    chunks_saved += 1
                 
             session.commit()
             print(f"[RAG] Successfully stored {chunks_saved} fallback overlapping chunks for '{filename}' in database.")
@@ -489,6 +566,36 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
             deduplicated.append(item)
 
     deduplicated.sort(key=lambda x: x[0], reverse=True)
+    
+    # ── Cross-Encoder Reranking ──────────────────────────────────────────────
+    rerank_mode = os.environ.get("RAG_RERANK_MODE", "quick").strip().lower()
+    reranker = get_reranker(rerank_mode)
+    
+    if reranker is not None and deduplicated:
+        # Take the top candidates (up to 20) for re-ranking
+        candidates = deduplicated[:20]
+        try:
+            # Build Query-Chunk pairs
+            pairs = [(query_text, item[1]) for item in candidates]
+            # Predict semantic relevance scores (0.0 to 1.0)
+            rerank_scores = reranker.predict(pairs)
+            
+            reranked_candidates = []
+            for i, item in enumerate(candidates):
+                # Combine scores: 30% Hybrid Score + 70% Rerank Score
+                h_score = item[0]
+                r_score = float(rerank_scores[i])
+                final_score = 0.3 * h_score + 0.7 * r_score
+                reranked_candidates.append((final_score, item[1], item[2], item[3], item[4]))
+                
+            # Re-sort candidates by new score
+            reranked_candidates.sort(key=lambda x: x[0], reverse=True)
+            # Replace the top of deduplicated list with reranked items
+            deduplicated = reranked_candidates + deduplicated[20:]
+            print(f"[RERANK SUCCESS] Reranked {len(candidates)} candidate chunks using mode '{rerank_mode.upper()}'.", flush=True)
+        except Exception as re_err:
+            print(f"[RERANK WARNING] Reranking failed: {re_err}", flush=True)
+
     total_available_chunks = len(db_chunks) if db_chunks else len(paragraphs)
 
     # Evidence Diversity Enforcement
@@ -551,11 +658,21 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
         else:
             retrieved_chunk_metas.append({"source_file": src_file})
 
-    # Build condensed context
+    # Build condensed context (Parent-Child Sentence Window Expansion)
     condensed_context = ""
     added_paragraphs = set()
-    for _, p_content, _, _, _ in final_sorted:
-        paras = [para.strip() for para in p_content.split('\n\n') if para.strip()]
+    for _, child_content, _, _, chunk_obj in final_sorted:
+        # Retrieve parent paragraph if available in metadata, else fallback to child sentence
+        parent_context = child_content
+        if chunk_obj is not None and chunk_obj.metadata_json:
+            try:
+                meta = json.loads(chunk_obj.metadata_json)
+                if "parent_context" in meta:
+                    parent_context = meta["parent_context"]
+            except Exception:
+                pass
+                
+        paras = [para.strip() for para in parent_context.split('\n\n') if para.strip()]
         chunk_unique_text = []
         for para in paras:
             para_body = para

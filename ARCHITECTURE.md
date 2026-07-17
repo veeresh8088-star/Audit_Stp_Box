@@ -99,3 +99,12 @@ The step-by-step lifecycle of an audit execution follows a strict sequence:
 ### 🛡️ 4.3 Ingestion-Time Malware Block (Security Layer)
 *   **Concept**: Stops executable exploits from reaching disk storage.
 *   **Checks**: Checks for executable headers (`b'MZ'`) and compares SHA256 hashes against blacklists. Rejects uploads and renders red security alerts before any write operations occur.
+
+### 🔑 4.4 Parent-Child Sentence-Window Retrieval (Search Optimization)
+*   **Concept**: Decouples search matching precision from LLM reading comprehension.
+*   **Mechanism**: Chunks are stored as individual pointwise sentences (the Children) to maximize vector matching accuracy, while the full parent paragraph is mapped inside their metadata. When retrieved, the search engine replaces the child sentence with the complete parent paragraph context for the LLM.
+
+### 🔀 4.5 Configurable Two-Tier Reranking Engine (Precision Layer)
+*   **Concept**: Adds deep-attention semantic scoring over the candidate chunks while preserving CPU/RAM limits.
+*   **Mechanism**: A sidebar toggle allows toggling between Quick Audit (loads the 80MB `ms-marco-MiniLM` model) and Deep Audit (loads the 278MB `bge-reranker-base` model). Evaluates the top 20 candidate chunks against the target control checklist, combining standard hybrid metrics (`0.3 * hybrid + 0.7 * rerank`) to sort and return the absolute best context pages. Relies on lazy loading and automatic memory garbage collection to avoid loading both models at the same time.
+

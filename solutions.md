@@ -399,3 +399,30 @@ The following core optimizations were implemented to improve CPU performance, UI
     *   Integrated `scan_file_security` checks directly inside the file uploader processing loops for both **Auditors** and **Auditees**.
     *   If a file fails the security scan (e.g. contains an `MZ` executable signature or a blacklisted SHA256 hash), the upload is immediately blocked. The file is **not** written to disk or the database.
     *   Displays a prominent red security error banner (e.g., `❌ Security Alert: Blocked upload of 'file_name' - Executable payload disguised as document...`) in the UI immediately upon upload.
+
+#### 8. Parent-Child Sentence-Window Retrieval (High-Accuracy RAG)
+*   **Files changed:** [`src/core/retrieval.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/retrieval.py)
+*   **Problem:** Standard paragraph-based vector search dilutes the specific semantic concepts inside large chunks, leading to weaker matching scores for highly specific control questions. Conversely, searching individual sentences provides high vector accuracy but starves the LLM of necessary context.
+*   **Fix:**
+    *   **Child Sentence Indexing**: When documents are uploaded, the parser splits paragraphs (the Parents) into individual sentences (the Children) using punctuation regex.
+    *   **Parent Metadata Binding**: The child sentence text is saved in the database as the search index target, and the full parent paragraph is mapped inside its `metadata_json` as `parent_context`.
+    *   **Automatic Parent Reconstruction**: During RAG query execution, the vector database retrieves the matching child sentences. The search context builder intercepts these and replaces the child sentence with the full parent paragraph from its metadata, ensuring the LLM receives the complete contextual environment for auditing.
+
+#### 9. Auto-Switching SQLite Database Fallback Engine
+*   **Files changed:** [`src/db/database.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/db/database.py)
+*   **Problem:** The system documentation advertised that the app automatically switches to SQLite if PostgreSQL/ShaktiDB is offline. However, the database module had no fallback exception logic, meaning that if PostgreSQL was offline or unreachable, the application crashed immediately on launch.
+*   **Fix:**
+    *   **Exception Isolation**: Wrapped the primary PostgreSQL engine checks and database bootstrapping inside a global `try...except` block in `init_db()`.
+    *   **SQLite Fallback Setup**: If PostgreSQL is unreachable, catches the exception and automatically instantiates a local SQLite connection engine at `data/sqlite/shakthidb_sqlite.db`. Enables WAL (Write-Ahead Logging) mode on SQLite to support concurrent reading and writing.
+    *   **Disable PostgreSQL Features**: Automatically intercepts calls to `replicate_changes()` and `Session.get_bind()` when using SQLite, resolving them directly to the master SQLite engine and skipping Postgres-specific replica replication calls to prevent syntax errors.
+
+#### 10. Two-Tier Configurable RAG Reranking Engine
+*   **Files changed:** [`src/core/retrieval.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/retrieval.py), [`src/ui/app.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/ui/app.py)
+*   **Problem:** Standard vector databases retrieve chunks based solely on keyword/concept overlap, which is susceptible to false compliance alarms. However, hardcoding a heavy reranker model leads to excessive latency and slows down generation times during live project demos.
+*   **Fix:**
+    *   **Configurable Mode Selection**: Added an "Audit Accuracy Mode" selector to the sidebar interface, offering two choices:
+        *   `⚡ Quick Audit (Speed Optimized)`: Uses the 80MB `ms-marco-MiniLM-L-6-v2` model (adds ~45s of scan latency).
+        *   `🔍 Deep Audit (Accuracy Optimized)`: Uses the 278MB `BAAI/bge-reranker-base` model (adds ~4.5m of scan latency).
+    *   **Lazy Loading & Memory Optimization**: Implemented the models inside a lazy loader helper `get_reranker()`. If a new mode is selected, it dynamically releases the previous model and triggers python garbage collection to prevent both models from taking up memory simultaneously.
+    *   **Cross-Encoder Rescoring**: In `_retrieve_rag_context()`, extracts the top 20 candidate chunks, scores them with the selected Cross-Encoder model against the control criteria, and merges the scores with standard hybrid outputs (`0.3 * hybrid + 0.7 * rerank`) to sort and return the absolute best-grounded chunks.
+
