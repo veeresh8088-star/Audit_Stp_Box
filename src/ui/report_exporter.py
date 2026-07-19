@@ -22,15 +22,22 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     # Helper to get dynamic values from st.session_state
     try:
         import streamlit as st
-        auditor_lead = st.session_state.get("auditor_lead", "Mr. Vikas Dubey")
+        auditor_lead = st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")
         auditor_firm = st.session_state.get("auditor_firm", "TÜV SÜD South Asia Pvt. Ltd.")
-        target_client = st.session_state.get("auditor_client", "Motorola Solutions, Inc")
+        auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
+        auditor_approver = st.session_state.get("auditor_approver", "Mr. Atul Srivastava")
+        report_doc_id = st.session_state.get("report_doc_id", "3153142723")
+        target_client = st.session_state.get("target_entity", st.session_state.get("auditor_client", "Motorola Solutions, Inc"))
         logo_path = st.session_state.get("auditor_logo_path")
     except Exception:
-        auditor_lead = "Mr. Vikas Dubey"
+        auditor_lead = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
         auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
+        auditor_reviewer = "Ms. Prianka Singla"
+        auditor_approver = "Mr. Atul Srivastava"
+        report_doc_id = "3153142723"
         target_client = "Motorola Solutions, Inc"
         logo_path = None
+
 
     scope_type = "External" if "external" in session_title.lower() else "Internal"
     doc_title = f"{scope_type} Network Vulnerability Assessment and Penetration Testing Validation Report"
@@ -119,13 +126,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     
     control_data = [
         ["Document Title", doc_title],
-        ["Document ID", "3153142723"],
+        ["Document ID", clean_text(report_doc_id)],
         ["Document Version", "1.0"],
         ["Prepared By", clean_text(auditor_lead)],
-        ["Reviewed By", "Ms. Prianka Singla"],
-        ["Approved By", "Mr. Atul Srivastava"],
+        ["Reviewed By", clean_text(auditor_reviewer)],
+        ["Approved By", clean_text(auditor_approver)],
         ["Testing Dates", f"24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"],
         ["Effective Date", datetime.now().strftime("%d-%B-%Y")]
+
     ]
     pdf.set_font("Helvetica", "", 9.5)
     with pdf.table(col_widths=(60, 120), text_align="L") as table:
@@ -551,15 +559,22 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
 
     try:
         import streamlit as st
-        auditor_lead = st.session_state.get("auditor_lead", "Mr. Vikas Dubey")
+        auditor_lead = st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")
         auditor_firm = st.session_state.get("auditor_firm", "TÜV SÜD South Asia Pvt. Ltd.")
-        target_client = st.session_state.get("auditor_client", "Motorola Solutions, Inc")
+        auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
+        auditor_approver = st.session_state.get("auditor_approver", "Mr. Atul Srivastava")
+        report_doc_id = st.session_state.get("report_doc_id", "3153142723")
+        target_client = st.session_state.get("target_entity", st.session_state.get("auditor_client", "Motorola Solutions, Inc"))
         logo_path = st.session_state.get("auditor_logo_path")
     except Exception:
-        auditor_lead = "Mr. Vikas Dubey"
+        auditor_lead = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
         auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
+        auditor_reviewer = "Ms. Prianka Singla"
+        auditor_approver = "Mr. Atul Srivastava"
+        report_doc_id = "3153142723"
         target_client = "Motorola Solutions, Inc"
         logo_path = None
+
 
     scope_type = "External" if "external" in session_title.lower() else "Internal"
     doc_title = f"{scope_type} Network Vulnerability Assessment and Penetration Testing Validation Report"
@@ -631,14 +646,15 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
     tbl_ctrl.style = 'Table Grid'
     control_rows = [
         ("Document Title", doc_title),
-        ("Document ID", "3153142723"),
+        ("Document ID", report_doc_id),
         ("Document Version", "1.0"),
         ("Prepared By", auditor_lead),
-        ("Reviewed By", "Ms. Prianka Singla"),
-        ("Approved By", "Mr. Atul Srivastava"),
+        ("Reviewed By", auditor_reviewer),
+        ("Approved By", auditor_approver),
         ("Testing Dates", f"24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"),
         ("Effective Date", datetime.now().strftime("%d-%B-%Y"))
     ]
+
     for r_idx, (label, val) in enumerate(control_rows):
         c1, c2 = tbl_ctrl.rows[r_idx].cells
         _set_cell_bg(c1, "F1F5F9")

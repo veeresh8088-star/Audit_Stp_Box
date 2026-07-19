@@ -4646,9 +4646,12 @@ with st.sidebar:
 
         # 👤 Custom Report Branding
         with st.sidebar.expander("👤 Custom Report Branding"):
-            st.text_input("Auditor Firm Name", value="Digital Age Strategies", key="auditor_firm")
-            st.text_input("Lead Auditors", value="Mr. Subhash Rao & Mr. Mahaveer Rajannavar", key="auditor_lead")
-            st.text_input("Target Organization", value="the Organization", key="target_entity")
+            st.text_input("Auditor Firm Name", value="TÜV SÜD South Asia Pvt. Ltd.", key="auditor_firm")
+            st.text_input("Lead Auditor(s)", value="Mr. Subhash Rao & Mr. Mahaveer Rajannavar", key="auditor_lead")
+            st.text_input("Reviewed By", value="Ms. Prianka Singla", key="auditor_reviewer")
+            st.text_input("Approved By", value="Mr. Atul Srivastava", key="auditor_approver")
+            st.text_input("Document ID", value="3153142723", key="report_doc_id")
+            st.text_input("Target Organization", value="Motorola Solutions, Inc", key="target_entity")
             logo_file = st.file_uploader("Upload Brand Logo (PNG/JPG)", type=["png", "jpg", "jpeg"], key="auditor_logo_upload")
             if logo_file is not None:
                 temp_dir = os.path.join("data", "cache")
@@ -4659,6 +4662,7 @@ with st.sidebar:
                 st.session_state["auditor_logo_path"] = logo_path
             else:
                 st.session_state["auditor_logo_path"] = None
+
 
 
 
