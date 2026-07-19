@@ -5503,7 +5503,8 @@ _resumable = get_resumable_checkpoint(st.session_state.active_chat_id)
 if not _resumable:
     _resumable = get_global_resumable_checkpoint()
 
-if _resumable and _resumable.session_id not in _bg_running:
+if _resumable and _resumable.session_id not in _bg_running and not st.session_state.get("findings") and st.session_state.get("stage") != 5:
+
     _done  = _resumable.completed_batches
     _total_b = (_resumable.total_controls + _resumable.batch_size - 1) // max(_resumable.batch_size, 1)
     _pct   = max(0, min(100, int((_done / max(_total_b, 1)) * 100)))
