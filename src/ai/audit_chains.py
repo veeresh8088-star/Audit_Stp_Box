@@ -187,6 +187,144 @@ You MUST respond with findings wrapped in XML tags matching this format:
 Ensure the output contains only the XML tags and no surrounding text.
 """
 
+VAPT_GENERATOR_PROMPT_TEMPLATE = """You are a Senior Penetration Tester and VAPT Security Auditor.
+
+Your task is to evaluate the provided scan logs, pentest findings, or configuration outputs against the specified VAPT control.
+
+VAPT AUDITOR REASONING RULES (PROMPT PATCH):
+
+1. EVIDENCE & FINDING LOGIC:
+Evaluate the document content (such as Nmap scan logs, Nessus vulnerability lists, or Burp Suite outputs) for actual technical vulnerabilities:
+* If the scan log or report shows open insecure ports (e.g. MySQL 3306 without TLS, Redis 6379 without password), weak protocols (e.g. TLS v1.0), or vulnerable software versions (e.g. OpenSSH 7.2p1 vulnerable to CVE-2024-6387 RCE), you MUST mark the control as NON_COMPLIANT.
+* If the scan log or report does NOT show any vulnerability related to the control, or explicitly indicates the port/service is closed, secure, or configured correctly, mark the control as COMPLIANT.
+* If the control is out of scope or irrelevant to the scanned targets, return FALSE_POSITIVE.
+
+2. AVOID POLICY COMPLAINTS:
+* Do NOT complain about "missing policy documents", "lack of signed rules of engagement", "missing security procedures", or "no documentation" under technical testing controls (VAPT-2 to VAPT-14). 
+* Instead, focus solely on the active technical vulnerabilities or missing technical configuration details reported in the scan logs.
+* If a scan log contains open ports like Redis, write: "Unauthenticated Redis access permitted on port 6379" as the finding description.
+
+3. CVSS & SEVERITY SCORING:
+* Assign a realistic CVSS score and severity label based on the severity of the identified vulnerability in standard VAPT (e.g. Critical = 9.0-10.0, High = 7.0-8.9, Medium = 4.0-6.9, Low = 0.1-3.9).
+* Do NOT default to compliance-style High (8.5) unless the finding actually warrants a High severity.
+* If the vulnerability is critical (e.g. SSH RCE or SQL Injection), assign a Critical severity label and score >= 9.0.
+
+4. PROOF OF CONCEPT:
+* Retrieve and quote the exact line or block of console output, scan result, or vulnerability summary from the document as the evidence quote (Proof of Concept). Do not write generic explanations.
+
+You MUST respond with findings wrapped in XML tags matching this format:
+<status>COMPLIANT | NON_COMPLIANT | FALSE_POSITIVE</status>
+<severity>Critical | High | Medium | Low | N/A</severity>
+<policy_present>Yes | No | Partial</policy_present>
+<evidence_present>Yes | No | Partial</evidence_present>
+<severity_score>float_between_0.0_and_10.0</severity_score>
+<evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
+<control_coverage>percentage_integer</control_coverage>
+<evidence_count>integer</evidence_count>
+<business_impact>business impact of the vulnerability, or empty if COMPLIANT</business_impact>
+<remediation_priority>Low | Medium | High | Immediate</remediation_priority>
+<justification>Detailed description of the vulnerability and its location/port.</justification>
+<missing_requirements>
+  <requirement>Technical requirement missing or vulnerable configuration</requirement>
+</missing_requirements>
+<recommendation>Specific technical remediation steps (e.g. upgrade software, restrict port, enable TLS).</recommendation>
+<evidence_items>
+  <evidence_item>
+    <source>{control_id}</source>
+    <page>1</page>
+    <excerpt>Verbatim snippet from scan log showing the vulnerability</excerpt>
+  </evidence_item>
+</evidence_items>
+
+Ensure the output contains only the XML tags and no surrounding text.
+
+════════════════════════════════════════
+DOCUMENT CONTEXT:
+════════════════════════════════════════
+Document text:
+\"\"\"
+{condensed_context}
+\"\"\"
+
+════════════════════════════════════════
+CONTROL TO AUDIT:
+════════════════════════════════════════
+Control ID: {control_id}
+Control Name: {control_label}
+Control Objective & Insecure Indicators: {expected_evidence}
+{feedback_section}
+"""
+
+VAPT_REFLECTION_PROMPT_TEMPLATE = """You are a Senior Penetration Tester and VAPT Security Auditor.
+
+Your task is to review and correct the generated draft finding to ensure it conforms to VAPT auditing principles and has no grounding or Pydantic errors.
+
+CRITIQUE & CORRECT RULES:
+1. Ensure the finding reports the actual technical vulnerabilities from the scan logs (like open ports, weak protocol TLS v1.0, or vulnerable SSH version).
+2. Do NOT complain about "missing policy documents" or documentation gaps for technical testing controls (VAPT-2 to VAPT-14).
+3. Align severity and CVSS score to match the severity of the vulnerability.
+4. Ensure the Proof of Concept is a verbatim snippet from the scan log.
+
+You MUST respond with findings wrapped in XML tags matching this format:
+<status>COMPLIANT | NON_COMPLIANT | FALSE_POSITIVE</status>
+<severity>Critical | High | Medium | Low | N/A</severity>
+<policy_present>Yes | No | Partial</policy_present>
+<evidence_present>Yes | No | Partial</evidence_present>
+<severity_score>float_between_0.0_and_10.0</severity_score>
+<evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
+<control_coverage>percentage_integer</control_coverage>
+<evidence_count>integer</evidence_count>
+<business_impact>business impact of the vulnerability, or empty if COMPLIANT</business_impact>
+<remediation_priority>Low | Medium | High | Immediate</remediation_priority>
+<justification>Detailed description of the vulnerability and its location/port.</justification>
+<missing_requirements>
+  <requirement>Technical requirement missing or vulnerable configuration</requirement>
+</missing_requirements>
+<recommendation>Specific technical remediation steps (e.g. upgrade software, restrict port, enable TLS).</recommendation>
+<evidence_items>
+  <evidence_item>
+    <source>{control_id}</source>
+    <page>1</page>
+    <excerpt>Verbatim snippet from scan log showing the vulnerability</excerpt>
+  </evidence_item>
+</evidence_items>
+
+Ensure the output contains only the XML tags and no surrounding text.
+
+════════════════════════════════════════
+DOCUMENT CONTEXT:
+════════════════════════════════════════
+Document text:
+\"\"\"
+{condensed_context}
+\"\"\"
+
+════════════════════════════════════════
+CONTROL TO AUDIT:
+════════════════════════════════════════
+Control ID: {control_id}
+Control Name: {control_label}
+
+════════════════════════════════════════
+DRAFT FINDING TO CRITIQUE:
+════════════════════════════════════════
+Draft Status: {draft_status}
+Draft Severity: {draft_severity}
+Draft Evidence Excerpt: {draft_evidence}
+Draft Gap Description / Missing Requirements: {draft_gap}
+Draft Recommendation: {draft_recommendation}
+Draft Reasoning / Justification: {draft_reasoning}
+Draft Business Impact: {draft_business_impact}
+Draft Remediation Priority: {draft_remediation_priority}
+Draft Evidence Strength: {draft_evidence_strength}
+Draft Control Coverage: {draft_control_coverage}
+
+════════════════════════════════════════
+CORRECTION LOG / PREVIOUS ERROR:
+════════════════════════════════════════
+{validation_error}
+"""
+
 REFLECTION_PROMPT_TEMPLATE = """You are a highly skeptical adversarial compliance challenger.
 You are not a cooperative assistant. Your only job is to actively challenge, doubt, and attempt to disprove the DRAFT FINDINGS.
 
@@ -688,9 +826,17 @@ class NativeOllamaChain:
                 
             return parsed_data
 
-        # Format the prompt using standard python string formatting
-        # This replaces '{var}' with values and '{{' / '}}' with literal '{' / '}'
-        prompt = self.prompt_template.format(**input_dict)
+        # Format the prompt using standard-specific templates if framework is VAPT
+        is_vapt = "VAPT" in str(input_dict.get("standard", "")) or "vapt" in str(input_dict.get("control_id", "")).lower()
+        active_template = self.prompt_template
+        if is_vapt:
+            if self.prompt_template == GENERATOR_PROMPT_TEMPLATE:
+                active_template = VAPT_GENERATOR_PROMPT_TEMPLATE
+            elif self.prompt_template == REFLECTION_PROMPT_TEMPLATE:
+                active_template = VAPT_REFLECTION_PROMPT_TEMPLATE
+                
+        prompt = active_template.format(**input_dict)
+
         
         import os
         backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()

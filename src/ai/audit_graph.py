@@ -128,8 +128,10 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
             "control_id": state["control_id"],
             "control_label": state["control_label"],
             "expected_evidence": state["expected_evidence"],
-            "feedback_section": feedback_section
+            "feedback_section": feedback_section,
+            "standard": state.get("standard", "")
         })
+
         
         return {
             "draft_finding": draft.model_dump(),
@@ -277,8 +279,10 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
             "draft_remediation_priority": draft.get("remediation_priority", "Medium"),
             "draft_evidence_strength": draft.get("evidence_strength", "None"),
             "draft_control_coverage": draft.get("control_coverage", 0),
-            "validation_error": state["validation_error"]
+            "validation_error": state["validation_error"],
+            "standard": state.get("standard", "")
         })
+
         
         return {
             "draft_finding": refined.model_dump(),
