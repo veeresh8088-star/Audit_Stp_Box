@@ -4562,23 +4562,6 @@ with st.sidebar:
                 "8.33 Test Information"
             ],
             "VAPT (Vulnerability Assessment & Pen Testing)": [
-                # ISO 27001 cross-walk controls relevant to VAPT
-                "5.7 Threat Intelligence",
-                "5.35 Independent Review of Information Security",
-                "5.36 Compliance with Policies and Standards for Information Security",
-                "8.7 Protection against Malware",
-                "8.8 Management of Technical Vulnerabilities",
-                "8.9 Configuration Management",
-                "8.15 Logging",
-                "8.16 Monitoring Activities",
-                "8.20 Network Security",
-                "8.21 Security of Network Services",
-                "8.22 Segregation of Networks",
-                "8.25 Secure Development Life Cycle",
-                "8.26 Application Security Requirements",
-                "8.28 Secure Coding",
-                "8.29 Security Testing in Development and Acceptance",
-                # VAPT-specific controls (sl 94–108)
                 "VAPT-1 Scope and Rules of Engagement",
                 "VAPT-2 Reconnaissance and OSINT",
                 "VAPT-3 Network Vulnerability Scan",
@@ -4593,8 +4576,9 @@ with st.sidebar:
                 "VAPT-12 Patch Management Verification",
                 "VAPT-13 Firewall and Network Segmentation Review",
                 "VAPT-14 Secure Configuration Baseline",
-                "VAPT-15 Final VAPT Report and Executive Summary",
+                "VAPT-15 Final VAPT Report and Executive Summary"
             ]
+
         }
 
         # Build count labels for dropdown display
@@ -4640,9 +4624,8 @@ with st.sidebar:
             st.caption("📌 **All Standards** audits the full ISO 27001 Annex A (93 controls), which fully covers GDPR, SOC 2, BCMS & X-BOM via cross-walk mapping.")
         elif selected_standard == "VAPT (Vulnerability Assessment & Pen Testing)":
             _cnt = _std_counts.get(selected_standard, 0)
-            st.caption(f"📌 **VAPT** covers **{_cnt}** checks — 15 VAPT-specific pen-testing controls (VAPT-1 to VAPT-15) plus 15 ISO 27001 cross-walk controls for vulnerability & network security.")
-            _cnt = _std_counts.get(selected_standard, 0)
-            st.caption(f"📌 **{selected_standard}** maps to **{_cnt}** ISO 27001 controls (cross-walk subset).")
+            st.caption(f"📌 **VAPT** covers **{_cnt}** VAPT-specific penetration testing and vulnerability assessment checks (VAPT-1 to VAPT-15).")
+
 
         # 👤 Custom Report Branding
         with st.sidebar.expander("👤 Custom Report Branding"):
