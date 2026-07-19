@@ -2678,7 +2678,15 @@ def _audit_batch(context, controls_batch, file_names_list, ollama_model, timeout
 
     standard_name = controls_batch[0].get("standard", "ISO 27001") if controls_batch else "ISO 27001"
 
-    prompt = f"""You are a strict forensic compliance auditor AI.
+    # Dynamically select LLM Auditor role instructions
+    is_vapt = "VAPT" in standard_name.upper() or "VULNERABILITY" in standard_name.upper()
+    role_text = (
+        "You are a strict VAPT (Vulnerability Assessment & Penetration Testing) compliance auditor AI."
+        if is_vapt else
+        "You are a strict forensic compliance auditor AI."
+    )
+
+    prompt = f"""{role_text}
 You are not a helpful assistant.
 You are an evidence investigator.
 
@@ -4560,9 +4568,24 @@ with st.sidebar:
         elif selected_standard == "VAPT (Vulnerability Assessment & Pen Testing)":
             _cnt = _std_counts.get(selected_standard, 0)
             st.caption(f"📌 **VAPT** covers **{_cnt}** checks — 15 VAPT-specific pen-testing controls (VAPT-1 to VAPT-15) plus 15 ISO 27001 cross-walk controls for vulnerability & network security.")
-        else:
             _cnt = _std_counts.get(selected_standard, 0)
             st.caption(f"📌 **{selected_standard}** maps to **{_cnt}** ISO 27001 controls (cross-walk subset).")
+
+        # 👤 Custom Report Branding
+        with st.sidebar.expander("👤 Custom Report Branding"):
+            st.text_input("Auditor Firm Name", value="Digital Age Strategies", key="auditor_firm")
+            st.text_input("Lead Auditors", value="Mr. Subhash Rao & Mr. Mahaveer Rajannavar", key="auditor_lead")
+            st.text_input("Target Organization", value="the Organization", key="target_entity")
+            logo_file = st.file_uploader("Upload Brand Logo (PNG/JPG)", type=["png", "jpg", "jpeg"], key="auditor_logo_upload")
+            if logo_file is not None:
+                temp_dir = os.path.join("data", "cache")
+                os.makedirs(temp_dir, exist_ok=True)
+                logo_path = os.path.join(temp_dir, f"brand_logo_{st.session_state.username}.png")
+                with open(logo_path, "wb") as lf:
+                    lf.write(logo_file.getvalue())
+                st.session_state["auditor_logo_path"] = logo_path
+            else:
+                st.session_state["auditor_logo_path"] = None
 
 
 
@@ -4612,6 +4635,12 @@ with st.sidebar:
             )
             st.session_state.audit_mode = "Deep" if "Full" in audit_mode_ui else "Quick"
             st.caption("ℹ️ **Quick** mode uses a lightweight 80MB cross-encoder (Single-pass). **Deep** mode runs a high-precision 278MB model with reflection loops.")
+            st.checkbox(
+                "Auto-run Analysis on Upload",
+                key="auto_run_after_upload",
+                value=st.session_state.get("auto_run_after_upload", True),
+                help="Automatically starts the audit analysis pipeline as soon as files are uploaded."
+            )
             st.divider()
 
         # 🔍 SCOPE DETECTION

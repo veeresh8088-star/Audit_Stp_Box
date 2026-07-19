@@ -1,3 +1,968 @@
+import os
+
+def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""):
+    from fpdf import FPDF
+    from fpdf.enums import XPos, YPos
+    from fpdf.fonts import FontFace
+    from datetime import datetime
+    import io as _io
+    import os
+    
+    def clean_text(val):
+        if not val:
+            return "—"
+        val = str(val)
+        val = val.replace("“", "\"").replace("”", "\"").replace("‘", "'").replace("’", "'")
+        val = val.replace("—", "-").replace("–", "-").replace("—", "-").replace("–", "-")
+        val = val.encode("latin-1", "replace").decode("latin-1")
+        return val
+
+    # Helper to get dynamic values from st.session_state
+    try:
+        import streamlit as st
+        auditor_lead = st.session_state.get("auditor_lead", "Mr. Vikas Dubey")
+        auditor_firm = st.session_state.get("auditor_firm", "TÜV SÜD South Asia Pvt. Ltd.")
+        target_client = st.session_state.get("auditor_client", "Motorola Solutions, Inc")
+        logo_path = st.session_state.get("auditor_logo_path")
+    except Exception:
+        auditor_lead = "Mr. Vikas Dubey"
+        auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
+        target_client = "Motorola Solutions, Inc"
+        logo_path = None
+
+    scope_type = "External" if "external" in session_title.lower() else "Internal"
+    doc_title = f"{scope_type} Network Vulnerability Assessment and Penetration Testing Validation Report"
+
+    class VAPTPDF(FPDF):
+        def header(self):
+            if self.page_no() > 1:
+                self.set_font("Helvetica", "I", 8)
+                self.set_text_color(100, 116, 139)
+                self.cell(0, 8, clean_text(f"{scope_type} Network VAPT Validation Report"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                self.ln(2)
+        def footer(self):
+            if self.page_no() > 1:
+                self.set_y(-15)
+                self.set_font("Helvetica", "", 8.5)
+                self.set_text_color(100, 116, 139)
+                # Bottom border line
+                self.line(15, self.get_y() - 2, 195, self.get_y() - 2)
+                self.cell(90, 8, clean_text("Cyber Security Services | TÜV SÜD South Asia"), align="L")
+                self.cell(90, 8, clean_text(f"Page {self.page_no()}"), align="R")
+
+    pdf = VAPTPDF()
+    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_margins(15, 20, 15)
+    
+    hdr_style = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(15, 23, 42))
+    lbl_style = FontFace(emphasis="B", fill_color=(241, 245, 249))
+    bold_style = FontFace(emphasis="B")
+    
+    # ── PAGE 1: COVER PAGE ──────────────────────────────────────────────────
+    pdf.add_page()
+    
+    # Header columns: Registered Office, Corporate Office, Submitted By
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(71, 85, 105)
+    
+    # Columns positioning
+    y_start = pdf.get_y()
+    pdf.set_xy(15, y_start)
+    pdf.multi_cell(60, 3, clean_text(
+        "Registered Office:\nTÜV SÜD South Asia Pvt. Ltd.\nTÜV SÜD House,\nOff Saki Vihar Road,\nSaki Naka, Andheri (East),\nMumbai - 400072, India."
+    ))
+    
+    pdf.set_xy(80, y_start)
+    pdf.multi_cell(60, 3, clean_text(
+        "Corporate Office:\nTÜV SÜD South Asia Pvt. Ltd.\nSolitaire, 4th Floor,\nITI Road, Aundh,\nPune - 411007, India."
+    ))
+    
+    pdf.set_xy(145, y_start)
+    pdf.multi_cell(50, 3, clean_text(
+        "Report Submitted by:\nTÜV SÜD South Asia Pvt. Ltd.\nTÜV SÜD House,\nOff Saki Vihar Road,\nSaki Naka, Mumbai - 400072.\nEmail: info@tuv-sud.in\nwww.tuv-sud.in"
+    ))
+    
+    pdf.set_y(y_start + 30)
+    pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+    pdf.ln(25)
+    
+    # Title
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_text_color(15, 23, 42)
+    pdf.multi_cell(0, 8, clean_text(doc_title), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(5)
+    
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.set_text_color(71, 85, 105)
+    pdf.cell(0, 8, clean_text(f"For: {target_client}"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    # Logo
+    pdf.ln(25)
+    if logo_path and os.path.exists(logo_path):
+        pdf.image(logo_path, x=85, y=pdf.get_y(), w=40)
+        pdf.ln(40)
+    else:
+        pdf.ln(40)
+        
+    pdf.set_font("Helvetica", "", 10)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(0, 6, clean_text(f"Submitted on: {datetime.now().strftime('%d-%B-%Y')}"), align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    # ── PAGE 2: DOCUMENT VERSION CONTROL ──────────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 8, clean_text("DOCUMENT VERSION CONTROL"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+    
+    control_data = [
+        ["Document Title", doc_title],
+        ["Document ID", "3153142723"],
+        ["Document Version", "1.0"],
+        ["Prepared By", clean_text(auditor_lead)],
+        ["Reviewed By", "Ms. Prianka Singla"],
+        ["Approved By", "Mr. Atul Srivastava"],
+        ["Testing Dates", f"24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"],
+        ["Effective Date", datetime.now().strftime("%d-%B-%Y")]
+    ]
+    pdf.set_font("Helvetica", "", 9.5)
+    with pdf.table(col_widths=(60, 120), text_align="L") as table:
+        for row in control_data:
+            r = table.row()
+            r.cell(row[0], style=lbl_style)
+            r.cell(row[1])
+            
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, clean_text("DOCUMENT SUBMISSION DETAILS"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+    
+    submission_data = [
+        ["Date", datetime.now().strftime("%d-%B-%Y")],
+        ["Classification", "Confidential"],
+        ["Document Type", doc_title]
+    ]
+    pdf.set_font("Helvetica", "", 9.5)
+    with pdf.table(col_widths=(60, 120), text_align="L") as table:
+        for row in submission_data:
+            r = table.row()
+            r.cell(row[0], style=lbl_style)
+            r.cell(row[1])
+            
+    # ── PAGE 3: TABLE OF CONTENTS ──────────────────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 10, clean_text("TABLE OF CONTENTS"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(5)
+    
+    toc_data = [
+        ["1 TÜV SÜD PENETRATION TEST METHODOLOGY", "4"],
+        ["  1.2 Standards-Based Testing and Reporting", "4"],
+        ["  1.3 CVSS: Scoring Vulnerabilities", "4"],
+        ["  1.4 Severity Rating Scale Table", "5"],
+        ["2 EXECUTIVE SUMMARY", "6"],
+        ["  2.1 Scope of the Engagement", "6"],
+        ["  2.2 Assessment Date", "6"],
+        ["  2.3 Summary of Findings", "7"],
+        ["  2.4 Tactical Recommendations", "8"],
+        ["3 TECHNICAL DETAIL REPORT", "9"],
+        ["  3.2 Testing Environment", "9"],
+        ["  3.3 Findings Detail", "9"],
+        ["4 APPENDIX", "12"],
+        ["  4.1 Testing Environment: Production", "12"],
+        ["  4.2 Tools Used", "12"],
+        ["  4.3 Provided Documentation", "12"],
+        ["5 DISCLAIMER", "13"]
+    ]
+    pdf.set_font("Helvetica", "", 10)
+    for toc in toc_data:
+        pdf.cell(160, 6, clean_text(toc[0]))
+        pdf.cell(20, 6, clean_text(toc[1]), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        
+    # ── PAGE 4: METHODOLOGY ───────────────────────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, clean_text("1 TÜV SÜD PENETRATION TEST METHODOLOGY"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(4)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, clean_text("1.2 Standards-Based Testing and Reporting"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        "Our penetration test plans are performed according to internally developed guidelines by TÜV SÜD South Asia penetration test experts. "
+        "Our test cases, where possible, are grounded in publicly available standards published by organizations such as OWASP, OSSTMM, NIST, "
+        "along with our experience as a penetration test team. As an extension to these test cases, additional test cases may be identified "
+        "based on penetration test experts' experience. During this engagement, network and web vulnerability scanning is executed "
+        "to check configurations, TLS parameters, and application flaws."
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(5)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, clean_text("1.3 CVSS: Scoring Vulnerabilities"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        "The Common Vulnerability Scoring System (CVSS) is an open framework for communicating the characteristics and severity of IT system vulnerabilities. "
+        "CVSS consists of three metric groups: Base, Temporal, and Environmental. In this report, CVSSv4.0 base metrics are calculated to reflect "
+        "the severity of security weaknesses, assessing Exploitability parameters (Attack Vector, Attack Complexity, Privileges Required, etc.) "
+        "and System Impact parameters (Confidentiality, Integrity, and Availability threat vectors)."
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(6)
+    
+    # ── PAGE 5: SEVERITY SCALE ─────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, clean_text("1.4 Severity Rating Scale"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+    
+    pdf.set_font("Helvetica", "", 9.5)
+    with pdf.table(col_widths=(45, 45, 90), text_align="L") as table:
+        hdr = table.row()
+        hdr.cell("Severity Range", style=hdr_style)
+        hdr.cell("Classification", style=hdr_style)
+        hdr.cell("Remediation Priority", style=hdr_style)
+        
+        ranges = [
+            ["9.0 - 10.0", "Critical", "Immediate Mitigation (P1)"],
+            ["7.0 - 8.9", "High", "Short-term Remediation (P2)"],
+            ["4.0 - 6.9", "Medium", "Planned Resolution (P3)"],
+            ["0.1 - 3.9", "Low", "Administrative Fixes (P4)"]
+        ]
+        for rng in ranges:
+            r = table.row()
+            r.cell(clean_text(rng[0]))
+            r.cell(clean_text(rng[1]))
+            r.cell(clean_text(rng[2]))
+
+    # ── PAGE 6: EXECUTIVE SUMMARY & FINDINGS OVERVIEW ──────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, clean_text("2 EXECUTIVE SUMMARY"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, clean_text("2.1 Scope of the Engagement"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        f"TÜV SÜD was engaged to perform network and application security validation testing. The target audit scope consists of "
+        f"critical service interfaces, web applications, and network routing configurations. Target assets: {session_title}."
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(4)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, clean_text("2.2 Assessment Date"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.cell(0, 6, clean_text(f"Testing Dates: 24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(6)
+    
+    # ── PAGE 7: SUMMARY OF FINDINGS ────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, clean_text("2.3 Summary of Findings"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+    
+    active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
+    
+    critical_cnt = sum(1 for f in active_findings if "critical" in str(f.get("severity", "")).lower() or (f.get("severity_score", 0) or 0) >= 9.0)
+    high_cnt = sum(1 for f in active_findings if "high" in str(f.get("severity", "")).lower() and (f.get("severity_score", 0) or 0) < 9.0)
+    medium_cnt = sum(1 for f in active_findings if "medium" in str(f.get("severity", "")).lower())
+    low_cnt = sum(1 for f in active_findings if "low" in str(f.get("severity", "")).lower())
+    total_cnt = len(active_findings)
+    
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        f"Based on the assessment, {total_cnt} vulnerabilities have been found in the target scope network which are categorized as follows:"
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+    
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, clean_text("2.3.2 Tabular Summary"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+    
+    pdf.set_font("Helvetica", "", 9)
+    with pdf.table(col_widths=(35, 35, 35, 35, 40), text_align="C") as table:
+        h = table.row()
+        h.cell("Critical", style=hdr_style)
+        h.cell("High", style=hdr_style)
+        h.cell("Medium", style=hdr_style)
+        h.cell("Low", style=hdr_style)
+        h.cell("Total Findings", style=hdr_style)
+        
+        r = table.row()
+        r.cell(str(critical_cnt))
+        r.cell(str(high_cnt))
+        r.cell(str(medium_cnt))
+        r.cell(str(low_cnt))
+        r.cell(str(total_cnt), style=lbl_style)
+        
+    pdf.ln(6)
+    
+    # ── PAGE 8: VULNERABILITIES SUMMARY TABLE ──────────────────────────────
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, clean_text("2.3.4 Vulnerabilities Summary"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+    
+    pdf.set_font("Helvetica", "", 9)
+    max_score = 0.0
+    with pdf.table(col_widths=(20, 100, 30, 30), text_align="L") as table:
+        h = table.row()
+        h.cell("Sr. No.", style=hdr_style)
+        h.cell("Vulnerabilities", style=hdr_style)
+        h.cell("CVSS Score", style=hdr_style)
+        h.cell("Severity", style=hdr_style)
+        
+        for idx, f in enumerate(active_findings, 1):
+            score = float(f.get("severity_score", 0.0) or 0.0)
+            if score > max_score:
+                max_score = score
+            sev = str(f.get("severity", "Low")).split()[-1].upper()
+            
+            r = table.row()
+            r.cell(str(idx))
+            r.cell(clean_text(f.get("control", "") or f.get("finding", "")))
+            r.cell(f"{score:.1f}")
+            r.cell(sev)
+            
+        # Overall row
+        overall_sev = "LOW"
+        if max_score >= 9.0:
+            overall_sev = "CRITICAL"
+        elif max_score >= 7.0:
+            overall_sev = "HIGH"
+        elif max_score >= 4.0:
+            overall_sev = "MEDIUM"
+            
+        r_over = table.row()
+        r_over.cell("OVERALL", style=lbl_style)
+        r_over.cell("OVERALL SCORE", style=lbl_style)
+        r_over.cell(f"{max_score:.1f}", style=lbl_style)
+        r_over.cell(overall_sev, style=lbl_style)
+        
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, clean_text("2.4 Tactical Recommendations"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        "It is recommended to follow the guidelines suggested by OWASP, OSSTMM and NIST. It is recommended to implement secure "
+        "SDLC while developing the applications, disable weak cipher suites like CBC cipher algorithms, and implement "
+        "Strict-Transport-Security configurations across all application headers."
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    # ── PAGE 9: TECHNICAL DETAIL REPORT: FINDINGS ────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 8, clean_text("3 TECHNICAL DETAIL REPORT: NETWORK VULNERABILITY ASSESSMENT"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, clean_text("3.2 Testing Environment"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.cell(0, 5, clean_text("For details concerning the testing environment, please refer to Appendix 4.1."), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(5)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, clean_text("3.3 Findings Detail"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+    
+    for idx, f in enumerate(active_findings, 1):
+        vuln_title = clean_text(f.get("control", "") or f.get("finding", "Vulnerability"))
+        pdf.set_font("Helvetica", "B", 10.5)
+        pdf.set_text_color(220, 38, 38)
+        pdf.multi_cell(0, 6, clean_text(f"3.3.{idx} {vuln_title}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
+        
+        pdf.set_font("Helvetica", "", 9)
+        pdf.set_text_color(15, 23, 42)
+        
+        score = float(f.get("severity_score", 0.0) or 0.0)
+        sev_label = str(f.get("severity", "Low")).split()[-1].upper()
+        
+        # Exploitability / System Impact mapping
+        av = "Network"
+        ac = "High" if "cbc" in vuln_title.lower() else "Low"
+        at = "None"
+        pr = "None"
+        ui = "Required" if "hsts" in vuln_title.lower() else "None"
+        
+        vc = "Low" if "cbc" in vuln_title.lower() or "hsts" in vuln_title.lower() else "High"
+        vi = "None"
+        va = "None"
+        
+        with pdf.table(col_widths=(60, 120), text_align="L") as table:
+            r = table.row()
+            r.cell("Vulnerability Description", style=lbl_style)
+            r.cell(clean_text(f.get("finding", "") or f.get("gap_description", "")))
+            
+            r = table.row()
+            r.cell("Target(s)", style=lbl_style)
+            r.cell(clean_text(f.get("control_id", "") or "Web / Network infrastructure"))
+            
+            r = table.row()
+            r.cell("Status", style=lbl_style)
+            r.cell("Detected")
+            
+            r = table.row()
+            r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
+            r.cell(f"{score:.1f} {sev_label}")
+            
+            # Metrics Row
+            r = table.row()
+            r.cell("CVSSv4.0 Base Metrics Detail", style=lbl_style)
+            metrics_text = (
+                f"Exploitability Metrics:\n"
+                f"- Attack Vector (AV): {av}\n"
+                f"- Attack Complexity (AC): {ac}\n"
+                f"- Attack Requirements (AT): {at}\n"
+                f"- Privileges Required (PR): {pr}\n"
+                f"- User Interaction (UI): {ui}\n\n"
+                f"System Impact Metrics:\n"
+                f"- Confidentiality (VC): {vc}\n"
+                f"- Integrity (VI): {vi}\n"
+                f"- Availability (VA): {va}"
+            )
+            r.cell(clean_text(metrics_text))
+            
+            # Proof of Concept Row
+            poc = f.get("evidence_snippet") or f.get("evidence_quote") or "N/A"
+            r = table.row()
+            r.cell("Proof of Concept", style=lbl_style)
+            r.cell(clean_text(poc))
+            
+            # Remediation Row
+            r = table.row()
+            r.cell("Remediation", style=lbl_style)
+            r.cell(clean_text(f.get("recommendation", "NIL")))
+            
+            # References Row
+            r = table.row()
+            r.cell("References", style=lbl_style)
+            r.cell("https://owasp.org/\nhttps://nvd.nist.gov/")
+            
+        pdf.ln(8)
+        
+    # ── PAGE 12: APPENDIX ─────────────────────────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 8, clean_text("4 APPENDIX"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.cell(0, 6, clean_text("4.1 Testing Environment: Production"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        "The network validation testing was conducted against active production interfaces as Black Box testing. "
+        "No network degradation or host disruptions occurred during scanning."
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(4)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, clean_text("4.2 Tools Used"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        "Nmap Security Scanner\nNessus Vulnerability Scanner\nBurp Suite Professional Web Scanner\nOpenSSL TLS Testing Utility"
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(4)
+    
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 6, clean_text("4.3 Provided Documentation"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        "Standard Target IP Address range definitions.\nVPN Credentials and authorization letters."
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    # ── PAGE 13: DISCLAIMER ───────────────────────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 8, clean_text("5 DISCLAIMER"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+    
+    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(51, 65, 85)
+    pdf.multi_cell(0, 5, clean_text(
+        "The accuracy of the information and data provided in this report is subject to the information available to TÜV SÜD testing team "
+        "during the engagement. The team relies on the accuracy and completeness of the information provided by the client and does not "
+        "assume any responsibility for any inaccuracies or omissions. The assessment was limited to the scope defined and does not "
+        "guarantee the absolute exclusion of other vulnerabilities."
+    ), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    
+    pdf_bytes = pdf.output()
+    return bytes(pdf_bytes)
+
+
+def _export_vapt_docx(session_title, findings, resolved_list, status, comments=""):
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Cm
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+    from datetime import datetime
+    import io as _io
+    import os
+    
+    doc = Document()
+    for section in doc.sections:
+        section.top_margin    = Cm(2)
+        section.bottom_margin = Cm(2)
+        section.left_margin   = Cm(2.5)
+        section.right_margin  = Cm(2.5)
+        
+    def _rgb(r, g, b):
+        return RGBColor(r, g, b)
+        
+    def _set_cell_bg(cell, hex_color):
+        tcPr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement('w:shd')
+        shd.set(qn('w:val'), 'clear')
+        shd.set(qn('w:color'), 'auto')
+        shd.set(qn('w:fill'), hex_color)
+        tcPr.append(shd)
+        
+    def _set_cell_borders(cell):
+        tcPr = cell._tc.get_or_add_tcPr()
+        tcBorders = OxmlElement('w:tcBorders')
+        for side in ['top', 'left', 'bottom', 'right']:
+            border = OxmlElement(f'w:{side}')
+            border.set(qn('w:val'), 'single')
+            border.set(qn('w:sz'), '4')
+            border.set(qn('w:space'), '0')
+            border.set(qn('w:color'), 'CCCCCC')
+            tcBorders.append(border)
+        tcPr.append(tcBorders)
+
+    try:
+        import streamlit as st
+        auditor_lead = st.session_state.get("auditor_lead", "Mr. Vikas Dubey")
+        auditor_firm = st.session_state.get("auditor_firm", "TÜV SÜD South Asia Pvt. Ltd.")
+        target_client = st.session_state.get("auditor_client", "Motorola Solutions, Inc")
+        logo_path = st.session_state.get("auditor_logo_path")
+    except Exception:
+        auditor_lead = "Mr. Vikas Dubey"
+        auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
+        target_client = "Motorola Solutions, Inc"
+        logo_path = None
+
+    scope_type = "External" if "external" in session_title.lower() else "Internal"
+    doc_title = f"{scope_type} Network Vulnerability Assessment and Penetration Testing Validation Report"
+
+    # 1. COVER PAGE (Page 1)
+    # Header Information Table
+    hdr_table = doc.add_table(rows=1, cols=3)
+    hdr_table.autofit = False
+    
+    col_widths = [Cm(5.5), Cm(5.5), Cm(5)]
+    for row in hdr_table.rows:
+        for idx, width in enumerate(col_widths):
+            row.cells[idx].width = width
+            
+    c1, c2, c3 = hdr_table.rows[0].cells
+    
+    p1 = c1.paragraphs[0]
+    p1.add_run("Registered Office:\nTÜV SÜD South Asia Pvt. Ltd.\nTÜV SÜD House,\nOff Saki Vihar Road,\nSaki Naka, Andheri (East),\nMumbai - 400072, India.").font.size = Pt(7.5)
+    
+    p2 = c2.paragraphs[0]
+    p2.add_run("Corporate Office:\nTÜV SÜD South Asia Pvt. Ltd.\nSolitaire, 4th Floor,\nITI Road, Aundh,\nPune - 411007, India.").font.size = Pt(7.5)
+    
+    p3 = c3.paragraphs[0]
+    p3.add_run("Report Submitted by:\nTÜV SÜD South Asia Pvt. Ltd.\nTÜV SÜD House,\nOff Saki Vihar Road,\nSaki Naka, Mumbai - 400072.\nEmail: info@tuv-sud.in\nwww.tuv-sud.in").font.size = Pt(7.5)
+    
+    doc.add_paragraph().add_run("\n" + "_" * 60 + "\n").font.color.rgb = _rgb(200, 200, 200)
+    
+    # Validation Title
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_p.paragraph_format.space_before = Pt(60)
+    title_run = title_p.add_run(doc_title)
+    title_run.bold = True
+    title_run.font.name = "Arial"
+    title_run.font.size = Pt(20)
+    title_run.font.color.rgb = _rgb(15, 23, 42)
+    
+    client_p = doc.add_paragraph()
+    client_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    client_p.paragraph_format.space_after = Pt(40)
+    client_run = client_p.add_run(f"For: {target_client}")
+    client_run.bold = True
+    client_run.font.name = "Arial"
+    client_run.font.size = Pt(13)
+    client_run.font.color.rgb = _rgb(71, 85, 105)
+    
+    # Logo
+    if logo_path and os.path.exists(logo_path):
+        logo_p = doc.add_paragraph()
+        logo_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        logo_p.add_run().add_picture(logo_path, width=Cm(4))
+        
+    doc.add_paragraph().paragraph_format.space_before = Pt(40)
+    date_p = doc.add_paragraph()
+    date_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    date_run = date_p.add_run(f"Submitted on: {datetime.now().strftime('%d-%B-%Y')}")
+    date_run.font.size = Pt(9.5)
+    date_run.font.color.rgb = _rgb(100, 116, 139)
+    
+    doc.add_page_break()
+
+    # 2. DOCUMENT CONTROL & SUBMISSION DETAILS (Page 2)
+    p = doc.add_paragraph()
+    p.add_run("DOCUMENT VERSION CONTROL").bold = True
+    p.paragraph_format.space_before = Pt(14)
+    p.paragraph_format.space_after = Pt(6)
+    
+    tbl_ctrl = doc.add_table(rows=8, cols=2)
+    tbl_ctrl.style = 'Table Grid'
+    control_rows = [
+        ("Document Title", doc_title),
+        ("Document ID", "3153142723"),
+        ("Document Version", "1.0"),
+        ("Prepared By", auditor_lead),
+        ("Reviewed By", "Ms. Prianka Singla"),
+        ("Approved By", "Mr. Atul Srivastava"),
+        ("Testing Dates", f"24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"),
+        ("Effective Date", datetime.now().strftime("%d-%B-%Y"))
+    ]
+    for r_idx, (label, val) in enumerate(control_rows):
+        c1, c2 = tbl_ctrl.rows[r_idx].cells
+        _set_cell_bg(c1, "F1F5F9")
+        _set_cell_borders(c1)
+        _set_cell_borders(c2)
+        c1.paragraphs[0].add_run(label).bold = True
+        c2.paragraphs[0].add_run(val)
+        
+    p = doc.add_paragraph()
+    p.add_run("DOCUMENT SUBMISSION DETAILS").bold = True
+    p.paragraph_format.space_before = Pt(18)
+    p.paragraph_format.space_after = Pt(6)
+    
+    tbl_sub = doc.add_table(rows=3, cols=2)
+    tbl_sub.style = 'Table Grid'
+    sub_rows = [
+        ("Date", datetime.now().strftime("%d-%B-%Y")),
+        ("Classification", "Confidential"),
+        ("Document Type", doc_title)
+    ]
+    for r_idx, (label, val) in enumerate(sub_rows):
+        c1, c2 = tbl_sub.rows[r_idx].cells
+        _set_cell_bg(c1, "F1F5F9")
+        _set_cell_borders(c1)
+        _set_cell_borders(c2)
+        c1.paragraphs[0].add_run(label).bold = True
+        c2.paragraphs[0].add_run(val)
+        
+    doc.add_page_break()
+
+    # 3. TABLE OF CONTENTS (Page 3)
+    p = doc.add_paragraph()
+    p.add_run("TABLE OF CONTENTS").bold = True
+    p.paragraph_format.space_after = Pt(12)
+    
+    toc_items = [
+        ("1 TÜV SÜD PENETRATION TEST METHODOLOGY", "4"),
+        ("  1.2 Standards-Based Testing and Reporting", "4"),
+        ("  1.3 CVSS: Scoring Vulnerabilities", "4"),
+        ("  1.4 Severity Rating Scale Table", "5"),
+        ("2 EXECUTIVE SUMMARY", "6"),
+        ("  2.1 Scope of the Engagement", "6"),
+        ("  2.2 Assessment Date", "6"),
+        ("  2.3 Summary of Findings", "7"),
+        ("  2.4 Tactical Recommendations", "8"),
+        ("3 TECHNICAL DETAIL REPORT", "9"),
+        ("  3.2 Testing Environment", "9"),
+        ("  3.3 Findings Detail", "9"),
+        ("4 APPENDIX", "12"),
+        ("  4.1 Testing Environment: Production", "12"),
+        ("  4.2 Tools Used", "12"),
+        ("  4.3 Provided Documentation", "12"),
+        ("5 DISCLAIMER", "13")
+    ]
+    for item, p_num in toc_items:
+        p_toc = doc.add_paragraph()
+        run_item = p_toc.add_run(item)
+        run_item.font.size = Pt(10)
+        p_toc.add_run(" " + "." * (80 - len(item)) + " " + p_num).font.size = Pt(10)
+        
+    doc.add_page_break()
+
+    # 4. METHODOLOGY & SEVERITY SCALE (Page 4)
+    p = doc.add_paragraph()
+    p.add_run("1 TÜV SÜD PENETRATION TEST METHODOLOGY").bold = True
+    p.paragraph_format.space_before = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.add_run("1.2 Standards-Based Testing and Reporting").bold = True
+    p.paragraph_format.space_before = Pt(8)
+    doc.add_paragraph(
+        "Our penetration test plans are performed according to internally developed guidelines by TÜV SÜD South Asia penetration test experts. "
+        "Our test cases, where possible, are grounded in publicly available standards published by organizations such as OWASP, OSSTMM, NIST, "
+        "along with our experience as a penetration test team. As an extension to these test cases, additional test cases may be identified "
+        "based on penetration test experts' experience. During this engagement, network and web vulnerability scanning is executed "
+        "to check configurations, TLS parameters, and application flaws."
+    )
+    
+    p = doc.add_paragraph()
+    p.add_run("1.3 CVSS: Scoring Vulnerabilities").bold = True
+    p.paragraph_format.space_before = Pt(8)
+    doc.add_paragraph(
+        "The Common Vulnerability Scoring System (CVSS) is an open framework for communicating the characteristics and severity of IT system vulnerabilities. "
+        "CVSS consists of three metric groups: Base, Temporal, and Environmental. In this report, CVSSv4.0 base metrics are calculated to reflect "
+        "the severity of security weaknesses, assessing Exploitability parameters (Attack Vector, Attack Complexity, Privileges Required, etc.) "
+        "and System Impact parameters (Confidentiality, Integrity, and Availability threat vectors)."
+    )
+    
+    p = doc.add_paragraph()
+    p.add_run("1.4 Severity Rating Scale").bold = True
+    p.paragraph_format.space_before = Pt(12)
+    p.paragraph_format.space_after = Pt(6)
+    
+    tbl_scale = doc.add_table(rows=5, cols=3)
+    tbl_scale.style = 'Table Grid'
+    scale_headers = ["Severity Range", "Classification", "Remediation Priority"]
+    for col_idx, text in enumerate(scale_headers):
+        cell = tbl_scale.rows[0].cells[col_idx]
+        _set_cell_bg(cell, "0F172A")
+        cell.paragraphs[0].add_run(text).font.color.rgb = _rgb(255, 255, 255)
+        cell.paragraphs[0].runs[0].bold = True
+        
+    ranges = [
+        ["9.0 - 10.0", "Critical", "Immediate Mitigation (P1)"],
+        ["7.0 - 8.9", "High", "Short-term Remediation (P2)"],
+        ["4.0 - 6.9", "Medium", "Planned Resolution (P3)"],
+        ["0.1 - 3.9", "Low", "Administrative Fixes (P4)"]
+    ]
+    for row_idx, row_data in enumerate(ranges, 1):
+        for col_idx, val in enumerate(row_data):
+            tbl_scale.rows[row_idx].cells[col_idx].paragraphs[0].add_run(val)
+            
+    doc.add_page_break()
+
+    # 5. EXECUTIVE SUMMARY (Page 6)
+    p = doc.add_paragraph()
+    p.add_run("2 EXECUTIVE SUMMARY").bold = True
+    p.paragraph_format.space_before = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.add_run("2.1 Scope of the Engagement").bold = True
+    doc.add_paragraph(
+        f"TÜV SÜD was engaged to perform network and application security validation testing. The target audit scope consists of "
+        f"critical service interfaces, web applications, and network routing configurations. Target assets: {session_title}."
+    )
+    
+    p = doc.add_paragraph()
+    p.add_run("2.2 Assessment Date").bold = True
+    doc.add_paragraph(f"Testing Dates: 24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}")
+    
+    # Summary of Findings (Page 7)
+    p = doc.add_paragraph()
+    p.add_run("2.3 Summary of Findings").bold = True
+    p.paragraph_format.space_before = Pt(12)
+    
+    active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
+    critical_cnt = sum(1 for f in active_findings if "critical" in str(f.get("severity", "")).lower() or (f.get("severity_score", 0) or 0) >= 9.0)
+    high_cnt = sum(1 for f in active_findings if "high" in str(f.get("severity", "")).lower() and (f.get("severity_score", 0) or 0) < 9.0)
+    medium_cnt = sum(1 for f in active_findings if "medium" in str(f.get("severity", "")).lower())
+    low_cnt = sum(1 for f in active_findings if "low" in str(f.get("severity", "")).lower())
+    total_cnt = len(active_findings)
+    
+    doc.add_paragraph(f"Based on the assessment, {total_cnt} vulnerabilities have been found in the target scope network which are categorized as follows:")
+    
+    p = doc.add_paragraph()
+    p.add_run("2.3.2 Tabular Summary").bold = True
+    
+    tbl_sum = doc.add_table(rows=2, cols=5)
+    tbl_sum.style = 'Table Grid'
+    sum_hdrs = ["Critical", "High", "Medium", "Low", "Total Findings"]
+    for col_idx, text in enumerate(sum_hdrs):
+        cell = tbl_sum.rows[0].cells[col_idx]
+        _set_cell_bg(cell, "0F172A")
+        cell.paragraphs[0].add_run(text).font.color.rgb = _rgb(255, 255, 255)
+        cell.paragraphs[0].runs[0].bold = True
+        
+    counts = [str(critical_cnt), str(high_cnt), str(medium_cnt), str(low_cnt), str(total_cnt)]
+    for col_idx, val in enumerate(counts):
+        cell = tbl_sum.rows[1].cells[col_idx]
+        if col_idx == 4:
+            _set_cell_bg(cell, "F1F5F9")
+            cell.paragraphs[0].add_run(val).bold = True
+        else:
+            cell.paragraphs[0].add_run(val)
+            
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.add_run("2.3.4 Vulnerabilities Summary").bold = True
+    
+    tbl_vulns = doc.add_table(rows=1 + len(active_findings) + 1, cols=4)
+    tbl_vulns.style = 'Table Grid'
+    vuln_hdrs = ["Sr. No.", "Vulnerabilities", "CVSS Score", "Severity"]
+    for col_idx, text in enumerate(vuln_hdrs):
+        cell = tbl_vulns.rows[0].cells[col_idx]
+        _set_cell_bg(cell, "0F172A")
+        cell.paragraphs[0].add_run(text).font.color.rgb = _rgb(255, 255, 255)
+        cell.paragraphs[0].runs[0].bold = True
+        
+    max_score = 0.0
+    for idx, f in enumerate(active_findings, 1):
+        score = float(f.get("severity_score", 0.0) or 0.0)
+        if score > max_score:
+            max_score = score
+        sev = str(f.get("severity", "Low")).split()[-1].upper()
+        
+        row_cells = tbl_vulns.rows[idx].cells
+        row_cells[0].paragraphs[0].add_run(str(idx))
+        row_cells[1].paragraphs[0].add_run(f.get("control", "") or f.get("finding", ""))
+        row_cells[2].paragraphs[0].add_run(f"{score:.1f}")
+        row_cells[3].paragraphs[0].add_run(sev)
+        
+    overall_sev = "LOW"
+    if max_score >= 9.0:
+        overall_sev = "CRITICAL"
+    elif max_score >= 7.0:
+        overall_sev = "HIGH"
+    elif max_score >= 4.0:
+        overall_sev = "MEDIUM"
+        
+    over_cells = tbl_vulns.rows[len(active_findings) + 1].cells
+    for cell in over_cells:
+        _set_cell_bg(cell, "F1F5F9")
+    over_cells[0].paragraphs[0].add_run("OVERALL").bold = True
+    over_cells[1].paragraphs[0].add_run("OVERALL SCORE").bold = True
+    over_cells[2].paragraphs[0].add_run(f"{max_score:.1f}").bold = True
+    over_cells[3].paragraphs[0].add_run(overall_sev).bold = True
+    
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.add_run("2.4 Tactical Recommendations").bold = True
+    doc.add_paragraph(
+        "It is recommended to follow the guidelines suggested by OWASP, OSSTMM and NIST. It is recommended to implement secure "
+        "SDLC while developing the applications, disable weak cipher suites like CBC cipher algorithms, and implement "
+        "Strict-Transport-Security configurations across all application headers."
+    )
+    
+    doc.add_page_break()
+
+    # 6. TECHNICAL DETAIL REPORT (Page 9+)
+    p = doc.add_paragraph()
+    p.add_run("3 TECHNICAL DETAIL REPORT: NETWORK VULNERABILITY ASSESSMENT").bold = True
+    p.paragraph_format.space_before = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.add_run("3.2 Testing Environment").bold = True
+    doc.add_paragraph("For details concerning the testing environment, please refer to Appendix 4.1.")
+    
+    p = doc.add_paragraph()
+    p.add_run("3.3 Findings Detail").bold = True
+    p.paragraph_format.space_before = Pt(12)
+    
+    for idx, f in enumerate(active_findings, 1):
+        vuln_title = f.get("control", "") or f.get("finding", "Vulnerability")
+        
+        fp = doc.add_paragraph()
+        run_f = fp.add_run(f"3.3.{idx} {vuln_title}")
+        run_f.bold = True
+        run_f.font.size = Pt(12)
+        run_f.font.color.rgb = _rgb(220, 38, 38)
+        
+        # Table Detail Grid
+        tbl_meta = doc.add_table(rows=7, cols=2)
+        tbl_meta.style = 'Table Grid'
+        
+        score = float(f.get("severity_score", 0.0) or 0.0)
+        sev_label = str(f.get("severity", "Low")).split()[-1].upper()
+        
+        av = "Network"
+        ac = "High" if "cbc" in vuln_title.lower() else "Low"
+        at = "None"
+        pr = "None"
+        ui = "Required" if "hsts" in vuln_title.lower() else "None"
+        vc = "Low" if "cbc" in vuln_title.lower() or "hsts" in vuln_title.lower() else "High"
+        vi = "None"
+        va = "None"
+        
+        metrics_text = (
+            f"Exploitability Metrics:\n"
+            f"- Attack Vector (AV): {av}\n"
+            f"- Attack Complexity (AC): {ac}\n"
+            f"- Attack Requirements (AT): {at}\n"
+            f"- Privileges Required (PR): {pr}\n"
+            f"- User Interaction (UI): {ui}\n\n"
+            f"System Impact Metrics:\n"
+            f"- Confidentiality (VC): {vc}\n"
+            f"- Integrity (VI): {vi}\n"
+            f"- Availability (VA): {va}"
+        )
+        
+        meta_rows = [
+            ("Vulnerability Description", f.get("finding", "") or f.get("gap_description", "")),
+            ("Target(s)", f.get("control_id", "") or "Web / Network infrastructure"),
+            ("Status", "Detected"),
+            ("CVSSv4.0 Base Metrics", f"{score:.1f} {sev_label}"),
+            ("CVSSv4.0 Base Metrics Detail", metrics_text),
+            ("Proof of Concept", f.get("evidence_snippet") or f.get("evidence_quote") or "N/A"),
+            ("Remediation", f.get("recommendation", "NIL"))
+        ]
+        for mr_idx, (m_lbl, m_val) in enumerate(meta_rows):
+            c1, c2 = tbl_meta.rows[mr_idx].cells
+            _set_cell_bg(c1, "F1F5F9")
+            _set_cell_borders(c1)
+            _set_cell_borders(c2)
+            c1.paragraphs[0].add_run(m_lbl).bold = True
+            c2.paragraphs[0].add_run(m_val)
+            
+        doc.add_paragraph()
+        
+    doc.add_page_break()
+
+    # 7. APPENDIX (Page 12)
+    p = doc.add_paragraph()
+    p.add_run("4 APPENDIX").bold = True
+    
+    p = doc.add_paragraph()
+    p.add_run("4.1 Testing Environment: Production").bold = True
+    doc.add_paragraph(
+        "The network validation testing was conducted against active production interfaces as Black Box testing. "
+        "No network degradation or host disruptions occurred during scanning."
+    )
+    
+    p = doc.add_paragraph()
+    p.add_run("4.2 Tools Used").bold = True
+    doc.add_paragraph("Nmap Security Scanner\nNessus Vulnerability Scanner\nBurp Suite Professional Web Scanner\nOpenSSL TLS Testing Utility")
+    
+    p = doc.add_paragraph()
+    p.add_run("4.3 Provided Documentation").bold = True
+    doc.add_paragraph("Standard Target IP Address range definitions.\nVPN Credentials and authorization letters.")
+    
+    doc.add_page_break()
+
+    # 8. DISCLAIMER (Page 13)
+    p = doc.add_paragraph()
+    p.add_run("5 DISCLAIMER").bold = True
+    doc.add_paragraph(
+        "The accuracy of the information and data provided in this report is subject to the information available to TÜV SÜD testing team "
+        "during the engagement. The team relies on the accuracy and completeness of the information provided by the client and does not "
+        "assume any responsibility for any inaccuracies or omissions. The assessment was limited to the scope defined and does not "
+        "guarantee the absolute exclusion of other vulnerabilities."
+    )
+    
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
 import io as _io
 from datetime import datetime
 from docx import Document
@@ -10,6 +975,8 @@ from fpdf.enums import XPos, YPos
 from src.core.pii_redactor import redact_pii
 
 def export_docx_report(session_title, findings, resolved_list, status, comments=""):
+    if "VAPT" in session_title.upper() or "VULNERABILITY" in session_title.upper():
+        return _export_vapt_docx(session_title, findings, resolved_list, status, comments)
     doc = Document()
     
     # Margins
@@ -62,6 +1029,18 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         run.font.color.rgb = _rgb(15, 23, 42)
 
     # ── COVER PAGE ─────────────────────────────────────────────────────────────
+    try:
+        import streamlit as st
+        logo_path = st.session_state.get("auditor_logo_path")
+    except Exception:
+        logo_path = None
+    if logo_path and os.path.exists(logo_path):
+        logo_p = doc.add_paragraph()
+        logo_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        logo_p.paragraph_format.space_before = Pt(40)
+        run_logo = logo_p.add_run()
+        run_logo.add_picture(logo_path, width=Cm(4))
+    
     # Title
     title_p = doc.add_paragraph()
     title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -131,7 +1110,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         ("Date of the Agreement", "[Date of Agreement]"),
         ("Date of Document", datetime.now().strftime("%dth %B %Y")),
         ("Version", "1.0"),
-        ("Prepared By", "[Auditor Firm Name]")
+        ("Prepared By", st.session_state.get("auditor_firm", "Digital Age Strategies"))
     ]
     for r_idx, (label, val) in enumerate(prep_data):
         c1, c2 = tbl_prep.rows[r_idx].cells
@@ -190,7 +1169,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     tbl_auditee = doc.add_table(rows=3, cols=3)
     tbl_auditee.style = 'Table Grid'
     auditee_data = [
-        ("1", "Name of Organization", "[Auditee Organization]"),
+        ("1", "Name of Organization", st.session_state.get("target_entity", "the Organization")),
         ("2", "Audit Area", f"IS Audit of {session_title}"),
         ("3", "Location", "Mumbai, India")
     ]
@@ -210,7 +1189,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     tbl_auditor = doc.add_table(rows=2, cols=3)
     tbl_auditor.style = 'Table Grid'
     auditor_data = [
-        ("1", "Auditor", "Mr. Subhash Rao BE.MBA, CEH, CHFI, ISO 27001 LA, CEI, CND, CDPSE"),
+        ("1", "Auditor", st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")),
         ("2", "Auditor", "Mr. Mahaveer Rajannavar BE.CEH, ISO 27001 LA")
     ]
     for r_idx, row_data in enumerate(auditor_data):
@@ -416,6 +1395,8 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
 
 
 def export_pdf_report(session_title, findings, resolved_list, status, comments=""):
+    if "VAPT" in session_title.upper() or "VULNERABILITY" in session_title.upper():
+        return _export_vapt_pdf(session_title, findings, resolved_list, status, comments)
     from fpdf.fonts import FontFace
 
     def clean_text(val):
@@ -458,7 +1439,16 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
 
     # ── COVER PAGE ─────────────────────────────────────────────────────────────
     pdf.add_page()
-    pdf.ln(25)
+    try:
+        import streamlit as st
+        logo_path = st.session_state.get("auditor_logo_path")
+    except Exception:
+        logo_path = None
+    if logo_path and os.path.exists(logo_path):
+        pdf.image(logo_path, x=85, y=15, w=40)
+        pdf.ln(35)
+    else:
+        pdf.ln(25)
     
     pdf.set_font("Helvetica", "B", 22)
     pdf.set_text_color(15, 23, 42)
@@ -480,7 +1470,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     pdf.cell(0, 6, clean_text("Audit Conducted By:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 5, clean_text("Mr. Subhash Rao BE.MBA, CEH, CHFI, ISO 27001 LA, CEI, CND, CDPSE"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.cell(0, 5, clean_text(st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.cell(0, 5, clean_text("Mr. Mahaveer Rajannavar BE.CEH, ISO 27001 LA"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.ln(20)
     
@@ -517,7 +1507,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         ["Date of the Agreement", "[Date of Agreement]"],
         ["Date of Document", datetime.now().strftime("%dth %B %Y")],
         ["Version", "1.0"],
-        ["Prepared By", "[Auditor Firm Name]"]
+        ["Prepared By", st.session_state.get("auditor_firm", "Digital Age Strategies")]
     ]
     with pdf.table(col_widths=(60, 130), text_align="L") as table:
         for row in prep_data:
@@ -556,7 +1546,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     # Details of Auditee (Table 4)
     section_title("Details of Auditee:")
     auditee_data = [
-        ["1", "Name of Organization", "[Auditee Organization]"],
+        ["1", "Name of Organization", st.session_state.get("target_entity", "the Organization")],
         ["2", "Audit Area", f"IS Audit of {session_title}"],
         ["3", "Location", "Mumbai, India"]
     ]
@@ -570,7 +1560,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     # Details of Auditor (Table 5)
     section_title("Details of Auditor:")
     auditor_data = [
-        ["1", "Auditor", "Mr. Subhash Rao BE.MBA, CEH, CHFI, ISO 27001 LA, CEI, CND, CDPSE"],
+        ["1", "Auditor", st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")],
         ["2", "Auditor", "Mr. Mahaveer Rajannavar BE.CEH, ISO 27001 LA"]
     ]
     with pdf.table(col_widths=(20, 40, 130), text_align="L") as table:

@@ -16,7 +16,6 @@ The following table summarizes the implementation status and mechanics for each 
 | G4 - Audit Metadata Logs | Orchestrated in `src/ai/audit_graph.py`, where the final validation node logs execution metrics (token counts, run latency, and correction retries) to the database. | OK |
 | G5 - Input Guardrail | Integrated via `src/core/input_guardrail.py` and file upload hooks in `src/ui/app.py`. Incoming files undergo magic byte verification, macro checks, zip bomb protection, and size boundaries validation. | OK |
 | G6 - Custom Excel Scoping | Added to the sidebar layout in `src/ui/app.py`: parses `.xlsx`/`.xls` scopes via pandas, auto-maps input columns, checks corresponding controls, and safely updates the session state configuration. | OK |
-| G7 - VAPT Controls Database | Loaded in the core controls list in `src/core/controls_data.py`: includes 15 pentesting controls (VAPT-1 to VAPT-15) covering scoping, OSINT, service scanning, web assessment, and API security. | OK |
 
 ---
 
