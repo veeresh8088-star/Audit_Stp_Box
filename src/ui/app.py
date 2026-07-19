@@ -5897,9 +5897,34 @@ def _render_running_progress(bg_key):
             .custom-spinner {{ border: 4px solid rgba(59, 130, 246, 0.1); border-top: 4px solid #3b82f6; border-radius: 50%; width: 48px; height: 48px; animation: spin_loader 1s linear infinite; }}
             @keyframes spin_loader {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
         </style>
+        
+        <script>
+            // Programmatically click the hidden RefreshAudit button to wake up Streamlit and update the progress bar
+            setTimeout(function() {{
+                try {{
+                    const doc = window.parent.document;
+                    const buttons = doc.querySelectorAll('button');
+                    for (const btn of buttons) {{
+                        const text = btn.innerText || "";
+                        if (text.trim() === 'RefreshAudit') {{
+                            btn.click();
+                            break;
+                        }}
+                    }}
+                }} catch(e) {{
+                    console.error("Auto-refresh error:", e);
+                }}
+            }}, 4000);
+        </script>
     </div>
     """, unsafe_allow_html=True)
     st.progress(prog_pct, text=f"**{prog_pct}%** completed")
+    
+    # Render the invisible button that JS clicks to force a clean rerun
+    st.markdown("<div style='display:none;'>", unsafe_allow_html=True)
+    st.button("RefreshAudit", key="refresh_audit_trigger_btn")
+    st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 @st.fragment(run_every=timedelta(seconds=3))
