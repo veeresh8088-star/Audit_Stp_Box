@@ -8411,133 +8411,6 @@ with _main_wrap:
 
                 new_ctrl_desc = st.text_area(
                     "Description (optional — helps semantic similarity matching)",
-                    placeholder="Ensure AI/ML models are monitored for adversarial inputs...",
-                    height=80,
-                    key="mc_new_ctrl_desc"
-                )
-
-                if st.button("✨ Auto-Generate Keywords from Name",
-                             key="mc_autogen_btn",
-                             use_container_width=False):
-                    if new_ctrl_name.strip():
-                        auto_kws = generate_keywords(new_ctrl_name.strip(), new_ctrl_desc.strip())
-                        st.session_state["mc_autogen_kws"] = ", ".join(auto_kws)
-                        st.toast(f"✨ Auto-generated {len(auto_kws)} keywords!")
-                    else:
-                        st.warning("Enter a Control Name first.")
-
-                kws_default = st.session_state.get("mc_autogen_kws", "")
-                new_ctrl_kws = st.text_area(
-                    "Keywords (comma-separated — used by regex keyword scanner)",
-                    value=kws_default,
-                    placeholder="ai, machine learning, monitoring, adversarial",
-                    height=100,
-                    key="mc_new_ctrl_kws",
-                    help="Option 1: Manually type keywords. Option 2: Click Auto-Generate above. Option 3: Leave empty — semantic similarity will still try to match."
-                )
-
-                st.caption(
-                    "💡 **Tip:** Option 3 (semantic similarity) always runs as a safety net, "
-                    "even if no keywords are provided."
-                )
-
-            # ─ TAB 3: MANAGE / DEACTIVATE ────────────────────────────────────
-            with ctrl_tab3:
-                all_rows = get_all_custom_controls(active_only=False)
-                if not all_rows:
-                    st.info("No custom controls yet. Add one in the 'Add New Control' tab.")
-                else:
-                    st.markdown("Toggle or permanently delete your custom controls below.")
-
-                    for row in all_rows:
-                        with st.expander(
-                            f"{'\U0001f7e2' if row['is_active'] else '\U0001f534'} [{row['control_id']}] {row['control_name']} — {row['category']}"
-                        ):
-                            st.markdown(f"**Keywords:** {', '.join(row['keywords']) or 'None (semantic fallback only)'}")
-                            st.markdown(f"**Description:** {row['description'] or '—'}")
-                            st.markdown(f"**Added by:** {row['created_by']} on {row['created_at'][:10]}")
-                            st.markdown(f"**Keywords type:** {'Auto-generated ✨' if row['auto_generated'] else 'Manual ✏️'}")
-
-                            ec1, ec2, ec3 = st.columns(3)
-                            with ec1:
-                                lbl = "🔴 Deactivate" if row["is_active"] else "🟢 Reactivate"
-                                if st.button(lbl, key=f"mc_toggle_{row['id']}", use_container_width=True):
-                                    update_custom_control(row["id"], is_active=not row["is_active"])
-                                    import src.ui.app as _self_mod; _self_mod._CUSTOM_UC_CACHE_TS = 0
-                                    st.toast(f"Control {'deactivated' if row['is_active'] else 'reactivated'}.")
-                                    st.rerun()
-                            with ec2:
-                                new_kw_str = st.text_input(
-                                    "Update keywords",
-                                    value=", ".join(row["keywords"]),
-                                    key=f"mc_kw_edit_{row['id']}",
-                                    label_visibility="collapsed",
-                                    placeholder="Update keywords..."
-                                )
-                                if st.button("💾 Save Keywords", key=f"mc_save_kw_{row['id']}",
-                                             use_container_width=True):
-                                    new_kws = [k.strip() for k in new_kw_str.split(",") if k.strip()]
-                                    update_custom_control(row["id"], keywords=new_kws)
-                                    import src.ui.app as _self_mod; _self_mod._CUSTOM_UC_CACHE_TS = 0
-                                    st.toast("✅ Keywords updated.")
-                                    st.rerun()
-                            with ec3:
-                                if st.button("🗑️ Delete", key=f"mc_delete_{row['id']}",
-                                             use_container_width=True):
-                                    delete_custom_control(row["id"], soft=False)
-                                    import src.ui.app as _self_mod; _self_mod._CUSTOM_UC_CACHE_TS = 0
-                                    st.toast("🗑️ Control permanently deleted.")
-                                    st.rerun()
-
-
-
-            # ─ TAB 1: VIEW ALL CONTROLS ──────────────────────────────────────
-            with ctrl_tab1:
-                custom_rows = get_all_custom_controls(active_only=False)
-                if not custom_rows:
-                    st.info("💡 No custom controls added yet. Use the 'Add New Control' tab to add your first control.")
-                else:
-                    import pandas as pd
-                    df = pd.DataFrame([
-                        {
-                            "ID": r["id"],
-                            "Control ID": r["control_id"],
-                            "Control Name": r["control_name"],
-                            "Category": r["category"],
-                            "Keywords": ", ".join(r["keywords"]),
-                            "Auto-Gen": "✅" if r["auto_generated"] else "✏️",
-                            "Active": "🟢" if r["is_active"] else "🔴",
-                            "Added By": r["created_by"],
-                        }
-                        for r in custom_rows
-                    ])
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                    st.caption(f"Total: {len(custom_rows)} custom controls | 🟢 Active  🔴 Deactivated  ✅ Auto-generated keywords  ✏️ Manual keywords")
-
-            # ─ TAB 2: ADD NEW CONTROL ───────────────────────────────────────
-            with ctrl_tab2:
-                st.markdown("**Add a new compliance control to the scoping engine**")
-
-                col_id, col_cat = st.columns([1, 2])
-                with col_id:
-                    new_ctrl_id = st.text_input(
-                        "Control ID", placeholder="e.g. 5.40",
-                        key="mc_new_ctrl_id"
-                    )
-                with col_cat:
-                    new_ctrl_cat = st.selectbox(
-                        "Category", CATEGORIES,
-                        key="mc_new_ctrl_cat"
-                    )
-
-                new_ctrl_name = st.text_input(
-                    "Control Name",
-                    placeholder="e.g. 5.40 AI System Security Monitoring",
-                    key="mc_new_ctrl_name"
-                )
-
-                new_ctrl_desc = st.text_area(
-                    "Description (optional — helps semantic similarity matching)",
                     placeholder="Ensure AI/ML models are monitored for adversarial inputs, data poisoning, and model drift...",
                     height=80,
                     key="mc_new_ctrl_desc"
@@ -8606,7 +8479,7 @@ with _main_wrap:
                     st.markdown("Toggle or permanently delete your custom controls below.")
                     for row in all_rows:
                         with st.expander(
-                            f"{'\ud83d\udfe2' if row['is_active'] else '\ud83d\udd34'} [{row['control_id']}] {row['control_name']} — {row['category']}"
+                            f"{'\u0001f7e2' if row['is_active'] else '\u0001f534'} [{row['control_id']}] {row['control_name']} — {row['category']}"
                         ):
                             st.markdown(f"**Keywords:** {', '.join(row['keywords']) or 'None (semantic fallback only)'}")
                             st.markdown(f"**Description:** {row['description'] or '—'}")
@@ -8618,6 +8491,7 @@ with _main_wrap:
                                 lbl = "🔴 Deactivate" if row["is_active"] else "🟢 Reactivate"
                                 if st.button(lbl, key=f"mc_toggle_{row['id']}", use_container_width=True):
                                     update_custom_control(row["id"], is_active=not row["is_active"])
+                                    import src.ui.app as _self_mod; _self_mod._CUSTOM_UC_CACHE_TS = 0
                                     st.toast(f"Control {'deactivated' if row['is_active'] else 'reactivated'}.")
                                     st.rerun()
                             with ec2:
@@ -8632,12 +8506,14 @@ with _main_wrap:
                                              use_container_width=True):
                                     new_kws = [k.strip() for k in new_kw_str.split(",") if k.strip()]
                                     update_custom_control(row["id"], keywords=new_kws)
+                                    import src.ui.app as _self_mod; _self_mod._CUSTOM_UC_CACHE_TS = 0
                                     st.toast("✅ Keywords updated.")
                                     st.rerun()
                             with ec3:
                                 if st.button("🗑️ Delete", key=f"mc_delete_{row['id']}",
                                              use_container_width=True):
                                     delete_custom_control(row["id"], soft=False)
+                                    import src.ui.app as _self_mod; _self_mod._CUSTOM_UC_CACHE_TS = 0
                                     st.toast("🗑️ Control permanently deleted.")
                                     st.rerun()
 
