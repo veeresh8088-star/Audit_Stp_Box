@@ -10,12 +10,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     
     def clean_text(val):
         if not val:
-            return "—"
+            return "-"
         val = str(val)
         val = val.replace("“", "\"").replace("”", "\"").replace("‘", "'").replace("’", "'")
-        val = val.replace("—", "-").replace("–", "-").replace("—", "-").replace("–", "-")
+        val = val.replace("—", "-").replace("–", "-").replace("\u2013", "-").replace("\u2014", "-")
+        val = val.replace("\u2022", "*").replace("•", "*").replace("\u25cf", "*").replace("\u25cb", "*")
         val = val.encode("latin-1", "replace").decode("latin-1")
         return val
+
 
     # Helper to get dynamic values from st.session_state
     try:
@@ -1374,7 +1376,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         row_cells[0].paragraphs[0].add_run(str(f_idx))
         row_cells[1].paragraphs[0].add_run(f.get("control_id", "") + " " + f.get("control", ""))
         row_cells[2].paragraphs[0].add_run(f.get("clause", "") or "ISO 27001 Annex A")
-        row_cells[3].paragraphs[0].add_run(redact_pii(f.get("finding") or f.get("description") or "—"))
+        row_cells[3].paragraphs[0].add_run(redact_pii(f.get("finding") or f.get("description") or "-"))
         row_cells[4].paragraphs[0].add_run(risk_text).bold = True
         row_cells[5].paragraphs[0].add_run(redact_pii(f.get("business_impact") or "NIL"))
         row_cells[6].paragraphs[0].add_run(redact_pii(f.get("recommendation") or "NIL"))
@@ -1401,22 +1403,23 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
 
     def clean_text(val):
         if not val:
-            return "—"
+            return "-"
         val = str(val)
         # Smart quotes
         val = val.replace("“", "\"").replace("”", "\"").replace("‘", "'").replace("’", "'")
         val = val.replace("\u201d", "\"").replace("\u201c", "\"").replace("\u2019", "'").replace("\u2018", "'")
         # Hyphens and dashes
-        val = val.replace("—", "-").replace("–", "-").replace("\u2013", "-").replace("\u2014", "-")
+        val = val.replace("—", "-").replace("–", "-").replace("\u2013", "-").replace("\u2014", "-").replace("\u2212", "-")
         # Bullet symbols
-        val = val.replace("\u2022", "*").replace("•", "*")
+        val = val.replace("\u2022", "*").replace("•", "*").replace("\u25cf", "*").replace("\u25cb", "*")
         # Fallback to Latin-1
         val = val.encode("latin-1", "replace").decode("latin-1")
         return val
 
     def truncate_cell_text(text, max_chars=800):
         if not text:
-            return "—"
+            return "-"
+
         text = str(text)
         if len(text) > max_chars:
             return text[:max_chars] + "... [Truncated for PDF]"
@@ -1772,7 +1775,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
             r.cell(clean_text(truncate_cell_text(ref_text, 100)), style=cell_style)
             
             # PII redacted before writing to exported PDF
-            obs_text = redact_pii(f.get("finding") or f.get("description") or "—")
+            obs_text = redact_pii(f.get("finding") or f.get("description") or "-")
             r.cell(clean_text(truncate_cell_text(obs_text, 600)), style=cell_style)
             
             r.cell(clean_text(risk_text), style=risk_style)
