@@ -5378,17 +5378,20 @@ if run or st.session_state.get("start_analysis_on_next_run"):
             if active_controls:
                 for uc in USE_CASES:
                     pending[f"ctrl_chk_{uc['sl']}"] = (uc["use_case"] in active_controls)
-            else:
-                for uc in USE_CASES:
-                    pending[f"ctrl_chk_{uc['sl']}"] = True
-            st.session_state.pending_ctrl_checks = pending
-                    
-            if warning_msg:
-                st.sidebar.warning(warning_msg)
+                st.session_state.pending_ctrl_checks = pending
                 
-            # Set rerun flag to update multiselect before thread starts
-            st.session_state.start_analysis_on_next_run = True
-            st.rerun()
+                if warning_msg:
+                    st.sidebar.warning(warning_msg)
+                    
+                # Set rerun flag to update multiselect before thread starts
+                st.session_state.start_analysis_on_next_run = True
+                st.rerun()
+            else:
+                # Scoping failed or LLM offline: do not start background audit on all 108 controls
+                st.session_state.start_analysis_on_next_run = False
+                st.sidebar.error("⚠️ **AI Scoping failed or found no matching controls.**\n\nPlease ensure your local LLM server is active, or select **Manual Scoping** to specify controls manually.")
+                st.stop()
+
 
         # Re-evaluate selected_sls based on updated checkbox states
         selected_ucs = [u for u in filtered_use_cases if st.session_state.get(f"ctrl_chk_{u['sl']}", True)]
