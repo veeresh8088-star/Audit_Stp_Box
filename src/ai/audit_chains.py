@@ -444,13 +444,19 @@ class NativeOllamaChain:
             else:
                 normalized["status"] = "NON_COMPLIANT"
                 
-            # 2. severity (DETERMINISTIC ASSIGNMENT: NOT FROM LLM PROMPT)
+            # 2. severity
             # If status is COMPLIANT or FALSE_POSITIVE, severity is always N/A
             if normalized["status"] in ("COMPLIANT", "FALSE_POSITIVE"):
                 normalized["severity"] = "N/A"
             else:
-                # Assign default control severity
-                normalized["severity"] = control_default_severity
+                # Respect LLM/model explicitly returned severity if valid
+                model_sev = str(data.get("severity", "")).strip().capitalize()
+                if model_sev in ("Critical", "High", "Medium", "Low"):
+                    normalized["severity"] = model_sev
+                else:
+                    # Assign default control severity
+                    normalized["severity"] = control_default_severity
+
                     
             # 3. evidence_strength
             strength = str(data.get("evidence_strength", "None")).strip()
@@ -574,9 +580,10 @@ class NativeOllamaChain:
         # Parse XML helper
         def parse_xml_to_dict(xml_text: str) -> dict:
             parsed_data = {}
-            expected_tags = ["status", "evidence_strength", "control_coverage", "evidence_count", 
+            expected_tags = ["status", "severity", "evidence_strength", "control_coverage", "evidence_count", 
                              "business_impact", "remediation_priority", "justification", "recommendation",
                              "policy_present", "evidence_present", "severity_score"]
+
             
             # Tag Repair Logic (pre-processing unclosed tags)
             repaired_text = xml_text.strip()
