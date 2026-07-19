@@ -205,6 +205,26 @@ class SystemEvent(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
+class CustomControl(Base):
+    """Auditor-managed controls that extend or supplement the hardcoded ISO 27001:2022 control set.
+    Loaded at runtime by the Zero-LLM scoping engine to support dynamic scope pruning.
+    """
+    __tablename__ = "custom_controls"
+    id             = Column(Integer, primary_key=True, autoincrement=True)
+    control_id     = Column(String(50),  nullable=False)   # e.g. "5.40"
+    control_name   = Column(String(300), nullable=False)   # e.g. "5.40 AI System Security"
+    category       = Column(String(200), nullable=False)   # e.g. "Technology / IT Security Policy"
+    description    = Column(Text, nullable=True)           # optional long description for semantic embedding
+    keywords_json  = Column(Text, nullable=True)           # JSON list e.g. ["ai", "machine learning"]
+    auto_generated = Column(Boolean, default=False)        # True = keywords were auto-generated
+    is_active      = Column(Boolean, default=True)         # soft-delete flag
+    is_global      = Column(Boolean, default=True)         # True = all auditors share it
+    created_by     = Column(String(100), nullable=True)    # auditor username
+    created_at     = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at     = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None),
+                            onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
 def _log_db_event(event_type: str, meta: dict = None, severity: str = "ERROR"):
     """
     Write a SystemEvent directly using the master engine.
@@ -738,3 +758,112 @@ def purge_old_logs(days=90):
         raise e
     finally:
         db.close()
+
+
+# ── CUSTOM CONTROLS CRUD ──────────────────────────────────────────────────────
+
+def get_all_custom_controls(active_only: bool = True) -> list:
+    """Returns all auditor-defined custom controls from the DB as dicts."""
+    import json as _json
+    db = SessionLocal()
+    try:
+        q = db.query(CustomControl)
+        if active_only:
+            q = q.filter(CustomControl.is_active == True)
+        rows = q.order_by(CustomControl.control_id).all()
+        result = []
+        for r in rows:
+            result.append({
+                "id":             r.id,
+                "control_id":     r.control_id,
+                "control_name":   r.control_name,
+                "category":       r.category,
+                "description":    r.description or "",
+                "keywords":       _json.loads(r.keywords_json) if r.keywords_json else [],
+                "auto_generated": r.auto_generated,
+                "is_active":      r.is_active,
+                "is_global":      r.is_global,
+                "created_by":     r.created_by or "unknown",
+                "created_at":     str(r.created_at),
+            })
+        return result
+    finally:
+        db.close()
+
+
+def add_custom_control(control_id: str, control_name: str, category: str,
+                       keywords: list, description: str = "",
+                       auto_generated: bool = False, created_by: str = "auditor",
+                       is_global: bool = True) -> int:
+    """Inserts a new CustomControl row. Returns the new row id."""
+    import json as _json
+    db = SessionLocal()
+    try:
+        with force_master():
+            row = CustomControl(
+                control_id=control_id.strip(),
+                control_name=control_name.strip(),
+                category=category.strip(),
+                description=description.strip(),
+                keywords_json=_json.dumps([k.lower().strip() for k in keywords if k.strip()]),
+                auto_generated=auto_generated,
+                is_global=is_global,
+                created_by=created_by,
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+            return row.id
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+
+
+def update_custom_control(control_db_id: int, keywords: list = None,
+                          description: str = None, is_active: bool = None) -> bool:
+    """Updates keywords, description, or active status of an existing custom control."""
+    import json as _json
+    db = SessionLocal()
+    try:
+        with force_master():
+            row = db.query(CustomControl).filter(CustomControl.id == control_db_id).first()
+            if not row:
+                return False
+            if keywords is not None:
+                row.keywords_json = _json.dumps([k.lower().strip() for k in keywords if k.strip()])
+                row.auto_generated = False  # manual update clears auto flag
+            if description is not None:
+                row.description = description
+            if is_active is not None:
+                row.is_active = is_active
+            db.commit()
+            return True
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+
+
+def delete_custom_control(control_db_id: int, soft: bool = True) -> bool:
+    """Soft-deletes (deactivates) or hard-deletes a custom control."""
+    db = SessionLocal()
+    try:
+        with force_master():
+            row = db.query(CustomControl).filter(CustomControl.id == control_db_id).first()
+            if not row:
+                return False
+            if soft:
+                row.is_active = False
+            else:
+                db.delete(row)
+            db.commit()
+            return True
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+

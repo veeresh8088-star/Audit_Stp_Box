@@ -4,6 +4,48 @@ import re
 import time
 from src.core.controls_data import USE_CASES
 
+
+def _load_custom_controls_from_db():
+    """
+    Load auditor-defined custom controls from the database at runtime.
+    Returns:
+        extra_doc_type_mappings  : dict {category -> [control_name, ...]}
+        extra_content_signals    : dict {category -> [keyword, ...]}
+        extra_scope_descriptions : dict {category -> description_str}
+    Silently returns empty dicts if the DB is not yet initialised.
+    """
+    extra_mappings      = {}
+    extra_signals       = {}
+    extra_descriptions  = {}
+    try:
+        from src.db.database import get_all_custom_controls
+        rows = get_all_custom_controls(active_only=True)
+        for row in rows:
+            cat  = row["category"]
+            name = row["control_name"]
+            kws  = row["keywords"]          # list[str]
+            desc = row["description"] or name
+
+            # Option 1: merge control into DOC_TYPE_MAPPINGS equivalent
+            extra_mappings.setdefault(cat, [])
+            if name not in extra_mappings[cat]:
+                extra_mappings[cat].append(name)
+
+            # Option 1 + 2: add keywords to CONTENT_SIGNALS equivalent
+            if kws:
+                extra_signals.setdefault(cat, [])
+                extra_signals[cat].extend(kws)
+
+            # Option 3: add description to SCOPE_DESCRIPTIONS equivalent
+            # Append to existing description so semantic similarity covers it
+            if cat in extra_descriptions:
+                extra_descriptions[cat] += ", " + desc
+            else:
+                extra_descriptions[cat] = desc
+    except Exception as db_err:
+        print(f"[SCOPING ENGINE] Custom controls DB load skipped: {db_err}")
+    return extra_mappings, extra_signals, extra_descriptions
+
 # ── DOC TYPE → ISO 27001:2022 CONTROL MAPPINGS ───────────────────────────────
 DOC_TYPE_MAPPINGS = {
     "Access Control Policy": [
@@ -193,15 +235,25 @@ UMBRELLA_EXPANDS_TO = [
 ]
 
 
-def _apply_content_signals(context_lower: str, doc_types: list) -> list:
+def _apply_content_signals(context_lower: str, doc_types: list,
+                           extra_signals: dict = None) -> list:
     """
     Scan document content for keyword signals and add missing doc types.
     Enforces word boundaries for short abbreviations (<= 4 chars) to prevent substring false matches.
+    Also scans extra_signals from auditor-defined custom controls (Option 1 + 2).
     """
     doc_types_set = set(doc_types)
-    for dtype, keywords in CONTENT_SIGNALS.items():
+
+    # Build merged signal dict: hardcoded + custom
+    merged_signals = dict(CONTENT_SIGNALS)
+    if extra_signals:
+        for cat, kws in extra_signals.items():
+            merged_signals.setdefault(cat, [])
+            merged_signals[cat] = list(set(merged_signals[cat] + kws))
+
+    for dtype, keywords in merged_signals.items():
         for kw in keywords:
-            # Enforce word boundaries for abbreviations or short terms to prevent matching within words like 'purpose'
+            # Enforce word boundaries for abbreviations or short terms
             if len(kw) <= 4 or kw in ["bcp", "drp", "rto", "rpo", "nda", "mfa", "sso", "rbac", "soc"]:
                 pattern = r"\b" + re.escape(kw) + r"\b"
                 if re.search(pattern, context_lower):
@@ -228,15 +280,26 @@ def _check_umbrella_policy(context_lower: str, doc_types: list) -> list:
     return doc_types
 
 
-def _get_candidate_controls(doc_types):
-    """Retrieve candidate control names based on identified document types."""
+def _get_candidate_controls(doc_types, extra_mappings: dict = None):
+    """Retrieve candidate control names based on identified document types.
+    Merges hardcoded ISO 27001:2022 controls with auditor-defined custom controls.
+    """
+    # Build merged mapping: hardcoded + custom (Option 1)
+    merged = dict(DOC_TYPE_MAPPINGS)
+    if extra_mappings:
+        for cat, ctrls in extra_mappings.items():
+            merged.setdefault(cat, [])
+            for c in ctrls:
+                if c not in merged[cat]:
+                    merged[cat].append(c)
+
     candidates = set()
     for dt in doc_types:
-        for c in DOC_TYPE_MAPPINGS.get(dt, []):
+        for c in merged.get(dt, []):
             candidates.add(c)
 
     if not candidates:
-        for dt, controls in DOC_TYPE_MAPPINGS.items():
+        for dt, controls in merged.items():
             for c in controls:
                 candidates.add(c)
 
@@ -276,38 +339,54 @@ def cosine_similarity(v1, v2):
 def detect_scope_and_controls(context, ollama_model=None):
     """
     Zero-LLM deterministic + semantic scope detection.
-    Combines direct keyword signals with fast Nomic embeddings (Option A).
+    Combines:
+      - Option 1: Auditor-provided keyword signals (from DB custom_controls)
+      - Option 2: Auto-generated keywords (stored in DB by keyword_generator)
+      - Option 3: Nomic semantic similarity fallback for controls with no keywords
     """
     start_time = time.time()
-    print(f"\n[{time.strftime('%H:%M:%S')}] [INFO] Starting Dual-Layer Scope Detection (Option A)...")
+    print(f"\n[{time.strftime('%H:%M:%S')}] [INFO] Starting Dual-Layer Scope Detection (Option A + Custom Controls)...")
+
+    # ── PRE-LOAD: Auditor-defined custom controls from DB ─────────────────────
+    extra_mappings, extra_signals, extra_descriptions = _load_custom_controls_from_db()
+    if extra_mappings:
+        print(f"[{time.strftime('%H:%M:%S')}] [INFO] Loaded {sum(len(v) for v in extra_mappings.values())} custom controls from DB")
 
     context_lower = context.lower()
     doc_types_set = set()
     ollama_offline = False
 
-    # ── LAYER 1: Python Keyword Signals (Instant) ─────────────────────────────
-    doc_types_list = _apply_content_signals(context_lower, [])
+    # ── LAYER 1: Python Keyword Signals (Instant) — Option 1 + 2 ─────────────
+    # Merges hardcoded CONTENT_SIGNALS with auditor-defined keywords from DB
+    doc_types_list = _apply_content_signals(context_lower, [], extra_signals)
     for dt in doc_types_list:
         doc_types_set.add(dt)
 
-    # ── LAYER 2: Semantic Embedding Match (~50ms) ────────────────────────────
-    # Convert first 800 chars of document to vector
+    # ── LAYER 2: Semantic Embedding Match (~50ms) — Option 3 Fallback ────────
+    # Merges SCOPE_DESCRIPTIONS with custom control descriptions from DB
+    merged_descriptions = dict(SCOPE_DESCRIPTIONS)
+    for cat, desc in extra_descriptions.items():
+        if cat in merged_descriptions:
+            merged_descriptions[cat] += ", " + desc
+        else:
+            merged_descriptions[cat] = desc
+
     doc_snippet = context[:800].strip()
     if doc_snippet:
         try:
             from src.core.llm_client import get_embedding
-            
-            # 1. Warm up category embeddings cache if empty
-            for cat, desc in SCOPE_DESCRIPTIONS.items():
+
+            # Warm up category embeddings cache (includes custom control descriptions)
+            for cat, desc in merged_descriptions.items():
                 if cat not in _category_embeddings_cache:
                     _category_embeddings_cache[cat] = get_embedding(desc)
 
-            # 2. Get document vector
+            # Get document vector
             doc_vector = get_embedding(doc_snippet)
 
-            # 3. Calculate cosine similarity
+            # Calculate cosine similarity — catches controls with no keyword match
             if doc_vector:
-                print(f"[{time.strftime('%H:%M:%S')}] [INFO] Computing semantic scope matches...")
+                print(f"[{time.strftime('%H:%M:%S')}] [INFO] Computing semantic scope matches (incl. custom controls)...")
                 for cat, cat_vector in _category_embeddings_cache.items():
                     if cat_vector:
                         sim = cosine_similarity(doc_vector, cat_vector)
@@ -326,13 +405,13 @@ def detect_scope_and_controls(context, ollama_model=None):
     if added_by_umbrella:
         print(f"[{time.strftime('%H:%M:%S')}] [INFO] Umbrella expansion added: {list(added_by_umbrella)}")
 
-    # ── LAYER 4: Map doc types to standard controls ──────────────────────────
-    selected_controls = _get_candidate_controls(doc_types)
+    # ── LAYER 4: Map doc types to controls (hardcoded + custom) ──────────────
+    selected_controls = _get_candidate_controls(doc_types, extra_mappings)
 
     # ── LAYER 5: Fallback if empty ────────────────────────────────────────────
     if not doc_types:
-        doc_types = list(DOC_TYPE_MAPPINGS.keys())
-        selected_controls = _get_candidate_controls(doc_types)
+        doc_types = list(DOC_TYPE_MAPPINGS.keys()) + list(extra_mappings.keys())
+        selected_controls = _get_candidate_controls(doc_types, extra_mappings)
         print(f"[{time.strftime('%H:%M:%S')}] [WARN] No scopes detected — falling back to ALL scopes")
 
     elapsed = time.time() - start_time

@@ -2481,22 +2481,95 @@ def _get_expected_evidence(uc, custom_evidence=None):
     except Exception:
         return uc["expected"]
 
+_CUSTOM_USE_CASES_CACHE = []   # refreshed on each audit run
+_CUSTOM_UC_CACHE_TS    = 0     # unix timestamp of last refresh
+
+
+def _load_custom_use_cases(force: bool = False) -> list:
+    """
+    Load auditor-defined custom controls from the DB and convert them to
+    USE_CASES-compatible dicts.  Serial numbers start at 10 000 to avoid
+    collisions with hardcoded ISO 27001 controls (which go up to ~93).
+
+    Results are cached for 60 s so repeated Streamlit rerenders don't
+    hammer the database.
+    """
+    global _CUSTOM_USE_CASES_CACHE, _CUSTOM_UC_CACHE_TS
+    import time as _time
+    now = _time.time()
+    if not force and (now - _CUSTOM_UC_CACHE_TS) < 60 and _CUSTOM_USE_CASES_CACHE is not None:
+        return _CUSTOM_USE_CASES_CACHE
+
+    try:
+        from src.db.database import get_all_custom_controls
+        rows = get_all_custom_controls(active_only=True)
+    except Exception:
+        return []
+
+    custom_ucs = []
+    for idx, row in enumerate(rows):
+        sl = 10000 + idx          # guaranteed not to collide with ISO controls
+        name   = row["control_name"]
+        cid    = row["control_id"]
+        desc   = row["description"] or name
+        cat    = row["category"]
+        kws    = ", ".join(row["keywords"]) if row["keywords"] else name
+
+        custom_ucs.append({
+            "sl":          sl,
+            "standard":    "Custom",
+            "category":    f"Custom — {cat}",
+            "label":       f"{name} ({cid}) [Custom]",
+            "icon":        "🔧",
+            "use_case":    name,        # this is what the scoping engine returns
+            "expected":    f"Evidence of compliance with {name}. {desc}",
+            "format":      "PDF",
+            "prompt_hint": (
+                f"Verify compliance against the custom control: {name} ({cid}). "
+                f"Category: {cat}. "
+                f"Description: {desc}. "
+                f"Relevant keywords: {kws}. "
+                f"Check whether the uploaded documents demonstrate that this control "
+                f"has been implemented, documented, and is being followed."
+            ),
+            "scope_tags":  [cat],
+            "severity":    "MEDIUM",
+            "finding":     f"No documented evidence found for custom control {cid} ({name}).",
+            "recommendation": (
+                f"Establish, document, and implement procedures to satisfy "
+                f"the custom control {cid} ({name})."
+            ),
+            "_is_custom":  True,        # marker so UI can distinguish
+        })
+
+    _CUSTOM_USE_CASES_CACHE = custom_ucs
+    _CUSTOM_UC_CACHE_TS     = now
+    return custom_ucs
+
 
 def _build_controls_for_audit(selected_sls, custom_evidence=None):
-    """Gather control metadata for the selected sl numbers."""
+    """Gather control metadata for the selected sl numbers.
+    Includes both hardcoded ISO 27001 controls (USE_CASES) and
+    auditor-defined custom controls loaded from the database.
+    """
+    # Merge hardcoded + custom controls
+    all_ucs = list(USE_CASES) + _load_custom_use_cases()
+
     controls = []
-    for uc in USE_CASES:
+    for uc in all_ucs:
         if uc["sl"] in selected_sls:
             controls.append({
-                "control": uc["use_case"],
-                "label": uc["label"],
-                "expected": _get_expected_evidence(uc, custom_evidence),
-                "prompt_hint": uc["prompt_hint"],
-                "severity": uc.get("severity", "MEDIUM"),
-                "standard": uc.get("standard", ""),
+                "control":        uc["use_case"],
+                "label":          uc["label"],
+                "expected":       _get_expected_evidence(uc, custom_evidence),
+                "prompt_hint":    uc["prompt_hint"],
+                "severity":       uc.get("severity", "MEDIUM"),
+                "standard":       uc.get("standard", ""),
                 "recommendation": uc.get("recommendation", ""),
             })
     return controls
+
+
 
 
 def _get_auditor_feedback_few_shot(control_ids):
@@ -4589,11 +4662,19 @@ with st.sidebar:
 
 
 
+        # Load custom controls from DB (USE_CASES-compatible format, sl >= 10000)
+        _custom_ucs = _load_custom_use_cases()
+
         if selected_standard == "All Standards":
-            filtered_use_cases = USE_CASES
+            filtered_use_cases = list(USE_CASES) + _custom_ucs
         else:
             mapped_use_cases = STANDARD_MAPPINGS.get(selected_standard, [])
-            filtered_use_cases = [u for u in USE_CASES if u["use_case"] in mapped_use_cases]
+            # Also include custom controls whose use_case name was returned by scoping
+            scoped_names = set(mapped_use_cases)
+            filtered_use_cases = (
+                [u for u in USE_CASES if u["use_case"] in scoped_names]
+                + _custom_ucs  # always show custom controls to auditor
+            )
 
 
         # Initialize check states in session state
@@ -4602,18 +4683,25 @@ with st.sidebar:
                 st.session_state[k] = v
             del st.session_state.pending_ctrl_checks
 
+        # Merge USE_CASES + custom for state tracking
+        _all_trackable = list(USE_CASES) + _custom_ucs
         if "ctrl_states" not in st.session_state:
-            st.session_state.ctrl_states = {uc["sl"]: True for uc in USE_CASES}
+            st.session_state.ctrl_states = {uc["sl"]: True for uc in _all_trackable}
+        else:
+            # Ensure new custom controls are also tracked
+            for uc in _custom_ucs:
+                if uc["sl"] not in st.session_state.ctrl_states:
+                    st.session_state.ctrl_states[uc["sl"]] = True
 
         # 1. Sync from st.session_state to ctrl_states first
-        for uc in USE_CASES:
+        for uc in _all_trackable:
             sl = uc["sl"]
             key = f"ctrl_chk_{sl}"
             if key in st.session_state:
                 st.session_state.ctrl_states[sl] = st.session_state[key]
 
         # 2. Write ctrl_states back to st.session_state for all controls
-        for uc in USE_CASES:
+        for uc in _all_trackable:
             sl = uc["sl"]
             key = f"ctrl_chk_{sl}"
             st.session_state[key] = st.session_state.ctrl_states[sl]
@@ -4796,17 +4884,20 @@ with st.sidebar:
             if st.session_state.scoping_mode == "Manual Scoping" and st.session_state.selected_scopes != st.session_state.prev_scopes:
                 if st.session_state.selected_scopes:
                     candidates = scoping_engine._get_candidate_controls(st.session_state.selected_scopes)
-                    for uc in USE_CASES:
-                        st.session_state[f"ctrl_chk_{uc['sl']}"] = (uc["use_case"] in candidates)
+                    # Include custom control names so they also get checked
+                    custom_names = {uc["use_case"] for uc in _load_custom_use_cases()}
+                    in_scope_names = set(candidates) | custom_names
+                    for uc in _all_trackable:
+                        st.session_state[f"ctrl_chk_{uc['sl']}"] = (uc["use_case"] in in_scope_names)
                 else:
-                    for uc in USE_CASES:
+                    for uc in _all_trackable:
                         st.session_state[f"ctrl_chk_{uc['sl']}"] = True
                 st.session_state.prev_scopes = list(st.session_state.selected_scopes)
                 st.rerun()
     
             if st.session_state.selected_scopes:
                 active_scope_controls = scoping_engine._get_candidate_controls(st.session_state.selected_scopes)
-                num_selected_in_scope = sum(1 for uc in USE_CASES if st.session_state.get(f"ctrl_chk_{uc['sl']}", True) and uc["use_case"] in active_scope_controls)
+                num_selected_in_scope = sum(1 for uc in _all_trackable if st.session_state.get(f"ctrl_chk_{uc['sl']}", True) and uc["use_case"] in active_scope_controls)
                 st.markdown(f"<small style='color:#60a5fa; font-weight:600;'>⚙️ Active Scope: {len(active_scope_controls)} controls in scope ({num_selected_in_scope} selected)</small>", unsafe_allow_html=True)
         
         total_ctrls = len(filtered_use_cases)
@@ -5899,13 +5990,13 @@ with _main_wrap:
         tab_upload, tab_submitted = st.tabs(["Upload Evidence", "Submitted Reports"])
         tab_chat, tab_report, tab_docs, tab_submitted, tab_records, tab_logs = None, None, None, None, None, None
     elif st.session_state.user_role == "admin":
-        tab_chat, tab_report, tab_records, tab_logs = st.tabs([
-            "AI Assistant", "Audit Records", "Audit Report", "Admin Logs"
+        tab_chat, tab_report, tab_records, tab_logs, tab_controls = st.tabs([
+            "AI Assistant", "Audit Records", "Audit Report", "Admin Logs", "⚙️ Manage Controls"
         ])
         tab_docs, tab_submitted, tab_upload = None, None, None
     else:
-        tab_chat, tab_docs, tab_report, tab_records, tab_submitted = st.tabs([
-            "AI Assistant", "Auditee Documents", "Audit Records", "Audit Report", "Submitted Reports"
+        tab_chat, tab_docs, tab_report, tab_records, tab_submitted, tab_controls = st.tabs([
+            "AI Assistant", "Auditee Documents", "Audit Records", "Audit Report", "Submitted Reports", "⚙️ Manage Controls"
         ])
         tab_upload, tab_logs = None, None
 
@@ -8240,6 +8331,187 @@ with _main_wrap:
                         st.error(f"Error reading log file: {e}")
                 else:
                     st.info("No developer logs recorded yet. Run an audit to log latency and terminal outputs!")
+
+
+
+
+    # ── MANAGE CONTROLS PAGE ───────────────────────────────────────────────
+    if "tab_controls" in dir() and tab_controls is not None:
+        with tab_controls:
+            from src.db.database import (
+                get_all_custom_controls, add_custom_control,
+                update_custom_control, delete_custom_control
+            )
+            from src.ai.keyword_generator import generate_keywords
+
+            st.markdown(
+                "<div style='background:rgba(30,41,59,0.7);border:1px solid rgba(99,102,241,0.35);"
+                "border-radius:14px;padding:18px 22px;margin-bottom:18px'>"
+                "<div style='font-size:1.15rem;font-weight:700;color:#f8fafc;margin-bottom:4px'>⚙️ Controls Management</div>"
+                "<div style='font-size:0.8rem;color:#94a3b8'>Add, edit, or deactivate ISO 27001 controls. "
+                "New controls are automatically picked up by the Zero-LLM scoping engine on the next document upload.</div>"
+                "</div>",
+                unsafe_allow_html=True
+            )
+
+            CATEGORIES = [
+                "Access Control Policy", "Asset Management Policy", "Risk Assessment",
+                "Incident Management Policy", "Business Continuity Plan", "General Security Policy",
+                "HR / People Security Policy", "Physical Security Policy",
+                "Technology / IT Security Policy", "Supplier / Third Party Policy",
+                "Development / Secure Coding Policy", "Compliance / Legal Policy"
+            ]
+
+            ctrl_tab1, ctrl_tab2, ctrl_tab3 = st.tabs([
+                "📋 View All Controls", "➕ Add New Control", "🗑️ Manage / Deactivate"
+            ])
+
+            # ─ TAB 1: VIEW ALL CONTROLS ──────────────────────────────────────
+            with ctrl_tab1:
+                custom_rows = get_all_custom_controls(active_only=False)
+                if not custom_rows:
+                    st.info("💡 No custom controls added yet. Use the 'Add New Control' tab to add your first control.")
+                else:
+                    import pandas as pd
+                    df = pd.DataFrame([
+                        {
+                            "ID": r["id"],
+                            "Control ID": r["control_id"],
+                            "Control Name": r["control_name"],
+                            "Category": r["category"],
+                            "Keywords": ", ".join(r["keywords"]),
+                            "Auto-Gen": "✅" if r["auto_generated"] else "✏️",
+                            "Active": "🟢" if r["is_active"] else "🔴",
+                            "Added By": r["created_by"],
+                        }
+                        for r in custom_rows
+                    ])
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                    st.caption(f"Total: {len(custom_rows)} custom controls | 🟢 Active  🔴 Deactivated  ✅ Auto-generated keywords  ✏️ Manual keywords")
+
+            # ─ TAB 2: ADD NEW CONTROL ───────────────────────────────────────
+            with ctrl_tab2:
+                st.markdown("**Add a new compliance control to the scoping engine**")
+
+                col_id, col_cat = st.columns([1, 2])
+                with col_id:
+                    new_ctrl_id = st.text_input(
+                        "Control ID", placeholder="e.g. 5.40",
+                        key="mc_new_ctrl_id"
+                    )
+                with col_cat:
+                    new_ctrl_cat = st.selectbox(
+                        "Category", CATEGORIES,
+                        key="mc_new_ctrl_cat"
+                    )
+
+                new_ctrl_name = st.text_input(
+                    "Control Name",
+                    placeholder="e.g. 5.40 AI System Security Monitoring",
+                    key="mc_new_ctrl_name"
+                )
+
+                new_ctrl_desc = st.text_area(
+                    "Description (optional — helps semantic similarity matching)",
+                    placeholder="Ensure AI/ML models are monitored for adversarial inputs, data poisoning, and model drift...",
+                    height=80,
+                    key="mc_new_ctrl_desc"
+                )
+
+                # Option 2: Auto-generate keywords button
+                if st.button("✨ Auto-Generate Keywords from Name",
+                             key="mc_autogen_btn",
+                             use_container_width=False):
+                    if new_ctrl_name.strip():
+                        auto_kws = generate_keywords(new_ctrl_name.strip(), new_ctrl_desc.strip())
+                        st.session_state["mc_autogen_kws"] = ", ".join(auto_kws)
+                        st.toast(f"✨ Auto-generated {len(auto_kws)} keywords!")
+                    else:
+                        st.warning("Enter a Control Name first.")
+
+                # Option 1: Manual keywords field (pre-populated if auto-gen was clicked)
+                kws_default = st.session_state.get("mc_autogen_kws", "")
+                new_ctrl_kws = st.text_area(
+                    "Keywords (comma-separated — used by regex keyword scanner)",
+                    value=kws_default,
+                    placeholder="ai, machine learning, monitoring, adversarial",
+                    height=100,
+                    key="mc_new_ctrl_kws",
+                    help="Option 1: Manually type keywords. Option 2: Click Auto-Generate above. Option 3: Leave empty — semantic similarity will still try to match."
+                )
+
+                st.caption(
+                    "💡 **Tip:** Option 3 (semantic similarity) always runs as a safety net, "
+                    "even if no keywords are provided."
+                )
+
+                if st.button("💾 Save Control", key="mc_save_btn",
+                             type="primary", use_container_width=True):
+                    if not new_ctrl_id.strip() or not new_ctrl_name.strip():
+                        st.error("❌ Control ID and Control Name are required.")
+                    else:
+                        kw_list = [k.strip() for k in new_ctrl_kws.split(",") if k.strip()]
+                        was_autogen = bool(st.session_state.get("mc_autogen_kws"))
+                        try:
+                            new_id = add_custom_control(
+                                control_id=new_ctrl_id.strip(),
+                                control_name=new_ctrl_name.strip(),
+                                category=new_ctrl_cat,
+                                keywords=kw_list,
+                                description=new_ctrl_desc.strip(),
+                                auto_generated=was_autogen,
+                                created_by=st.session_state.get("username", "auditor")
+                            )
+                            st.success(f"✅ Control saved (DB ID: {new_id}). It will be active on the next document upload.")
+                            # Clear autogen cache
+                            st.session_state.pop("mc_autogen_kws", None)
+                            st.rerun()
+                        except Exception as save_err:
+                            st.error(f"❌ Failed to save: {save_err}")
+
+            # ─ TAB 3: MANAGE / DEACTIVATE ────────────────────────────────────
+            with ctrl_tab3:
+                all_rows = get_all_custom_controls(active_only=False)
+                if not all_rows:
+                    st.info("No custom controls yet. Add one in the 'Add New Control' tab.")
+                else:
+                    st.markdown("Toggle or permanently delete your custom controls below.")
+                    for row in all_rows:
+                        with st.expander(
+                            f"{'\ud83d\udfe2' if row['is_active'] else '\ud83d\udd34'} [{row['control_id']}] {row['control_name']} — {row['category']}"
+                        ):
+                            st.markdown(f"**Keywords:** {', '.join(row['keywords']) or 'None (semantic fallback only)'}")
+                            st.markdown(f"**Description:** {row['description'] or '—'}")
+                            st.markdown(f"**Added by:** {row['created_by']} on {row['created_at'][:10]}")
+                            st.markdown(f"**Keywords type:** {'Auto-generated ✨' if row['auto_generated'] else 'Manual ✏️'}")
+
+                            ec1, ec2, ec3 = st.columns(3)
+                            with ec1:
+                                lbl = "🔴 Deactivate" if row["is_active"] else "🟢 Reactivate"
+                                if st.button(lbl, key=f"mc_toggle_{row['id']}", use_container_width=True):
+                                    update_custom_control(row["id"], is_active=not row["is_active"])
+                                    st.toast(f"Control {'deactivated' if row['is_active'] else 'reactivated'}.")
+                                    st.rerun()
+                            with ec2:
+                                new_kw_str = st.text_input(
+                                    "Update keywords",
+                                    value=", ".join(row["keywords"]),
+                                    key=f"mc_kw_edit_{row['id']}",
+                                    label_visibility="collapsed",
+                                    placeholder="Update keywords..."
+                                )
+                                if st.button("💾 Save Keywords", key=f"mc_save_kw_{row['id']}",
+                                             use_container_width=True):
+                                    new_kws = [k.strip() for k in new_kw_str.split(",") if k.strip()]
+                                    update_custom_control(row["id"], keywords=new_kws)
+                                    st.toast("✅ Keywords updated.")
+                                    st.rerun()
+                            with ec3:
+                                if st.button("🗑️ Delete", key=f"mc_delete_{row['id']}",
+                                             use_container_width=True):
+                                    delete_custom_control(row["id"], soft=False)
+                                    st.toast("🗑️ Control permanently deleted.")
+                                    st.rerun()
 
 
 st.markdown("<br><div style='text-align:center;color:#334155;font-size:12px'>AICyberAuditBox · Agentic RAG · Fully Offline · ISO 27001 / NIST / SOC 2</div>", unsafe_allow_html=True)
