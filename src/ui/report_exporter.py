@@ -977,9 +977,18 @@ from fpdf.enums import XPos, YPos
 from src.core.pii_redactor import redact_pii
 
 def export_docx_report(session_title, findings, resolved_list, status, comments=""):
-    if "VAPT" in session_title.upper() or "VULNERABILITY" in session_title.upper():
+    import streamlit as st
+    st_std = st.session_state.get("selected_standard", "") if "selected_standard" in dir(st) and hasattr(st, "session_state") else ""
+    is_vapt = (
+        "VAPT" in str(session_title).upper()
+        or "VULNERABILITY" in str(session_title).upper()
+        or "VAPT" in str(st_std).upper()
+        or any("VAPT" in str(f.get("control_id", "")).upper() or "VAPT" in str(f.get("control", "")).upper() for f in (findings or []))
+    )
+    if is_vapt:
         return _export_vapt_docx(session_title, findings, resolved_list, status, comments)
     doc = Document()
+
     
     # Margins
     for section in doc.sections:
@@ -1397,9 +1406,21 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
 
 
 def export_pdf_report(session_title, findings, resolved_list, status, comments=""):
-    if "VAPT" in session_title.upper() or "VULNERABILITY" in session_title.upper():
+    try:
+        import streamlit as st
+        st_std = st.session_state.get("selected_standard", "")
+    except Exception:
+        st_std = ""
+    is_vapt = (
+        "VAPT" in str(session_title).upper()
+        or "VULNERABILITY" in str(session_title).upper()
+        or "VAPT" in str(st_std).upper()
+        or any("VAPT" in str(f.get("control_id", "")).upper() or "VAPT" in str(f.get("control", "")).upper() for f in (findings or []))
+    )
+    if is_vapt:
         return _export_vapt_pdf(session_title, findings, resolved_list, status, comments)
     from fpdf.fonts import FontFace
+
 
     def clean_text(val):
         if not val:
