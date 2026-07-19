@@ -27,7 +27,8 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
             "prompt": prompt,
             "temperature": temperature,
             "stream": False,
-            "n_predict": 1024 if format == "json" else 4096,
+            "n_predict": 1024 if format == "json" else -1,
+
         }
         if format == "json":
             payload["response_format"] = {"type": "json_object"}

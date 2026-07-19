@@ -322,8 +322,9 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
     is_12b = any("12b" in m.lower() for m in [ollama_model])
     if backend in ("llama.cpp", "llamacpp"):
-        TARGET_CONTEXT_TOKENS = 1800
-        HARD_MAX_CONTEXT_TOKENS = 2200
+        TARGET_CONTEXT_TOKENS = 1200
+        HARD_MAX_CONTEXT_TOKENS = 1500
+
     else:
         TARGET_CONTEXT_TOKENS = 2500 if is_12b else 4000
         HARD_MAX_CONTEXT_TOKENS = 3000 if is_12b else 5000
