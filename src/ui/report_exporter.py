@@ -282,7 +282,8 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     high_cnt = sum(1 for f in active_findings if "high" in str(f.get("severity", "")).lower() and (f.get("severity_score", 0) or 0) < 9.0)
     medium_cnt = sum(1 for f in active_findings if "medium" in str(f.get("severity", "")).lower())
     low_cnt = sum(1 for f in active_findings if "low" in str(f.get("severity", "")).lower())
-    total_cnt = len(active_findings)
+    total_cnt = critical_cnt + high_cnt + medium_cnt + low_cnt
+
     
     pdf.set_font("Helvetica", "", 9.5)
     pdf.set_text_color(51, 65, 85)
@@ -795,7 +796,8 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
     high_cnt = sum(1 for f in active_findings if "high" in str(f.get("severity", "")).lower() and (f.get("severity_score", 0) or 0) < 9.0)
     medium_cnt = sum(1 for f in active_findings if "medium" in str(f.get("severity", "")).lower())
     low_cnt = sum(1 for f in active_findings if "low" in str(f.get("severity", "")).lower())
-    total_cnt = len(active_findings)
+    total_cnt = critical_cnt + high_cnt + medium_cnt + low_cnt
+
     
     doc.add_paragraph(f"Based on the assessment, {total_cnt} vulnerabilities have been found in the target scope network which are categorized as follows:")
     
