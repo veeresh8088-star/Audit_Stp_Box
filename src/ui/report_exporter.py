@@ -72,13 +72,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_margins(15, 16, 15)
     
     hdr_blue = FontFace(emphasis="B", color=(255, 255, 255), fill_color=TUV_BLUE)
-    lbl_style = FontFace(emphasis="B", fill_color=(241, 245, 249))
+    lbl_style = FontFace(emphasis="B", color=(15, 23, 42), fill_color=(241, 245, 249))
+    body_style = FontFace(emphasis="", color=(51, 65, 85), fill_color=(255, 255, 255))
 
     def draw_banner(title_text):
         pdf.set_fill_color(*TUV_BLUE)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("Helvetica", "B", 12)
         pdf.cell(0, 8, clean_text(f"  {title_text}"), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.set_fill_color(255, 255, 255)
         pdf.ln(3)
 
     # ── PAGE 1: COVER PAGE ──────────────────────────────────────────────────
@@ -163,7 +166,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         for row in version_control_data:
             r = table.row()
             r.cell(row[0], style=lbl_style)
-            r.cell(row[1])
+            r.cell(row[1], style=body_style)
 
     pdf.ln(5)
     draw_banner("DOCUMENT SUBMISSION DETAILS")
@@ -182,7 +185,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         for row in submission_data:
             r = table.row()
             r.cell(row[0], style=lbl_style)
-            r.cell(row[1])
+            r.cell(row[1], style=body_style)
 
     pdf.ln(5)
     draw_banner("REVISION HISTORY")
@@ -200,13 +203,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         ]
         for r_no, r_dt, r_ver, r_desc in revs:
             r = table.row()
-            r.cell(r_no)
-            r.cell(r_dt)
-            r.cell(r_ver)
-            r.cell(r_desc)
+            r.cell(r_no, style=body_style)
+            r.cell(r_dt, style=body_style)
+            r.cell(r_ver, style=body_style)
+            r.cell(r_desc, style=body_style)
 
     pdf.ln(5)
     pdf.set_font("Helvetica", "B", 9)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 5, "All rights reserved.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 8)
     pdf.set_text_color(*BODY_TEXT)
@@ -247,6 +251,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     ]
 
     pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_text_color(*BODY_TEXT)
     for title, p_num in toc_items:
         pdf.cell(160, 5.5, clean_text(title))
         pdf.cell(20, 5.5, clean_text(p_num), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -256,6 +261,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     draw_banner("1 TÜV SÜD PENETRATION TEST METHODOLOGY")
 
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "1.2 Standards-Based Testing and Reporting", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*BODY_TEXT)
@@ -300,7 +306,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         for c_title, c_desc in chars:
             r = table.row()
             r.cell(c_title, style=lbl_style)
-            r.cell(c_desc)
+            r.cell(c_desc, style=body_style)
 
     pdf.ln(4)
     # Severity Range Table
@@ -319,13 +325,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         ]
         for r_rng, r_rt, r_dsc in ranges:
             r = table.row()
-            r.cell(r_rng)
-            r.cell(r_rt)
-            r.cell(r_dsc)
+            r.cell(r_rng, style=body_style)
+            r.cell(r_rt, style=body_style)
+            r.cell(r_dsc, style=body_style)
 
     # ── PAGE 5: HOW TO USE THIS DOCUMENT ─────────────────────────────────────
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "1.4 How to Use This Document", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*BODY_TEXT)
@@ -352,13 +359,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         for d_lbl, d_cnt in desc_rows:
             r = table.row()
             r.cell(d_lbl, style=lbl_style)
-            r.cell(d_cnt)
+            r.cell(d_cnt, style=body_style)
 
     # ── PAGE 6: EXECUTIVE SUMMARY & TARGET SCOPE ─────────────────────────────
     pdf.add_page()
     draw_banner("2 EXECUTIVE SUMMARY")
 
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "2.2 Analysis Overview", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*BODY_TEXT)
@@ -380,16 +388,19 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     with pdf.table(col_widths=(60, 60, 60), text_align="C") as table:
         for i in range(0, len(ip_list), 3):
             r = table.row()
-            r.cell(ip_list[i])
-            r.cell(ip_list[i+1] if i+1 < len(ip_list) else "")
-            r.cell(ip_list[i+2] if i+2 < len(ip_list) else "")
+            r.cell(ip_list[i], style=body_style)
+            r.cell(ip_list[i+1] if i+1 < len(ip_list) else "", style=body_style)
+            r.cell(ip_list[i+2] if i+2 < len(ip_list) else "", style=body_style)
 
     pdf.ln(4)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_text_color(*BODY_TEXT)
     pdf.cell(0, 5, clean_text(f"Assessment Date: 24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # ── PAGE 7: SUMMARY OF FINDINGS & TABULAR SUMMARY ──────────────────────
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "2.3 Summary of Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
     active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
@@ -405,6 +416,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.ln(3)
 
     pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 5, "2.3.2 Tabular Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
@@ -423,15 +435,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         h.cell("Total Findings", style=hdr_tot)
 
         r = table.row()
-        r.cell(str(critical_cnt))
-        r.cell(str(high_cnt))
-        r.cell(str(medium_cnt))
-        r.cell(str(low_cnt if low_cnt else 2))
-        r.cell(str(total_cnt if total_cnt else 2))
+        r.cell(str(critical_cnt), style=body_style)
+        r.cell(str(high_cnt), style=body_style)
+        r.cell(str(medium_cnt), style=body_style)
+        r.cell(str(low_cnt if low_cnt else 2), style=body_style)
+        r.cell(str(total_cnt if total_cnt else 2), style=lbl_style)
 
     # ── PAGE 8: VULNERABILITIES SUMMARY TABLE ──────────────────────────────
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "2.3.4 Vulnerabilities Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
@@ -453,19 +466,20 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             score_str = str(f.get("severity_score", f.get("score", "2.3")))
             sev_str = str(f.get("severity", f.get("sev", "LOW"))).split()[-1].upper()
             r = table.row()
-            r.cell(f"{idx}.")
-            r.cell(clean_text(title))
-            r.cell(score_str)
-            r.cell(sev_str)
+            r.cell(f"{idx}.", style=body_style)
+            r.cell(clean_text(title), style=body_style)
+            r.cell(score_str, style=body_style)
+            r.cell(sev_str, style=body_style)
 
         r_over = table.row()
-        r_over.cell("")
+        r_over.cell("", style=lbl_style)
         r_over.cell("OVERALL SCORE", style=lbl_style)
         r_over.cell("2.3", style=lbl_style)
         r_over.cell("LOW", style=lbl_style)
 
     pdf.ln(6)
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "2.4 Tactical Recommendations", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*BODY_TEXT)
@@ -478,6 +492,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     draw_banner(f"3 TECHNICAL DETAIL REPORT: {scope_type.upper()} NETWORK VULNERABILITY ASSESSMENT AND PENETRATION TESTING")
 
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "3.2 Testing Environment", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*BODY_TEXT)
@@ -485,83 +500,87 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.ln(4)
 
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "3.3 Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
     # Render Finding 3.3.1
     pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "3.3.1 SSL Cipher Block Chaining Cipher Suites Supported", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
     with pdf.table(col_widths=(45, 135), text_align="L") as table:
         r = table.row()
         r.cell("Vulnerability Description", style=lbl_style)
-        r.cell("The remote host supports the use of SSL ciphers that operate in Cipher Block Chaining (CBC) mode. These cipher suites offer additional security over Electronic Codebook (ECB) mode, but have potential to leak information if used improperly which can be vulnerable to LUCKY 13 attack.")
+        r.cell("The remote host supports the use of SSL ciphers that operate in Cipher Block Chaining (CBC) mode. These cipher suites offer additional security over Electronic Codebook (ECB) mode, but have potential to leak information if used improperly which can be vulnerable to LUCKY 13 attack.", style=body_style)
 
         r = table.row()
         r.cell("Target(s)", style=lbl_style)
-        r.cell("172.201.152.88, 13.69.211.177, 20.160.135.87, 443, 4.180.98.53, 13.74.56.242, 13.74.123.207, 20.160.135.107, 20.160.172.53, 20.234.182.170, 108.143.101.251, 3.69.213.189, 108.143.102.46, 172.201.152.88")
+        r.cell("172.201.152.88, 13.69.211.177, 20.160.135.87, 443, 4.180.98.53, 13.74.56.242, 13.74.123.207, 20.160.135.107, 20.160.172.53, 20.234.182.170, 108.143.101.251, 3.69.213.189, 108.143.102.46, 172.201.152.88", style=body_style)
 
         r = table.row()
         r.cell("Status", style=lbl_style)
-        r.cell("Detected")
+        r.cell("Detected", style=body_style)
 
         r = table.row()
         r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
-        r.cell("2.3 LOW\nExploitability Metrics: AV: Network, AC: High, AT: None, PR: None, UI: None\nSystem Impact Metrics: VC: Low, VI: None, VA: High, SC: None, SI: None, SA: None")
+        r.cell("2.3 LOW\nExploitability Metrics: AV: Network, AC: High, AT: None, PR: None, UI: None\nSystem Impact Metrics: VC: Low, VI: None, VA: High, SC: None, SI: None, SA: None", style=body_style)
 
         r = table.row()
         r.cell("Proof of Concept", style=lbl_style)
-        r.cell("Nmap ssl-enum-ciphers console scan output verified CBC ciphers enabled on port 443.\nPotentially Vulnerable to LUCKY13.")
+        r.cell("Nmap ssl-enum-ciphers console scan output verified CBC ciphers enabled on port 443.\nPotentially Vulnerable to LUCKY13.", style=body_style)
 
         r = table.row()
         r.cell("Remediation", style=lbl_style)
-        r.cell("Disable CBC-Based Cipher Suites: Remove all TLS cipher suites using CBC mode (TLS_RSA_WITH_AES_128_CBC_SHA).\nUse GCM or ChaCha20 Cipher Suites (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256).\nPrioritize Secure TLS Versions (TLS 1.2 and TLS 1.3 only).")
+        r.cell("Disable CBC-Based Cipher Suites: Remove all TLS cipher suites using CBC mode (TLS_RSA_WITH_AES_128_CBC_SHA).\nUse GCM or ChaCha20 Cipher Suites (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256).\nPrioritize Secure TLS Versions (TLS 1.2 and TLS 1.3 only).", style=body_style)
 
         r = table.row()
         r.cell("References", style=lbl_style)
-        r.cell("https://www.openssl.org/docs/manmaster/man1/ciphers.html\nhttp://www.nessus.org/u?cc4a822a\nhttps://www.openssl.org/~bodo/tls-cbc.txt")
+        r.cell("https://www.openssl.org/docs/manmaster/man1/ciphers.html\nhttp://www.nessus.org/u?cc4a822a\nhttps://www.openssl.org/~bodo/tls-cbc.txt", style=body_style)
 
     # Render Finding 3.3.2 on next page
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "3.3.2 HSTS missing from HTTP", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
     with pdf.table(col_widths=(45, 135), text_align="L") as table:
         r = table.row()
         r.cell("Vulnerability Description", style=lbl_style)
-        r.cell("The web application does not include the Strict-Transport-Security (HSTS) header in its HTTP response. HSTS forces browsers to only interact with the site over secure HTTPS connections.")
+        r.cell("The web application does not include the Strict-Transport-Security (HSTS) header in its HTTP response. HSTS forces browsers to only interact with the site over secure HTTPS connections.", style=body_style)
 
         r = table.row()
         r.cell("Target(s)", style=lbl_style)
-        r.cell("172.201.152.88, 20.160.135.87, 13.69.211.177, 13.69.213.189, 13.69.210.3, 13.69.208.120, 13.74.144.45, 108.143.102.46, 108.143.96.68")
+        r.cell("172.201.152.88, 20.160.135.87, 13.69.211.177, 13.69.213.189, 13.69.210.3, 13.69.208.120, 13.74.144.45, 108.143.102.46, 108.143.96.68", style=body_style)
 
         r = table.row()
         r.cell("Status", style=lbl_style)
-        r.cell("Detected")
+        r.cell("Detected", style=body_style)
 
         r = table.row()
         r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
-        r.cell("2.3 LOW\nExploitability Metrics: AV: Network, AC: Low, AT: None, PR: None, UI: Required\nSystem Impact Metrics: VC: Low, VI: None, VA: None, SC: None, SI: None, SA: None")
+        r.cell("2.3 LOW\nExploitability Metrics: AV: Network, AC: Low, AT: None, PR: None, UI: Required\nSystem Impact Metrics: VC: Low, VI: None, VA: None, SC: None, SI: None, SA: None", style=body_style)
 
         r = table.row()
         r.cell("Proof of Concept", style=lbl_style)
-        r.cell("curl -I -k https://172.201.152.88 verified missing Strict-Transport-Security response header.")
+        r.cell("curl -I -k https://172.201.152.88 verified missing Strict-Transport-Security response header.", style=body_style)
 
         r = table.row()
         r.cell("Remediation", style=lbl_style)
-        r.cell("1. Enable HTTP Strict Transport Security (HSTS): Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload\n2. Force HTTPS Redirects: Ensure all HTTP requests are redirected to HTTPS using 301/302 status codes.")
+        r.cell("1. Enable HTTP Strict Transport Security (HSTS): Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload\n2. Force HTTPS Redirects: Ensure all HTTP requests are redirected to HTTPS using 301/302 status codes.", style=body_style)
 
         r = table.row()
         r.cell("References", style=lbl_style)
-        r.cell("https://owasp.org/www-project-secure-headers/#strict-transport-security\nhttps://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security")
+        r.cell("https://owasp.org/www-project-secure-headers/#strict-transport-security\nhttps://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security", style=body_style)
 
     # ── PAGE 12: APPENDIX ─────────────────────────────────────────────────
     pdf.add_page()
     draw_banner("4 APPENDIX")
 
     pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, "4.1 Testing Environment: Production", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
