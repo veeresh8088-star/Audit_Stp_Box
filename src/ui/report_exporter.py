@@ -30,7 +30,6 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         submitted_to = st.session_state.get("submitted_to", "Ashish Jaiswal")
         designation = st.session_state.get("designation", "Head of India Channel Sales")
         email = st.session_state.get("client_email", "ashish.jaiswal1@motorolasolutions.com")
-        logo_path = st.session_state.get("auditor_logo_path")
     except Exception:
         auditor_lead = "Mr. Vikas Dubey"
         auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
@@ -41,7 +40,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         submitted_to = "Ashish Jaiswal"
         designation = "Head of India Channel Sales"
         email = "ashish.jaiswal1@motorolasolutions.com"
-        logo_path = None
+
+    assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "assets"))
+    logo_path = os.path.join(assets_dir, "tuv_sud_logo.png")
+    bg_path   = os.path.join(assets_dir, "cover_matrix_bg.png")
+    chart_path= os.path.join(assets_dir, "chart_risk_severity.png")
+    poc_cbc   = os.path.join(assets_dir, "poc_nmap_cbc.png")
+    poc_lk13  = os.path.join(assets_dir, "poc_lucky13.png")
+    poc_hsts  = os.path.join(assets_dir, "poc_hsts.png")
 
     scope_type = "External" if "external" in session_title.lower() else "Internal"
     doc_title = f"{scope_type} Network Vulnerability Assessment and Penetration Testing Validation Report"
@@ -49,15 +55,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     TUV_BLUE = (0, 80, 157)      # Corporate TÜV SÜD Blue #00509D
     DARK_TEXT = (15, 23, 42)
     BODY_TEXT = (51, 65, 85)
-    LIGHT_BG = (245, 247, 250)
 
     class VAPTPDF(FPDF):
         def header(self):
             if self.page_no() > 1:
+                if os.path.exists(logo_path):
+                    self.image(logo_path, x=175, y=8, w=18)
                 self.set_font("Helvetica", "", 8.5)
                 self.set_text_color(100, 116, 139)
                 self.cell(0, 5, clean_text(f"{scope_type} Network VAPT Validation Report"), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                self.ln(2)
+                self.ln(3)
 
         def footer(self):
             if self.page_no() > 1:
@@ -69,55 +76,67 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
 
     pdf = VAPTPDF()
     pdf.set_auto_page_break(auto=True, margin=18)
-    pdf.set_margins(15, 16, 15)
+    pdf.set_margins(15, 14, 15)
     
-    hdr_blue = FontFace(emphasis="B", color=(255, 255, 255), fill_color=TUV_BLUE)
-    lbl_style = FontFace(emphasis="B", color=(15, 23, 42), fill_color=(241, 245, 249))
+    hdr_blue   = FontFace(emphasis="B", color=(255, 255, 255), fill_color=TUV_BLUE)
+    lbl_style  = FontFace(emphasis="B", color=(15, 23, 42), fill_color=(241, 245, 249))
     body_style = FontFace(emphasis="", color=(51, 65, 85), fill_color=(255, 255, 255))
 
     def draw_banner(title_text):
         pdf.set_fill_color(*TUV_BLUE)
         pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, clean_text(f"  {title_text}"), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.cell(0, 7.5, clean_text(f"  {title_text}"), fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_text_color(*DARK_TEXT)
         pdf.set_fill_color(255, 255, 255)
-        pdf.ln(3)
+        pdf.ln(2.5)
 
     # ── PAGE 1: COVER PAGE ──────────────────────────────────────────────────
     pdf.add_page()
     
+    # Background matrix digital art image
+    if os.path.exists(bg_path):
+        pdf.image(bg_path, x=0, y=0, w=210, h=297)
+
     # White container box with TÜV SÜD logo & tagline at top-left
-    pdf.rect(15, 15, 80, 30)
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_fill_color(255, 255, 255)
+    pdf.rect(12, 12, 85, 34, style='F')
+    if os.path.exists(logo_path):
+        pdf.image(logo_path, x=15, y=15, w=26)
+    else:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*TUV_BLUE)
+        pdf.set_xy(16, 22)
+        pdf.cell(26, 6, "TÜV SÜD", new_x=XPos.RIGHT, new_y=YPos.TOP)
+
+    pdf.set_draw_color(180, 180, 180)
+    pdf.line(45, 15, 45, 43) # vertical divider line
+    pdf.set_font("Helvetica", "B", 8.5)
     pdf.set_text_color(*TUV_BLUE)
-    pdf.set_xy(20, 22)
-    pdf.cell(30, 6, "TÜV SÜD", new_x=XPos.RIGHT, new_y=YPos.TOP)
-    pdf.line(52, 18, 52, 42) # vertical divider line
-    pdf.set_xy(55, 20)
-    pdf.multi_cell(38, 4.5, clean_text("Add value.\nInspire trust."))
+    pdf.set_xy(48, 20)
+    pdf.multi_cell(45, 4, clean_text("Add value.\nInspire trust."))
 
     # Title & Target Client Block
-    pdf.set_y(60)
-    pdf.set_font("Helvetica", "B", 16)
+    pdf.set_y(65)
+    pdf.set_font("Helvetica", "B", 15)
     pdf.set_text_color(*TUV_BLUE)
-    pdf.multi_cell(120, 7.5, clean_text(doc_title), align="L", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(8)
+    pdf.multi_cell(120, 7, clean_text(doc_title), align="L", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(6)
 
-    pdf.set_font("Helvetica", "B", 12)
+    pdf.set_font("Helvetica", "B", 11.5)
     pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 6, clean_text(f"For:  {target_client}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(6)
 
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(71, 85, 105)
-    pdf.cell(0, 5, clean_text("Submitted By:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.cell(0, 5, clean_text("TÜV SÜD South Asia"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(8)
-    pdf.cell(0, 5, clean_text("Version v1.0"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.5, clean_text("Submitted By:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.5, clean_text("TÜV SÜD South Asia"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(6)
+    pdf.cell(0, 4.5, clean_text("Version v1.0"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # Bottom 4-Column Address Block
-    pdf.set_y(245)
+    pdf.set_y(250)
     pdf.set_draw_color(180, 180, 180)
     pdf.set_line_width(0.3)
     pdf.line(15, pdf.get_y(), 195, pdf.get_y())
@@ -127,22 +146,22 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
 
     y_addr = pdf.get_y()
     pdf.set_xy(15, y_addr)
-    pdf.multi_cell(42, 2.8, clean_text(
+    pdf.multi_cell(42, 2.7, clean_text(
         "Registered Office:\nTÜV SÜD South Asia Pvt. Ltd.\nTÜV SÜD House,\nOff Saki Vihar Road,\nSaki Naka, Andheri (East),\nMumbai - 400072, India."
     ))
 
     pdf.set_xy(60, y_addr)
-    pdf.multi_cell(42, 2.8, clean_text(
+    pdf.multi_cell(42, 2.7, clean_text(
         "Corporate Office:\nTÜV SÜD South Asia Pvt. Ltd.\nSolitaire, 4th Floor,\nITI Road, Aundh,\nPune - 411007, India."
     ))
 
     pdf.set_xy(105, y_addr)
-    pdf.multi_cell(45, 2.8, clean_text(
+    pdf.multi_cell(45, 2.7, clean_text(
         "Report Submitted by:\nTÜV SÜD South Asia Pvt. Ltd.\nTÜV SÜD House,\nOff Saki Vihar Road,\nSaki Naka, Andheri (East),\nMumbai - 400072, India."
     ))
 
     pdf.set_xy(153, y_addr)
-    pdf.multi_cell(42, 2.8, clean_text(
+    pdf.multi_cell(42, 2.7, clean_text(
         "Email: info@tuv-sud.in\nwww.tuv-sud.in\n\nTÜV SÜD South Asia"
     ))
 
@@ -161,14 +180,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         ["Effective Date", datetime.now().strftime("%d-%B-%Y")]
     ]
 
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8.5)
     with pdf.table(col_widths=(55, 125), text_align="L") as table:
         for row in version_control_data:
             r = table.row()
             r.cell(row[0], style=lbl_style)
             r.cell(row[1], style=body_style)
 
-    pdf.ln(5)
+    pdf.ln(4)
     draw_banner("DOCUMENT SUBMISSION DETAILS")
 
     submission_data = [
@@ -180,14 +199,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         ["E-mail", clean_text(email)]
     ]
 
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8.5)
     with pdf.table(col_widths=(55, 125), text_align="L") as table:
         for row in submission_data:
             r = table.row()
             r.cell(row[0], style=lbl_style)
             r.cell(row[1], style=body_style)
 
-    pdf.ln(5)
+    pdf.ln(4)
     draw_banner("REVISION HISTORY")
     with pdf.table(col_widths=(15, 35, 30, 100), text_align="L") as table:
         h = table.row()
@@ -208,13 +227,13 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             r.cell(r_ver, style=body_style)
             r.cell(r_desc, style=body_style)
 
-    pdf.ln(5)
-    pdf.set_font("Helvetica", "B", 9)
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 8.5)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, "All rights reserved.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 8)
+    pdf.cell(0, 4.5, "All rights reserved.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 7.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4, clean_text(
+    pdf.multi_cell(0, 3.8, clean_text(
         "Any kind of publication, reproduction, duplication or recording on a storage medium or any form of distribution by printing, "
         "photocopying, microfilming or in any other way, even in part only with the prior written consent of TÜV SÜD South Asia.\n\n"
         "By TÜV SÜD South Asia no part of this publication may be published, reproduced, copied or stored in any format or by any means as a print-out of this publication.\n\n"
@@ -250,42 +269,42 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         ("5 Disclaimer", "13")
     ]
 
-    pdf.set_font("Helvetica", "", 9.5)
+    pdf.set_font("Helvetica", "", 9)
     pdf.set_text_color(*BODY_TEXT)
     for title, p_num in toc_items:
-        pdf.cell(160, 5.5, clean_text(title))
-        pdf.cell(20, 5.5, clean_text(p_num), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(160, 5, clean_text(title))
+        pdf.cell(20, 5, clean_text(p_num), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # ── PAGE 4: METHODOLOGY & CVSS V4.0 METRICS ─────────────────────────────
     pdf.add_page()
     draw_banner("1 TÜV SÜD PENETRATION TEST METHODOLOGY")
 
-    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "1.2 Standards-Based Testing and Reporting", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5.5, "1.2 Standards-Based Testing and Reporting", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, clean_text(
+    pdf.multi_cell(0, 4, clean_text(
         "Our penetration test plans are performed according to internally developed guidelines by TÜV SÜD South Asia penetration test experts. "
         "Our test cases, where possible, are grounded in publicly available standards published by organizations such as OWASP, OSSTMM, NIST, "
         "along with our experience as a penetration test team. As an extension to these test cases, additional test cases may be identified based on penetration tester experience and the attack surface of target of evaluation."
     ))
-    pdf.ln(4)
+    pdf.ln(3)
 
-    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "1.3 CVSS: Scoring Vulnerabilities", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5.5, "1.3 CVSS: Scoring Vulnerabilities", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, clean_text(
+    pdf.multi_cell(0, 4, clean_text(
         "The overarching goal of a penetration test is to identify the vulnerabilities in a target of evaluation. To assist in the prioritization of vulnerability remediation, TÜV SÜD South Asia utilizes the Common Vulnerability Scoring System (CVSS v4.0). "
         "CVSS assists in the assessment of a vulnerability's severity by providing a standard set of characteristics by which the vulnerability is scored. These scores are then used to calculate an overall severity score from 1-10; 1 being lowest and 10 being highest."
     ))
-    pdf.ln(3)
+    pdf.ln(2.5)
 
     # Characteristics Table
-    pdf.set_font("Helvetica", "", 8.5)
-    with pdf.table(col_widths=(50, 130), text_align="L") as table:
+    pdf.set_font("Helvetica", "", 8)
+    with pdf.table(col_widths=(48, 132), text_align="L") as table:
         h = table.row()
         h.cell("Characteristics", style=hdr_blue)
         h.cell("Description", style=hdr_blue)
@@ -308,9 +327,9 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             r.cell(c_title, style=lbl_style)
             r.cell(c_desc, style=body_style)
 
-    pdf.ln(4)
-    # Severity Range Table
-    with pdf.table(col_widths=(30, 30, 120), text_align="L") as table:
+    pdf.ln(3)
+    # Severity Range Table (Starts on page 4)
+    with pdf.table(col_widths=(28, 28, 124), text_align="L") as table:
         h = table.row()
         h.cell("Range", style=hdr_blue)
         h.cell("Rating", style=hdr_blue)
@@ -320,8 +339,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             ("9.0 - 10.0", "Critical", "These vulnerabilities should be reviewed immediately. Exploit exists that could severely impact CAV."),
             ("7.0 - 8.9", "High", "Needs short-term assessment. Exploitable with low/medium complexity with moderate to high impact."),
             ("4.0 - 6.9", "Medium", "Evaluated for business impact; exploitable with increased effort or lower confidentiality impact."),
-            ("0.1 - 3.9", "Low", "Exploitation likely results in little negative impact to confidentiality, integrity, or availability."),
-            ("0.0", "Info", "Informational findings with zero direct impact on confidentiality, integrity, or availability.")
+            ("0.1 - 3.9", "Low", "Exploitation likely results in little negative impact to confidentiality, integrity, or availability.")
         ]
         for r_rng, r_rt, r_dsc in ranges:
             r = table.row()
@@ -331,12 +349,20 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
 
     # ── PAGE 5: HOW TO USE THIS DOCUMENT ─────────────────────────────────────
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 10.5)
+    # Finish 0.0 Info row at top of page 5
+    with pdf.table(col_widths=(28, 28, 124), text_align="L") as table:
+        r = table.row()
+        r.cell("0.0", style=body_style)
+        r.cell("Info", style=body_style)
+        r.cell("Informational findings with zero direct impact on confidentiality, integrity, or availability.", style=body_style)
+
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "1.4 How to Use This Document", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5.5, "1.4 How to Use This Document", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, clean_text(
+    pdf.multi_cell(0, 4, clean_text(
         "The vulnerabilities reported in this document provide a view of the target of evaluation's security posture at the time of testing. "
         "The report is broken up into three major sections: an executive summary, a technical detail report, and an appendix."
     ))
@@ -365,12 +391,12 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.add_page()
     draw_banner("2 EXECUTIVE SUMMARY")
 
-    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "2.2 Analysis Overview", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5.5, "2.2 Analysis Overview", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, clean_text(
+    pdf.multi_cell(0, 4, clean_text(
         "The objective of vulnerability assessment is to determine security vulnerabilities in the systems that can be exploited by Internal entities. "
         "The tests were carried out assuming the identity of an attacker with malicious intent. Scope targets:"
     ))
@@ -384,7 +410,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         "52.169.16.121", "13.94.107.40", "51.124.236.151",
         "40.113.64.127", "13.74.56.244", "52.164.122.235"
     ]
-    pdf.set_font("Helvetica", "", 8.5)
+    pdf.set_font("Helvetica", "", 8)
     with pdf.table(col_widths=(60, 60, 60), text_align="C") as table:
         for i in range(0, len(ip_list), 3):
             r = table.row()
@@ -393,15 +419,15 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             r.cell(ip_list[i+2] if i+2 < len(ip_list) else "", style=body_style)
 
     pdf.ln(4)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.cell(0, 5, clean_text(f"Assessment Date: 24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.5, clean_text(f"Assessment Date: 24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    # ── PAGE 7: SUMMARY OF FINDINGS & TABULAR SUMMARY ──────────────────────
+    # ── PAGE 7: SUMMARY OF FINDINGS & GRAPHICAL BAR CHART ─────────────────
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "2.3 Summary of Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5.5, "2.3 Summary of Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
     active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
     critical_cnt = sum(1 for f in active_findings if "critical" in str(f.get("severity", "")).lower() or (f.get("severity_score", 0) or 0) >= 9.0)
@@ -410,15 +436,15 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     low_cnt = sum(1 for f in active_findings if "low" in str(f.get("severity", "")).lower() or (f.get("severity_score", 0) or 0) <= 3.9)
     total_cnt = len(active_findings) if active_findings else 2
 
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.cell(0, 5, clean_text(f"2.3.1 Findings Overview: Based on assessment, {total_cnt} vulnerabilities have been found in scope:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(3)
+    pdf.cell(0, 4.5, clean_text(f"2.3.1 Findings Overview: Based on assessment, {total_cnt} vulnerabilities have been found in scope:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2.5)
 
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font("Helvetica", "B", 9.5)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, "2.3.2 Tabular Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
+    pdf.cell(0, 4.5, "2.3.2 Tabular Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1.5)
 
     hdr_crit = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(192, 0, 0))
     hdr_high = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(255, 0, 0))
@@ -441,11 +467,20 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         r.cell(str(low_cnt if low_cnt else 2), style=body_style)
         r.cell(str(total_cnt if total_cnt else 2), style=lbl_style)
 
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.cell(0, 4.5, "2.3.3 Graphical Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+
+    # Embed Risk Severity Bar Chart image
+    if os.path.exists(chart_path):
+        pdf.image(chart_path, x=20, y=pdf.get_y(), w=170)
+
     # ── PAGE 8: VULNERABILITIES SUMMARY TABLE ──────────────────────────────
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "2.3.4 Vulnerabilities Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5.5, "2.3.4 Vulnerabilities Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
     with pdf.table(col_widths=(20, 100, 30, 30), text_align="L") as table:
@@ -477,37 +512,37 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         r_over.cell("2.3", style=lbl_style)
         r_over.cell("LOW", style=lbl_style)
 
-    pdf.ln(6)
-    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.ln(5)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "2.4 Tactical Recommendations", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 5.5, "2.4 Tactical Recommendations", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, clean_text(
+    pdf.multi_cell(0, 4, clean_text(
         "It is recommended to follow the guidelines suggested by OWASP, OSSTMM and NIST. It is recommended to implement secure SDLC while developing the application."
     ))
 
-    # ── PAGE 9, 10, 11: TECHNICAL DETAIL REPORT ─────────────────────────────
+    # ── PAGE 9: TECHNICAL DETAIL REPORT: FINDING 3.3.1 (CBC) ────────────────
     pdf.add_page()
     draw_banner(f"3 TECHNICAL DETAIL REPORT: {scope_type.upper()} NETWORK VULNERABILITY ASSESSMENT AND PENETRATION TESTING")
 
-    pdf.set_font("Helvetica", "B", 10.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "3.2 Testing Environment", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*BODY_TEXT)
-    pdf.cell(0, 5, "For details concerning the testing environment, please refer to Appendix 4.1.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(4)
-
-    pdf.set_font("Helvetica", "B", 10.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "3.3 Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
-
-    # Render Finding 3.3.1
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "3.3.1 SSL Cipher Block Chaining Cipher Suites Supported", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5.5, "3.2 Testing Environment", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
+    pdf.set_text_color(*BODY_TEXT)
+    pdf.cell(0, 4.5, "For details concerning the testing environment, please refer to Appendix 4.1.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
+
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(0, 5.5, "3.3 Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1.5)
+
+    # Render Finding 3.3.1
+    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.set_text_color(*DARK_TEXT)
+    pdf.cell(0, 5, "3.3.1 SSL Cipher Block Chaining Cipher Suites Supported", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
     with pdf.table(col_widths=(45, 135), text_align="L") as table:
@@ -527,10 +562,24 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
         r.cell("2.3 LOW\nExploitability Metrics: AV: Network, AC: High, AT: None, PR: None, UI: None\nSystem Impact Metrics: VC: Low, VI: None, VA: High, SC: None, SI: None, SA: None", style=body_style)
 
-        r = table.row()
-        r.cell("Proof of Concept", style=lbl_style)
-        r.cell("Nmap ssl-enum-ciphers console scan output verified CBC ciphers enabled on port 443.\nPotentially Vulnerable to LUCKY13.", style=body_style)
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 4.5, "Proof of Concept", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+    if os.path.exists(poc_cbc):
+        pdf.image(poc_cbc, x=15, y=pdf.get_y(), w=180)
 
+    # ── PAGE 10: LUCKY13 & REMEDIATION (3.3.1) ──────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 4.5, "Potentially Vulnerable to LUCKY13", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+    if os.path.exists(poc_lk13):
+        pdf.image(poc_lk13, x=15, y=pdf.get_y(), w=180)
+        pdf.set_y(pdf.get_y() + 85)
+
+    pdf.ln(3)
+    with pdf.table(col_widths=(45, 135), text_align="L") as table:
         r = table.row()
         r.cell("Remediation", style=lbl_style)
         r.cell("Disable CBC-Based Cipher Suites: Remove all TLS cipher suites using CBC mode (TLS_RSA_WITH_AES_128_CBC_SHA).\nUse GCM or ChaCha20 Cipher Suites (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256).\nPrioritize Secure TLS Versions (TLS 1.2 and TLS 1.3 only).", style=body_style)
@@ -539,11 +588,11 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         r.cell("References", style=lbl_style)
         r.cell("https://www.openssl.org/docs/manmaster/man1/ciphers.html\nhttp://www.nessus.org/u?cc4a822a\nhttps://www.openssl.org/~bodo/tls-cbc.txt", style=body_style)
 
-    # Render Finding 3.3.2 on next page
+    # ── PAGE 11: TECHNICAL DETAIL REPORT: FINDING 3.3.2 (HSTS) ────────────────
     pdf.add_page()
-    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_font("Helvetica", "B", 9.5)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "3.3.2 HSTS missing from HTTP", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, "3.3.2 HSTS missing from HTTP", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
     with pdf.table(col_widths=(45, 135), text_align="L") as table:
@@ -563,10 +612,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
         r.cell("2.3 LOW\nExploitability Metrics: AV: Network, AC: Low, AT: None, PR: None, UI: Required\nSystem Impact Metrics: VC: Low, VI: None, VA: None, SC: None, SI: None, SA: None", style=body_style)
 
-        r = table.row()
-        r.cell("Proof of Concept", style=lbl_style)
-        r.cell("curl -I -k https://172.201.152.88 verified missing Strict-Transport-Security response header.", style=body_style)
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 4.5, "Proof of Concept", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+    if os.path.exists(poc_hsts):
+        pdf.image(poc_hsts, x=15, y=pdf.get_y(), w=180)
+        pdf.set_y(pdf.get_y() + 65)
 
+    pdf.ln(3)
+    with pdf.table(col_widths=(45, 135), text_align="L") as table:
         r = table.row()
         r.cell("Remediation", style=lbl_style)
         r.cell("1. Enable HTTP Strict Transport Security (HSTS): Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload\n2. Force HTTPS Redirects: Ensure all HTTP requests are redirected to HTTPS using 301/302 status codes.", style=body_style)
@@ -579,40 +634,40 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.add_page()
     draw_banner("4 APPENDIX")
 
-    pdf.set_font("Helvetica", "B", 10.5)
+    pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 6, "4.1 Testing Environment: Production", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5.5, "4.1 Testing Environment: Production", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
 
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.cell(0, 5, "4.1.1 Testing Environment Conditions", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(0, 4.5, "4.1.1 Testing Environment Conditions", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, clean_text("The test was carried out as Black Box. No difficulties were faced during testing. Industrial Standard for Security were followed, such as OWASP, OSSTMM and NIST."))
+    pdf.multi_cell(0, 4, clean_text("The test was carried out as Black Box. No difficulties were faced during testing. Industrial Standard for Security were followed, such as OWASP, OSSTMM and NIST."))
     pdf.ln(3)
 
-    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, "4.1.2 Tools Used", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 4.5, "4.1.2 Tools Used", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, "Nessus\nNmap\nOpenSSL")
+    pdf.multi_cell(0, 4, "Nessus\nNmap\nOpenSSL")
     pdf.ln(3)
 
-    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.set_font("Helvetica", "B", 9)
     pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, "4.1.3 Provided Documentation", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 4.5, "4.1.3 Provided Documentation", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, "IP addresses provided for testing.\nVPN access\n\nNote: For the given set of external IPs, only port 443 (HTTPS) was found open and no other issues were found.")
+    pdf.multi_cell(0, 4, "IP addresses provided for testing.\nVPN access\n\nNote: For the given set of external IPs, only port 443 (HTTPS) was found open and no other issues were found.")
 
     # ── PAGE 13: DISCLAIMER ───────────────────────────────────────────────
     pdf.add_page()
     draw_banner("5 DISCLAIMER")
 
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, clean_text(
+    pdf.multi_cell(0, 4, clean_text(
         "The accuracy of the information and data provided in this report is subject to the information available to TÜV SÜD testing team during the engagement. "
         "The team relies on the accuracy and completeness of the information provided by the client and does not assume any responsibility for any inaccuracies or omissions.\n\n"
         "The assessment performed by TÜV SÜD was limited to the scope outlined in the engagement agreement between TÜV SÜD and the client. "
