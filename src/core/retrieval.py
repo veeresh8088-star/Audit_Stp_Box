@@ -253,6 +253,7 @@ def save_document_chunks(filename, text):
                         ".pdf": "pdf",   ".docx": "docx", ".doc": "docx",
                         ".txt": "txt",   ".xlsx": "xlsx",  ".xls": "xlsx",
                         ".csv": "csv",   ".pptx": "pptx",  ".ppt": "pptx",
+                        ".html": "html", ".htm": "html",
                         ".png": "image", ".jpg": "image",   ".jpeg": "image"
                     }
                     src_type = SUPPORTED_TYPES_LOCAL.get(ext, ext.lstrip(".") if ext else "txt")
@@ -373,6 +374,7 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
         ".pdf": "pdf",   ".docx": "docx", ".doc": "docx",
         ".txt": "txt",   ".xlsx": "xlsx",  ".xls": "xlsx",
         ".csv": "csv",   ".pptx": "pptx",  ".ppt": "pptx",
+        ".html": "html", ".htm": "html",
         ".png": "image", ".jpg": "image",   ".jpeg": "image"
     }
     type_counts = {}

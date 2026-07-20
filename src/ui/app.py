@@ -1966,7 +1966,7 @@ def extract_text(f):
         import zipfile, io as _io
         SUPPORTED_EXTS = (
             ".pdf", ".docx", ".doc", ".xlsx", ".xls",
-            ".csv", ".pptx", ".ppt", ".txt",
+            ".csv", ".pptx", ".ppt", ".txt", ".html", ".htm",
             ".png", ".jpg", ".jpeg"
         )
         combined_texts = []
@@ -2356,6 +2356,55 @@ def extract_text(f):
             return txt_content
         except Exception as e:
             return f"[Error parsing text file {f.name}: {e}]"
+
+    elif name_lower.endswith((".html", ".htm")):
+        try:
+            if hasattr(f, "seek"):
+                f.seek(0)
+            html_bytes = f.read()
+            if hasattr(f, "seek"):
+                f.seek(0)
+            html_str = html_bytes.decode("utf-8", errors="ignore")
+            
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html_str, "html.parser")
+            
+            for script in soup(["script", "style", "head", "meta", "link", "svg"]):
+                script.decompose()
+                
+            paragraphs_data = []
+            current_section = "HTML Content"
+            
+            for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "tr", "li"]):
+                if element.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
+                    heading_text = element.get_text(strip=True)
+                    if heading_text:
+                        current_section = heading_text
+                        paragraphs_data.append((heading_text, current_section))
+                elif element.name == "tr":
+                    cells = [td.get_text(strip=True) for td in element.find_all(["th", "td"]) if td.get_text(strip=True)]
+                    if cells:
+                        row_str = " | ".join(cells)
+                        paragraphs_data.append((row_str, current_section))
+                else:
+                    text = element.get_text(strip=True)
+                    if text and len(text.split()) >= 3 and not element.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "tr", "p", "div", "li"]):
+                        paragraphs_data.append((text, current_section))
+                        
+            html_fname = getattr(f, "name", "vapt_report.html")
+            chunks = chunk_paragraphs(paragraphs_data, target=1000, overlap=200)
+            html_chunks = []
+            for chunk_content, chunk_section, _, _ in chunks:
+                html_chunks.append((chunk_content, {
+                    "source_file": html_fname,
+                    "source_type": "html",
+                    "section_heading": chunk_section,
+                    "chunk_id": ""
+                }))
+            _ingested_chunks_cache[f.name] = html_chunks
+            return "\n\n".join([txt for txt, _ in paragraphs_data])
+        except Exception as e:
+            return f"[Error parsing HTML file {f.name}: {e}]"
 
     else:
         try:
@@ -4967,7 +5016,7 @@ with st.sidebar:
             
             uploaded = st.file_uploader(
                 "Upload auditor reference documents",
-                type=["pdf","docx","doc","xlsx","xls","csv","pptx","ppt","txt","png","jpg","jpeg","zip"],
+                type=["pdf","docx","doc","xlsx","xls","csv","pptx","ppt","txt","html","htm","png","jpg","jpeg","zip"],
                 accept_multiple_files=True,
                 key=f"auditor_sidebar_file_uploader_widget_{st.session_state.active_chat_id}"
             )
@@ -7442,7 +7491,7 @@ with _main_wrap:
                 
                 uploaded_files = st.file_uploader(
                     "Upload files",
-                    type=["pdf","docx","doc","xlsx","xls","csv","pptx","ppt","txt","png","jpg","jpeg","zip"],
+                    type=["pdf","docx","doc","xlsx","xls","csv","pptx","ppt","txt","html","htm","png","jpg","jpeg","zip"],
                     accept_multiple_files=True,
                     label_visibility="collapsed",
                     key=f"auditee_file_uploader_widget_{st.session_state.active_chat_id}"
