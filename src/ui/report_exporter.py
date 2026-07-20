@@ -402,14 +402,21 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     ))
     pdf.ln(3)
 
-    # Scope IPs Table (3 columns)
-    ip_list = [
+    # Scope IPs Table (3 columns - dynamic)
+    try:
+        import streamlit as st
+        dynamic_ips = st.session_state.get("target_ips") or st.session_state.get("scoped_ips")
+    except Exception:
+        dynamic_ips = None
+
+    default_ips = [
         "40.113.64.39", "20.16.45.35", "51.124.236.137",
         "40.113.70.57", "51.124.236.134", "20.160.172.53",
         "13.79.32.252", "20.166.55.139", "20.224.131.202",
         "52.169.16.121", "13.94.107.40", "51.124.236.151",
         "40.113.64.127", "13.74.56.244", "52.164.122.235"
     ]
+    ip_list = dynamic_ips if dynamic_ips else default_ips
     pdf.set_font("Helvetica", "", 8)
     with pdf.table(col_widths=(60, 60, 60), text_align="C") as table:
         for i in range(0, len(ip_list), 3):
@@ -522,7 +529,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         "It is recommended to follow the guidelines suggested by OWASP, OSSTMM and NIST. It is recommended to implement secure SDLC while developing the application."
     ))
 
-    # ── PAGE 9: TECHNICAL DETAIL REPORT: FINDING 3.3.1 (CBC) ────────────────
+    # ── PAGE 9+, TECHNICAL DETAIL REPORT: DYNAMIC FINDINGS ──────────────────
     pdf.add_page()
     draw_banner(f"3 TECHNICAL DETAIL REPORT: {scope_type.upper()} NETWORK VULNERABILITY ASSESSMENT AND PENETRATION TESTING")
 
@@ -539,96 +546,100 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.cell(0, 5.5, "3.3 Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1.5)
 
-    # Render Finding 3.3.1
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, "3.3.1 SSL Cipher Block Chaining Cipher Suites Supported", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(1)
+    default_findings_detail = [
+        {
+            "control": "SSL Cipher Block Chaining Cipher Suites Supported",
+            "control_id": "172.201.152.88, 13.69.211.177, 20.160.135.87, 443, 4.180.98.53, 13.74.56.242",
+            "finding": "The remote host supports the use of SSL ciphers that operate in Cipher Block Chaining (CBC) mode. These cipher suites offer additional security over Electronic Codebook (ECB) mode, but have potential to leak information if used improperly which can be vulnerable to LUCKY 13 attack.",
+            "status": "Detected",
+            "severity_score": "2.3",
+            "severity": "LOW",
+            "metrics_text": "2.3 LOW\nExploitability Metrics: AV: Network, AC: High, AT: None, PR: None, UI: None\nSystem Impact Metrics: VC: Low, VI: None, VA: High, SC: None, SI: None, SA: None",
+            "evidence_quote": "Nmap ssl-enum-ciphers console scan output verified CBC ciphers enabled on port 443.\nPotentially Vulnerable to LUCKY13.",
+            "recommendation": "Disable CBC-Based Cipher Suites: Remove all TLS cipher suites using CBC mode (TLS_RSA_WITH_AES_128_CBC_SHA).\nUse GCM or ChaCha20 Cipher Suites (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256).\nPrioritize Secure TLS Versions (TLS 1.2 and TLS 1.3 only).",
+            "references": "https://www.openssl.org/docs/manmaster/man1/ciphers.html\nhttp://www.nessus.org/u?cc4a822a\nhttps://www.openssl.org/~bodo/tls-cbc.txt",
+            "poc_image": poc_cbc,
+            "extra_image": poc_lk13
+        },
+        {
+            "control": "HSTS missing from HTTP",
+            "control_id": "172.201.152.88, 20.160.135.87, 13.69.211.177, 13.69.213.189, 13.69.210.3",
+            "finding": "The web application does not include the Strict-Transport-Security (HSTS) header in its HTTP response. HSTS forces browsers to only interact with the site over secure HTTPS connections.",
+            "status": "Detected",
+            "severity_score": "2.3",
+            "severity": "LOW",
+            "metrics_text": "2.3 LOW\nExploitability Metrics: AV: Network, AC: Low, AT: None, PR: None, UI: Required\nSystem Impact Metrics: VC: Low, VI: None, VA: None, SC: None, SI: None, SA: None",
+            "evidence_quote": "curl -I -k https://172.201.152.88 verified missing Strict-Transport-Security response header.",
+            "recommendation": "1. Enable HTTP Strict Transport Security (HSTS): Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload\n2. Force HTTPS Redirects: Ensure all HTTP requests are redirected to HTTPS using 301/302 status codes.",
+            "references": "https://owasp.org/www-project-secure-headers/#strict-transport-security\nhttps://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security",
+            "poc_image": poc_hsts,
+            "extra_image": None
+        }
+    ]
 
-    with pdf.table(col_widths=(45, 135), text_align="L") as table:
-        r = table.row()
-        r.cell("Vulnerability Description", style=lbl_style)
-        r.cell("The remote host supports the use of SSL ciphers that operate in Cipher Block Chaining (CBC) mode. These cipher suites offer additional security over Electronic Codebook (ECB) mode, but have potential to leak information if used improperly which can be vulnerable to LUCKY 13 attack.", style=body_style)
+    list_to_render = active_findings if active_findings else default_findings_detail
 
-        r = table.row()
-        r.cell("Target(s)", style=lbl_style)
-        r.cell("172.201.152.88, 13.69.211.177, 20.160.135.87, 443, 4.180.98.53, 13.74.56.242, 13.74.123.207, 20.160.135.107, 20.160.172.53, 20.234.182.170, 108.143.101.251, 3.69.213.189, 108.143.102.46, 172.201.152.88", style=body_style)
+    for idx, f in enumerate(list_to_render, 1):
+        if idx > 1:
+            pdf.add_page()
+            
+        vuln_title = f.get("control") or f.get("finding") or f.get("title") or f"Finding 3.3.{idx}"
+        desc = f.get("finding") or f.get("gap_description") or f.get("description") or "-"
+        target = f.get("control_id") or f.get("target") or "Scoped Network Endpoints / Systems"
+        status_str = f.get("status") or "Detected"
+        score_val = str(f.get("severity_score", f.get("score", "2.3")))
+        sev_val = str(f.get("severity", f.get("sev", "LOW"))).split()[-1].upper()
+        metrics = f.get("metrics_text") or f"{score_val} {sev_val}\nExploitability Metrics: AV: Network, AC: Low, AT: None, PR: None, UI: None\nSystem Impact Metrics: VC: Low, VI: None, VA: None, SC: None, SI: None, SA: None"
+        poc_text = f.get("evidence_quote") or f.get("evidence_snippet") or f.get("poc") or "Console / Log Audit Verification"
+        remed = f.get("recommendation") or f.get("remediation") or "Apply recommended security patches and hardening configurations."
+        ref = f.get("references") or f.get("reference") or "OWASP / OSSTMM / NIST Security Recommendations"
+        main_img = f.get("poc_image") or f.get("image_path")
+        extra_img = f.get("extra_image")
 
-        r = table.row()
-        r.cell("Status", style=lbl_style)
-        r.cell("Detected", style=body_style)
+        pdf.set_font("Helvetica", "B", 9.5)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.cell(0, 5, clean_text(f"3.3.{idx} {vuln_title}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(1)
 
-        r = table.row()
-        r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
-        r.cell("2.3 LOW\nExploitability Metrics: AV: Network, AC: High, AT: None, PR: None, UI: None\nSystem Impact Metrics: VC: Low, VI: None, VA: High, SC: None, SI: None, SA: None", style=body_style)
+        with pdf.table(col_widths=(45, 135), text_align="L") as table:
+            r = table.row()
+            r.cell("Vulnerability Description", style=lbl_style)
+            r.cell(clean_text(desc), style=body_style)
 
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(0, 4.5, "Proof of Concept", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(1)
-    if os.path.exists(poc_cbc):
-        pdf.image(poc_cbc, x=15, y=pdf.get_y(), w=180)
+            r = table.row()
+            r.cell("Target(s)", style=lbl_style)
+            r.cell(clean_text(target), style=body_style)
 
-    # ── PAGE 10: LUCKY13 & REMEDIATION (3.3.1) ──────────────────────────────
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(0, 4.5, "Potentially Vulnerable to LUCKY13", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(1)
-    if os.path.exists(poc_lk13):
-        pdf.image(poc_lk13, x=15, y=pdf.get_y(), w=180)
-        pdf.set_y(pdf.get_y() + 85)
+            r = table.row()
+            r.cell("Status", style=lbl_style)
+            r.cell(clean_text(status_str), style=body_style)
 
-    pdf.ln(3)
-    with pdf.table(col_widths=(45, 135), text_align="L") as table:
-        r = table.row()
-        r.cell("Remediation", style=lbl_style)
-        r.cell("Disable CBC-Based Cipher Suites: Remove all TLS cipher suites using CBC mode (TLS_RSA_WITH_AES_128_CBC_SHA).\nUse GCM or ChaCha20 Cipher Suites (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256).\nPrioritize Secure TLS Versions (TLS 1.2 and TLS 1.3 only).", style=body_style)
+            r = table.row()
+            r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
+            r.cell(clean_text(metrics), style=body_style)
 
-        r = table.row()
-        r.cell("References", style=lbl_style)
-        r.cell("https://www.openssl.org/docs/manmaster/man1/ciphers.html\nhttp://www.nessus.org/u?cc4a822a\nhttps://www.openssl.org/~bodo/tls-cbc.txt", style=body_style)
+            r = table.row()
+            r.cell("Proof of Concept", style=lbl_style)
+            r.cell(clean_text(poc_text), style=body_style)
 
-    # ── PAGE 11: TECHNICAL DETAIL REPORT: FINDING 3.3.2 (HSTS) ────────────────
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.cell(0, 5, "3.3.2 HSTS missing from HTTP", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(1)
+            r = table.row()
+            r.cell("Remediation", style=lbl_style)
+            r.cell(clean_text(remed), style=body_style)
 
-    with pdf.table(col_widths=(45, 135), text_align="L") as table:
-        r = table.row()
-        r.cell("Vulnerability Description", style=lbl_style)
-        r.cell("The web application does not include the Strict-Transport-Security (HSTS) header in its HTTP response. HSTS forces browsers to only interact with the site over secure HTTPS connections.", style=body_style)
+            r = table.row()
+            r.cell("References", style=lbl_style)
+            r.cell(clean_text(ref), style=body_style)
 
-        r = table.row()
-        r.cell("Target(s)", style=lbl_style)
-        r.cell("172.201.152.88, 20.160.135.87, 13.69.211.177, 13.69.213.189, 13.69.210.3, 13.69.208.120, 13.74.144.45, 108.143.102.46, 108.143.96.68", style=body_style)
+        if main_img and os.path.exists(main_img):
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.cell(0, 4, "Proof of Concept Artifact:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(1)
+            pdf.image(main_img, x=15, y=pdf.get_y(), w=175)
 
-        r = table.row()
-        r.cell("Status", style=lbl_style)
-        r.cell("Detected", style=body_style)
-
-        r = table.row()
-        r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
-        r.cell("2.3 LOW\nExploitability Metrics: AV: Network, AC: Low, AT: None, PR: None, UI: Required\nSystem Impact Metrics: VC: Low, VI: None, VA: None, SC: None, SI: None, SA: None", style=body_style)
-
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.cell(0, 4.5, "Proof of Concept", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(1)
-    if os.path.exists(poc_hsts):
-        pdf.image(poc_hsts, x=15, y=pdf.get_y(), w=180)
-        pdf.set_y(pdf.get_y() + 65)
-
-    pdf.ln(3)
-    with pdf.table(col_widths=(45, 135), text_align="L") as table:
-        r = table.row()
-        r.cell("Remediation", style=lbl_style)
-        r.cell("1. Enable HTTP Strict Transport Security (HSTS): Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload\n2. Force HTTPS Redirects: Ensure all HTTP requests are redirected to HTTPS using 301/302 status codes.", style=body_style)
-
-        r = table.row()
-        r.cell("References", style=lbl_style)
-        r.cell("https://owasp.org/www-project-secure-headers/#strict-transport-security\nhttps://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security", style=body_style)
+        if extra_img and os.path.exists(extra_img):
+            pdf.add_page()
+            pdf.image(extra_img, x=15, y=20, w=175)
 
     # ── PAGE 12: APPENDIX ─────────────────────────────────────────────────
     pdf.add_page()
