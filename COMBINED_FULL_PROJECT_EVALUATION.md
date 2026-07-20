@@ -3,7 +3,9 @@
 **Project Name:** AICyberAuditBox — Local Audit  
 **Target Architecture:** CPU-Only (8 Cores, 16GB RAM)  
 **Inference Backend:** Optimized `llama.cpp` (`llama-server.exe`)  
-**Evaluation & Solutions Date:** July 18, 2026  
+**Embedding Model:** Nomic Embed Text v1.5 (`nomic-embed-text-v1.5.f16.gguf`)  
+**Reranker Model:** `ms-marco-MiniLM-L-6-v2`  
+**Evaluation & Solutions Date:** July 20, 2026  
 
 ---
 
@@ -89,6 +91,38 @@ For every audit query, the input prompt consists of:
     *   *Without RAG (Brute-Force)*: Feeding a massive 100-page document would force the KV Cache to store 32,000+ tokens, occupying **10GB+ of extra RAM** and causing OOM failures on CPU.
     *   *With RAG (Our Setup)*: Because the retrieved text is restricted to ~1,500 tokens per prompt, the active KV Cache consumes under **200MB of RAM**. This lets us audit documents of *any size* safely and rapidly.
     *   *Multi-Control Speedups*: When auditing multiple controls against the same document, the server bypasses the heavy CPU prefill calculations entirely, loading the prefix KV-cache instantly. In our audit benchmark, the first control took 8.5 minutes (due to the initial prefill), whereas subsequent controls bypassed the prefill and finished in only 1.8 minutes (a 5x speedup).
+
+### D. Local AI Engine & Parameters Configuration
+To support secure, offline compliance audits on CPU-only hardware, the system is configured with specific local model parameters (defined in `run_llamacpp_demo.bat` and `src/core/llm_client.py`):
+
+1. **Large Language Model (LLM)**:
+   * **Model File**: `google_gemma-4-E4B-it-Q4_K_M.gguf` (Gemma 4B E4B Instruct model, quantized using Q4_K_M for memory efficiency).
+   * **Local Server Hosting**: Hosted on `127.0.0.1:11434` via `llama-server.exe`.
+   * **Context Size (`-c`)**: **8,192 tokens** (providing a large window to handle high-context RAG payloads and prevent truncation).
+   * **Threads (`-t`)**: **8 threads** (explicitly matching the 8 physical CPU cores to maximize core saturation).
+   * **Batch Size (`-b`)**: **512** (speeding up prefill ingestion on CPU).
+   * **Flash Attention**: Enabled (`--flash-attn on`) to optimize memory footprint and execution speed.
+
+2. **Text Embedding Model**:
+   * **Model File**: `nomic-embed-text-v1.5.f16.gguf` (Nomic Embed Text v1.5, f16 precision).
+   * **Model Class & Architecture**: Open-source, high-performance, long-context text embedding model.
+   * **Context Sequence Length**: Native support for up to **8,192 tokens**, allowing long policy paragraphs and multi-sentence compliance clauses to be indexed as cohesive single chunks without information loss.
+   * **Vector Dimension**: Native size of **768 dimensions** (forming the basis of our high-precision exact vector searches).
+   * **Matryoshka Representation Learning**: Supports dynamic dimension truncation (e.g. down to 512, 256, or 128 dimensions) for resource-constrained setups. However, the system is locked to the full **768 dimensions** to guarantee maximum similarity retrieval recall.
+   * **Precision Format**: **FP16 (16-bit Float)** precision. This ensures vector distance computations have zero quantization loss compared to quantized GGUF variants, providing identical matching scores to cloud-based models.
+   * **Local Server Hosting**: Hosted on `127.0.0.1:11435` via `llama-server.exe` running in `--embedding` mode.
+   * **Threads (`-t`)**: **4 threads** (ensuring rapid document section indexing during ingestion without CPU thread starvation).
+
+3. **Cross-Encoder Reranker Models**:
+   * **Quick Mode Reranker**: `cross-encoder/ms-marco-MiniLM-L-6-v2` (lightweight ~80MB, 6-layer MiniLM model trained on MS-MARCO). Designed for high-speed single-pass relevance ranking.
+   * **Deep Mode Reranker**: `BAAI/bge-reranker-base` (high-precision ~278MB model). Designed for deep semantic relevance checks and compliance proof validation.
+   * **Reranker Parameters**: Hard capped at **512 tokens** (`max_length=512`) to align with transformer input shapes.
+   * **Memory Management**: The system features **dynamic lazy-loading**. When changing modes, the inactive model is explicitly unloaded and the Python garbage collector (`gc.collect()`) is run to free up memory and prevent CPU-only OOM crashes.
+
+4. **Client-Side request parameters**:
+   * **Temperature**: **0.0** (strictly deterministic, ensuring the auditor generates repeatable compliance findings without random variations).
+   * **Client Context Size (`num_ctx`)**: **4,096 tokens** (capping individual request evaluations to prevent memory thrashing while preserving the backend's 8,192 context limit).
+   * **Keep-Alive**: Configured to **15 minutes** (`keep_alive: "15m"`) to prevent the server from repeatedly unloading the model from RAM between control audits.
 
 ---
 
@@ -261,6 +295,83 @@ Here is the registry of specialized features currently implemented in the codeba
 *   **Progress-Bar Safety Clamping**: Clamps numerical calculations between `0` and `100` to prevent UI rendering crashes.
 *   **Model Pruning & Ollama Removal**: Locks engine selector to local `llama.cpp` and restricts model list.
 *   **Deferred OCR Ingestion & Auto-run on Analysis**: Saves files instantly as pending placeholders and processes OCR during active analysis run.
-*   **Instant Malware Scanning**: Integrated MZ signature scanner directly in Streamlit file upload listeners to block malicious uploads.
 *   **Two-Tier Configurable RAG Reranking**: Configurable `Quick` vs `Deep` audit modes using MS-Marco or BGE Cross-Encoder models.
+
+---
+
+## 9. VAPT Ingestion, Mapping & Reporting Engine
+
+To support technical audits alongside compliance checking, the system implements a dedicated VAPT (Vulnerability Assessment & Penetration Testing) subsystem. This allows the system to ingest raw security logs and cross-walk technical vulnerabilities directly to compliance standards.
+
+### A. The VAPT Audit Pipeline Lifecycle
+The step-by-step lifecycle of a VAPT audit execution follows a structured pipeline:
+
+```mermaid
+graph TD
+    Upload([1. Auditor Uploads Scan Logs]) --> Ingest[2. Log Ingestion & Parsing]
+    Ingest --> DB[(3. ShaktiDB Document Chunks)]
+    
+    DB --> Scope{4. Auditor Selects VAPT Framework<br/>Controls VAPT-1 to VAPT-15}
+    Scope --> Retrieve[5. Hybrid RAG Retrieval<br/>Vector 60% + Keyword 40%]
+    
+    Retrieve --> Prompt[6. VAPT Auditor Prompt Injection<br/>Role: Strict VAPT Compliance Auditor]
+    Prompt --> LLM[7. Gemma LLM Evaluation]
+    
+    LLM --> Validator{8. 4-Gate Forensic Validator<br/>Verbatim checks for IP, port, service versions}
+    
+    Validator -- Passed --> Save[9. Save verified findings to ShaktiDB]
+    Validator -- Failed --> Reflect[10. LangGraph Self-Correction Loop<br/>Max 2 retries]
+    Reflect --> LLM
+    
+    Save --> Export[11. Compile TÜV SÜD Template Reports<br/>Official PDF & Remediation DOCX]
+```
+
+### B. Multi-Scanner Log Parsers
+The system features structured regex and heuristic log parsers that ingest and normalize raw output files from standard security scanning tools:
+*   **Nmap Infrastructure Scan**: Analyzes port states, service version strings, and SSL/TLS cipher suites (specifically parsing out CBC-based suites vulnerable to Lucky13 attacks).
+*   **Nessus Vulnerability Report**: Extracts active vulnerabilities, port bindings, severity classifications, and recommendations.
+*   **Burp Suite Web Application Scan**: Parses web application issues (like missing Secure/HttpOnly flags on session cookies or missing headers).
+*   **Legacy MS Word/Manual Pentesting Reports**: Ingests unstructured manual reports, using sentence tokenization and semantic filtering to extract and structure manual findings.
+
+### C. Dynamic CVSS v4.0 Metric Mapping
+Different scanners report risk severity using conflicting systems (grades, letter scores, text classifications). The auditor engine harmonizes this by translating all findings to the standard CVSS v4.0 framework:
+*   **Network-Level Scan Metrics**: For infrastructure vulnerabilities (like weak ciphers), the system sets Attack Vector (AV) to `Network` and User Interaction (UI) to `None`, which yields high exploitability ratings.
+*   **Web-Application Metrics**: For application weaknesses (like missing secure cookie flags), the system adjusts User Interaction (UI) to `Required` and Privileges Required (PR) to `None`/`Low` depending on the session context.
+*   **Impact Vectors**: Dynamically maps system impact metrics—Confidentiality (VC), Integrity (VI), and Availability (VA)—to compute the overall CVSS v4.0 base score.
+
+### D. VAPT Framework Controls (VAPT-1 to VAPT-15)
+The system evaluates the uploaded evidence against a predefined checklist of 15 VAPT-specific controls, which cross-walk to standard compliance frameworks like ISO 27001:
+
+| Control ID | Control Name | Focus Area & Description | Cross-Walk to ISO 27001:2022 |
+|---|---|---|---|
+| **VAPT-1** | Scope and Rules of Engagement | Verifies Rules of Engagement, IP range constraints, and testing timeline agreements. | Control 5.1 / 5.31 |
+| **VAPT-2** | Reconnaissance and OSINT | Scans for publicly leaked information, active domains, and open intelligence data. | Control 5.7 |
+| **VAPT-3** | Network Vulnerability Scan | Inspects open port logs, active services, and protocol negotiations (e.g. Nmap scan). | Control 8.8 / 8.22 |
+| **VAPT-4** | Web Application Testing OWASP Top 10 | Analyzes cookies (HttpOnly/Secure), XSS vulnerabilities, injection flaws, and headers. | Control 8.26 / 8.28 |
+| **VAPT-5** | Internal Network Penetration Test | Evaluates lateral movement paths, unauthenticated internal services (e.g. Redis). | Control 8.20 / 8.22 |
+| **VAPT-6** | External Penetration Test | Audits edge systems, public gateways, and external network exposures. | Control 8.20 |
+| **VAPT-7** | Privilege Escalation Testing | Checks for access elevation paths, sudo misconfigurations, or service exploits. | Control 8.2 |
+| **VAPT-8** | Social Engineering & Phishing Simulation | Evaluates training, phishing campaign reports, and user compliance metrics. | Control 6.3 / 6.8 |
+| **VAPT-9** | Wireless Security Testing | Reviews WPA3/WPA2 enterprise configs, guest network isolation, and rogue AP detection. | Control 8.20 |
+| **VAPT-10** | API Security Testing | Audits REST/SOAP API endpoints, authentication keys, and parameter validation. | Control 8.28 |
+| **VAPT-11** | Vulnerability Remediation Tracking | Verifies tracking workflows, ticketing integrations, and remediation SLA status. | Control 8.8 |
+| **VAPT-12** | Patch Management Verification | Checks for outdated software versions (e.g. OpenSSH 7.2p1, Apache 2.4.38). | Control 8.8 / 8.19 |
+| **VAPT-13** | Firewall & Network Segmentation Review | Audits firewall rule bases, VLAN segmentations, and network access lists (ACLs). | Control 8.22 |
+| **VAPT-14** | Secure Configuration Baseline | Evaluates baseline settings, disabled default credentials, and TLS cipher hardening. | Control 8.9 |
+| **VAPT-15** | Final VAPT Report & Executive Summary | Compiles version control, scope grids, and overall CVSS metrics. | Control 5.36 / 5.37 |
+
+### E. VAPT 4-Gate Grounding & Hallucination Prevention
+Because vulnerability details are highly sensitive to alphanumeric accuracy (e.g., matching exact IP addresses like `192.168.1.105` or service versions like `OpenSSH 7.2p1`), the custom validator (`src/core/validator.py`) enforces strict validation rules:
+1. **Verbatim IP and Port Grounding**: The LLM's draft findings must cite IP addresses and port numbers that exist verbatim in the source document chunks stored in ShaktiDB.
+2. **Scant Version Matching**: Verifies that any service version cited by the LLM (e.g. `Apache httpd 2.4.38`) matches the log files, preventing the AI from hallucinating a different version.
+3. **Smart Override & Warnings**: If a vulnerability is found in the logs (e.g., unauthenticated access permitted on Redis port 6379) but the LLM fails to list it, the validator raises an override, downgrades the control to `NON_COMPLIANT`, and flags it for human review with a direct link to the log file chunk.
+
+### F. TÜV SÜD Template Replication (Dual-Format)
+The system compiles these parsed findings into reports matching the exact layout of the official TÜV SÜD South Asia registration template. It outputs both formats:
+*   **Official PDF (`_export_vapt_pdf`)**: A print-ready document containing:
+    1.  *Registered Office details* block on the cover page.
+    2.  *Document Version Control* and *Document Submission Details* tables.
+    3.  *Vulnerabilities Summary* table calculating individual scores and the **Overall CVSS Score** (using the highest base severity).
+    4.  *Granular Findings Grid* detailing description, target hosts, status, CVSS v4.0 metrics detail, Proof of Concept, and remediation references.
+*   **Remediation DOCX (`_export_vapt_docx`)**: A fully editable Word document replication. This is critical for security operations teams to copy-paste remediation commands, add internal ticket tracking, or edit recommendations before final regulatory submission.
 

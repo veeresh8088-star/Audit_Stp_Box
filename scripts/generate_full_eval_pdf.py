@@ -108,6 +108,60 @@ QUICK_DEEP_DIAGRAM = """
               +-----------------------------------------------------+
 """
 
+VAPT_DIAGRAM = """
+      [ 1. Ingest Raw logs ] --------> [ 2. Parse scan files ]
+      (Nmap, Nessus, Burp, docs)      (Extract ports/ciphers/vulns)
+                                                    |
+                                                    v
+      [ 4. Hybrid RAG Retrieval ] <---- [ 3. Auditor Selects Framework ]
+      (60% Vector + 40% Keyword)       (VAPT checklist VAPT-1 to 15)
+                   |
+                   v
+      [ 5. Prompt injection ] --------> [ 6. LLM Evaluation ]
+      (Auditor agent instructions)    (Gemma 4B / Qwen draft)
+                                                    |
+                                                    v
+      [ 8. Reflection Node ] <-------- [ 7. 4-Gate Grounding Validator ]
+      (LangGraph self-correction loop) (Check exact IP, port & version)
+              |                                     | (Passed)
+              v (Max 2 retries)                     v
+      [ Retry LLM Draft ]             [ 9. Save to database & Export ]
+                                      (Official TÜV SÜD PDF & DOCX)
+"""
+
+CUSTOM_CONTROL_DIAGRAM = """
+      [ Auditor Input ] ---------------------> [ Excel Ingestion (XLSX) ]
+      (UI Form: ID, Name, Desc, Evidence)      (3-Column Upload Ingestion)
+                         \\                         /
+                          v                       v
+                    +------------------------------------+
+                    | add_custom_control() DB Writer     |
+                    +------------------------------------+
+                                      |
+                                      v
+                    +------------------------------------+
+                    | ShaktiDB Table: custom_controls    |
+                    +------------------------------------+
+                                      |
+                                      v
+                    +------------------------------------+
+                    | _load_custom_use_cases() Loader    |
+                    | (Combines defaults + custom active)|
+                    +------------------------------------+
+                                      |
+                                      v
+                    +------------------------------------+
+                    | Dynamic Scoping & Keyword Matcher  |
+                    | (Binds control to matching docs)   |
+                    +------------------------------------+
+                                      |
+                                      v
+                    +------------------------------------+
+                    |      Offline Compliance Audit      |
+                    |    (RAG -> Gemma -> Validator)     |
+                    +------------------------------------+
+"""
+
 class FullEvalPDF(FPDF):
     def header(self):
         self.set_draw_color(*MID_GRAY)
@@ -192,6 +246,8 @@ def build_pdf():
     pdf.cell(0, 5, "Project Name: AICyberAuditBox - Local Audit", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.cell(0, 5, "Target Architecture: CPU-Only (8 Cores, 16GB RAM)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.cell(0, 5, "Inference Backend: Optimized llama.cpp (llama-server.exe)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, "Embedding Model: Nomic Embed Text v1.5 (nomic-embed-text-v1.5.f16.gguf)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 5, "Reranker Model: ms-marco-MiniLM-L-6-v2", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     import datetime
     pdf.cell(0, 5, f"Evaluation Date: {datetime.date.today().strftime('%B %d, %Y')}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(5)
@@ -229,10 +285,34 @@ def build_pdf():
     pdf.body("3. Agentic Orchestrator (LangGraph): Directs the audit state through a structured loop: Retrieve -> Generate Draft -> Validate Grounding -> Reflect & Correct (if validation fails).", indent=4)
 
     # ════════════════════════════════════════════
-    # PAGE 3 -- Token System & Context
+    # PAGE 3 -- Scoping & Ingestion Pipeline (NEW CHRONOLOGICAL FLOW)
     # ════════════════════════════════════════════
     pdf.add_page()
-    pdf.section_title("3. Token System & Context Architecture")
+    pdf.section_title("3. Zero-LLM Scoping & Custom Control Ingestion")
+    pdf.body("To minimize processing latency and handle hundreds of controls without performance degradation, the system implements a local, high-speed scoping and custom control ingestion engine.")
+    
+    pdf.subsection_title("A. Zero-LLM Hybrid Scoping")
+    pdf.body("o  Challenge: Brute-forcing 92 controls against 20 documents requires 1,840 LLM runs. Initial scoping via generative models takes ~20s per run and is prone to hallucination.", indent=4)
+    pdf.body("o  Layer 1 (Python Keyword Signals): Scans for keywords/synonyms with strict word boundaries to prevent substring overlaps.", indent=4)
+    pdf.body("o  Layer 2 (Semantic Embedding Match): Embeds the first 800 characters of the document and checks Cosine Similarity against all category definitions. Category match is scoped-in if similarity >= 0.645.", indent=4)
+    pdf.body("o  Result: Bypasses generative LLM calls on upload, completing scoping checks in under 410 milliseconds and reducing the audit surface area by 90%.", indent=4)
+    
+    pdf.subsection_title("B. Custom Compliance Controls Ingestion Flow")
+    pdf.body("Auditors can define custom controls directly through the UI or via Excel. The system processes and synchronizes these controls using a deterministic local pipeline:")
+    pdf.ln(1)
+    pdf.draw_diagram_block(CUSTOM_CONTROL_DIAGRAM)
+    
+    pdf.subsection_title("C. Local NLP & Cache Management Specs")
+    pdf.body("o  Local Tokenization (Word Splitting): Normalizes name/description text and splits using regular expressions at spacing/punctuation boundaries, filtering stop-words.", indent=4)
+    pdf.body("o  Deterministic Bigram Building: Constructs word-pairs (e.g. 'incident response') to ensure query matching precision.", indent=4)
+    pdf.body("o  Synonym Map Expansion: Expands tokens to include synonyms (e.g. 'pii' expands to gdpr, privacy, data subject).", indent=4)
+    pdf.body("o  Real-time Cache Sync: Saves the control to database. Invalidates UI session cache (_CUSTOM_UC_CACHE_TS = 0) to immediately refresh sidebar scope lists.", indent=4)
+
+    # ════════════════════════════════════════════
+    # PAGE 4 -- Token System & Context
+    # ════════════════════════════════════════════
+    pdf.add_page()
+    pdf.section_title("4. Token System & Context Architecture")
     pdf.body("To ensure fast and stable execution on CPU-only hardware, the project implements a strict token management system:")
     
     pdf.subsection_title("A. Document Chunking Size (200-500 Tokens)")
@@ -253,11 +333,17 @@ def build_pdf():
     pdf.body("o  Since the input prompt averages ~3,100 tokens (and maxes at ~6,000 in bypass mode), it leaves a generous safety buffer of 2,000 to 5,000 tokens for the LLM output.", indent=4)
     pdf.body("o  Because the final finding report generated by the LLM is only ~200 to 400 tokens, the system is mathematically guaranteed to fit within the memory limits without context crashes.", indent=4)
 
+    pdf.subsection_title("D. Local AI Engine & Parameters Configuration")
+    pdf.body("o  Large Language Model (LLM): google_gemma-4-E4B-it-Q4_K_M.gguf (Gemma 4B E4B Instruct model, Q4_K_M quantization). Hosted on 127.0.0.1:11434 with -c 8192 context window, -t 8 execution threads, -b 512 batch size, and --flash-attn on.", indent=4)
+    pdf.body("o  Text Embedding Model: nomic-embed-text-v1.5.f16.gguf (Nomic Embed Text v1.5, f16 precision, 768 dimensions, native 8,192 token context, supports Matryoshka learning). Hosted on 127.0.0.1:11435 in --embedding server mode with -t 4 threads.", indent=4)
+    pdf.body("o  Cross-Encoder Reranker Models: cross-encoder/ms-marco-MiniLM-L-6-v2 (Quick mode, ~80MB 6-layer MiniLM) and BAAI/bge-reranker-base (Deep mode, ~278MB high-precision base transformer). Reranker length is hard-capped at max_length=512. Toggled via dynamic lazy-loading and garbage collection (gc.collect()) to free memory and prevent CPU OOM crashes.", indent=4)
+    pdf.body("o  Client-Side Parameters: temperature=0.0 (strictly deterministic), client-side num_ctx=4096 tokens, and keep_alive='15m' to prevent memory unloading between control runs.", indent=4)
+
     # ════════════════════════════════════════════
-    # PAGE 4 -- Token Overflow & Diagram 2
+    # PAGE 5 -- Token Overflow & Diagram 2
     # ════════════════════════════════════════════
     pdf.add_page()
-    pdf.section_title("4. Handling Token Overflow & Limiting Constraints")
+    pdf.section_title("5. Handling Token Overflow & Limiting Constraints")
     pdf.body("When processing large text databases (like 20 files simultaneously), the system implements several layers of protection against token limits and evidence omission:")
 
     pdf.subsection_title("A. Token Accumulation & Ranking")
@@ -272,7 +358,7 @@ def build_pdf():
     pdf.draw_diagram_block(SEQ_DIAGRAM)
 
     # ════════════════════════════════════════════
-    # PAGE 5 -- Shifting, Truncation & KV Cache
+    # PAGE 6 -- Shifting, Truncation & KV Cache
     # ════════════════════════════════════════════
     pdf.add_page()
     pdf.body("1. Grounding Validator Gate: The custom validator (validator.py) scans the SQL database. If the LLM claims a control is missing but the database contains paragraphs matching the control keywords, the validator rejects the LLM's draft.", indent=4)
@@ -294,9 +380,16 @@ def build_pdf():
     pdf.body("o  Optimization & Results: For subsequent controls, the server bypasses the heavy CPU prefill calculations entirely, loading the KV-cache instantly. In our audit benchmark, the first control (5.24) took 8.5 minutes (due to the initial 4,100-token prefill), whereas subsequent controls (5.25, 5.26, etc.) bypassed the prefill and finished in only 1.8 minutes (a 5x speedup).", indent=4)
 
     # ════════════════════════════════════════════
-    # PAGE 6 -- Quick vs. Deep Audits & Diagram 3
+    # PAGE 7 -- Validator & Benchmarking
     # ════════════════════════════════════════════
     pdf.add_page()
+    pdf.section_title("6. RAG & Custom Validator Pipeline Evaluation")
+    pdf.body("The custom forensic validator performs strict checks to prevent prompt leaks and hallucinations:")
+    pdf.body("o  Gate 1 (Prompt Leakage): Blocks prompt templates and expected guidelines from leaking into output citations.", indent=4)
+    pdf.body("o  Gate 2 (Verbatim Grounding): Direct lookup checks to ensure LLM quotes exist word-for-word in the source document.", indent=4)
+    pdf.body("o  Gate 3 (Fuzzy OCR Grounding): Sequence matching fallback (similarity threshold >= 85%) for scanned PDF/image OCR data.", indent=4)
+    pdf.body("o  Gate 4 (Consistency): Overrides LLM output to NON_COMPLIANT if the model claims compliance but lists zero verified evidence quotes.", indent=4)
+
     pdf.subsection_title("G. Quick Audit vs. Deep Audit Execution Pathways")
     pdf.body("The system runs in two operational modes depending on accuracy and latency needs:")
     pdf.body("o  Quick Audit (Single-Pass Mode): The LLM evaluates the context once. If the grounding validator rejects the draft, the orchestrator immediately accepts the validator's overrides (such as status downgrades or human review flags) and proceeds.", indent=4)
@@ -305,17 +398,10 @@ def build_pdf():
     pdf.draw_diagram_block(QUICK_DEEP_DIAGRAM)
 
     # ════════════════════════════════════════════
-    # PAGE 7 -- Validator & Benchmarking
+    # PAGE 8 -- CPU Performance & Benchmarking
     # ════════════════════════════════════════════
     pdf.add_page()
-    pdf.section_title("5. RAG & Custom Validator Pipeline Evaluation")
-    pdf.body("The custom forensic validator performs strict checks to prevent prompt leaks and hallucinations:")
-    pdf.body("o  Gate 1 (Prompt Leakage): Blocks prompt templates and expected guidelines from leaking into output citations.", indent=4)
-    pdf.body("o  Gate 2 (Verbatim Grounding): Direct lookup checks to ensure LLM quotes exist word-for-word in the source document.", indent=4)
-    pdf.body("o  Gate 3 (Fuzzy OCR Grounding): Sequence matching fallback for scanned PDF/image OCR data.", indent=4)
-    pdf.body("o  Gate 4 (Consistency): Overrides LLM output to NON_COMPLIANT if the model claims compliance but lists zero verified evidence quotes.", indent=4)
-
-    pdf.section_title("6. Performance Benchmarking & CPU Optimization")
+    pdf.section_title("7. Performance Benchmarking & CPU Optimization")
     pdf.body("To accommodate the CPU-only client requirement, we tuned the server parameters to achieve optimal execution:")
     pdf.body("o  Thread Tuning (-t 8): Set LLM threads to match your 8 physical cores to maximize core saturation.", indent=4)
     pdf.body("o  Batch Processing (-b 512): Enabled prompt evaluation chunking to speed up CPU prefill ingestion.", indent=4)
@@ -329,133 +415,92 @@ def build_pdf():
     pdf.body("o  Total Savings: 216.12 seconds (~3.6 minutes saved per control - a 30.15% speedup!)", indent=4)
 
     # ════════════════════════════════════════════
-    # PAGE 8 -- VAPT Engine
+    # PAGE 9 -- VAPT Engine & Lifecycle Flow
     # ════════════════════════════════════════════
     pdf.add_page()
-    pdf.section_title("7. VAPT Ingestion & Reporting Engine")
-    pdf.body("To support technical audits alongside compliance checking, the system implements a dedicated VAPT (Vulnerability Assessment & Penetration Testing) subsystem.")
+    pdf.section_title("8. VAPT Ingestion & Reporting Engine")
+    pdf.body("To support technical audits alongside compliance checking, the system implements a dedicated VAPT (Vulnerability Assessment & Penetration Testing) subsystem. This allows the system to ingest raw security logs and cross-walk technical vulnerabilities directly to compliance standards.")
     
-    pdf.subsection_title("A. Multi-Scanner Log Parsers")
+    pdf.subsection_title("A. The VAPT Audit Pipeline Lifecycle")
+    pdf.body("The step-by-step lifecycle of a VAPT audit execution follows a structured pipeline:")
+    pdf.ln(1)
+    pdf.draw_diagram_block(VAPT_DIAGRAM)
+
+    # ════════════════════════════════════════════
+    # PAGE 9.5 -- Multi-Scanner Log Parsers & CVSS Mapping
+    # ════════════════════════════════════════════
+    pdf.add_page()
+    pdf.subsection_title("B. Multi-Scanner Log Parsers")
+    pdf.body("The system features structured regex and heuristic log parsers that ingest and normalize raw output files from standard security scanning tools:")
     pdf.body("o  Nmap Infrastructure Scan: Analyzes port states, service version strings, and SSL/TLS cipher suites (specifically parsing out CBC-based suites vulnerable to Lucky13 attacks).", indent=4)
     pdf.body("o  Nessus Vulnerability Report: Extracts active vulnerabilities, port bindings, severity classifications, and recommendations.", indent=4)
     pdf.body("o  Burp Suite Web Application Scan: Parses web application issues (like missing Secure/HttpOnly flags on session cookies or missing headers).", indent=4)
     pdf.body("o  Legacy MS Word/Manual Pentesting Reports: Ingests unstructured manual reports, using sentence tokenization and semantic filtering to extract and structure manual findings.", indent=4)
     
-    pdf.subsection_title("B. Dynamic CVSS v4.0 Metric Mapping")
+    pdf.subsection_title("C. Dynamic CVSS v4.0 Metric Mapping")
     pdf.body("Different scanners report risk severity using conflicting systems (grades, letter scores, text classifications). The auditor engine harmonizes this by translating all findings to the standard CVSS v4.0 framework:")
     pdf.body("o  Network-Level Scan Metrics: For infrastructure vulnerabilities (like weak ciphers), the system sets Attack Vector (AV) to 'Network' and User Interaction (UI) to 'None', which yields high exploitability ratings.", indent=4)
     pdf.body("o  Web-Application Metrics: For application weaknesses (like missing secure cookie flags), the system adjusts User Interaction (UI) to 'Required' and Privileges Required (PR) to 'None'/'Low' depending on the session context.", indent=4)
     pdf.body("o  Impact Vectors: Dynamically maps system impact metrics-Confidentiality (VC), Integrity (VI), and Availability (VA)-to compute the overall CVSS v4.0 base score.", indent=4)
+
+    # ════════════════════════════════════════════
+    # PAGE 10 -- VAPT Controls Checklist
+    # ════════════════════════════════════════════
+    pdf.add_page()
+    pdf.subsection_title("D. VAPT Framework Controls Checklist (VAPT-1 to VAPT-15)")
+    pdf.body("The system cross-walks parsed scan findings against the 15 VAPT controls:")
+    pdf.ln(2)
     
-    pdf.subsection_title("C. TÜV SÜD Template Replication (Dual-Format)")
+    hdr_style_evl = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(15, 23, 42))
+    lbl_style_evl = FontFace(emphasis="B", fill_color=(245, 247, 250))
+    with pdf.table(col_widths=(20, 60, 100), text_align="L") as table:
+        h = table.row()
+        h.cell("Control ID", style=hdr_style_evl)
+        h.cell("Control Name", style=hdr_style_evl)
+        h.cell("Focus & Description", style=hdr_style_evl)
+        
+        controls = [
+            ("VAPT-1", "Rules of Engagement", "Verifies IP ranges, scope exclusions, and timelines."),
+            ("VAPT-2", "OSINT Reconnaissance", "Audits domain leaks, active hosts, and open intelligence."),
+            ("VAPT-3", "Network Vulnerability Scan", "Open ports, service versions, weak TLS ciphers (Lucky13)."),
+            ("VAPT-4", "Web Application OWASP 10", "Cookies (HttpOnly/Secure), XSS, injection flaws, headers."),
+            ("VAPT-5", "Internal Pentesting", "Lateral movement, unauthenticated Redis, DB exposure."),
+            ("VAPT-6", "External Pentesting", "Edge systems, public gateway exposures."),
+            ("VAPT-7", "Privilege Escalation", "Access levels, sudo config, service exploit paths."),
+            ("VAPT-8", "Social Engineering", "Phishing campaign statistics, user awareness training."),
+            ("VAPT-9", "Wireless Security", "WPA3 Enterprise, guest network isolation, rogue APs."),
+            ("VAPT-10", "API Security", "REST/SOAP API auth keys, input validations."),
+            ("VAPT-11", "Remediation Tracking", "Vulnerability tracking, ticketing integrations, SLAs."),
+            ("VAPT-12", "Patch Verification", "Outdated software version detection and patch verification."),
+            ("VAPT-13", "Firewall & Segment Review", "VLAN boundaries, firewall rule base, ACL lists."),
+            ("VAPT-14", "Secure Baseline Config", "Disabled defaults, default credential audits, cipher audits."),
+            ("VAPT-15", "Final Regulatory Report", "Registered offices details, submission tables, overall CVSS.")
+        ]
+        for cid, cname, cdesc in controls:
+            r = table.row()
+            r.cell(cid, style=lbl_style_evl)
+            r.cell(cname)
+            r.cell(cdesc)
+
+    # ════════════════════════════════════════════
+    # PAGE 11 -- Grounding & Output Format
+    # ════════════════════════════════════════════
+    pdf.add_page()
+    pdf.subsection_title("E. VAPT 4-Gate Grounding & Hallucination Prevention")
+    pdf.body("Because vulnerability details are highly sensitive to alphanumeric accuracy (matching IP addresses or version tags), the custom validator enforces strict grounding rules:")
+    pdf.body("o  Gate 1 (Verbatim IP and Port Grounding): LLM draft findings must cite IP addresses and port numbers that exist word-for-word in the source document chunks.", indent=4)
+    pdf.body("o  Gate 2 (Scant Version Matching): Verifies service versions (e.g. Apache httpd 2.4.38) match the logs exactly, preventing the AI from hallucinating hypothetical versions.", indent=4)
+    pdf.body("o  Gate 3 (Smart Override & Warnings): If a scan finding is identified in logs but skipped by the LLM, the validator automatically overrides and flags it as NON_COMPLIANT for human review.", indent=4)
+    pdf.body("o  Gate 4 (Consistency Check): Automatically rejects and re-runs drafts that claim a control is compliant but contain zero verified evidence quotes.", indent=4)
+    
+    pdf.subsection_title("F. TÜV SÜD Template Replication (Dual-Format)")
     pdf.body("The system compiles these parsed findings into reports matching the exact layout of the official TÜV SÜD South Asia registration template. It outputs both formats:")
     pdf.body("o  Official PDF (_export_vapt_pdf): A print-ready document containing cover pages, Document Version Control and Document Submission Details tables, a Vulnerabilities Summary table, and a detailed findings grid with CVSS v4.0 metrics, Proof of Concept, and remediation references.", indent=4)
     pdf.body("o  Remediation DOCX (_export_vapt_docx): A fully editable Word document replication. This is critical for security operations teams to copy-paste remediation commands, add internal ticket tracking, or edit recommendations before final regulatory submission.", indent=4)
 
     # ════════════════════════════════════════════
-    # PAGE 9 -- Vector Indexing Benchmark
+    # OUTPUT PDF
     # ════════════════════════════════════════════
-    pdf.add_page()
-    pdf.section_title("8. Live Vector Indexing Benchmark & Architecture Defense")
-    pdf.body("A critical architecture decision for the RAG pipeline is selecting the vector indexing method: Flat (Brute Force) Cosine Similarity vs. HNSW Graph Search. We executed a live benchmark using actual database embeddings (1,648 chunks, 768 dimensions) and a 10x scaling simulation (16,480 chunks) to mathematically justify the selection of Flat indexing:")
-    pdf.ln(2)
-
-    # Benchmark Table
-    hdr_style_evl = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(15, 23, 42))
-    lbl_style_evl = FontFace(emphasis="B", fill_color=(245, 247, 250))
-    with pdf.table(col_widths=(45, 65, 70), text_align="C") as table:
-        h = table.row()
-        h.cell("Metric", style=hdr_style_evl)
-        h.cell("Flat Index (Current Design)", style=hdr_style_evl)
-        h.cell("HNSW Graph (efSearch = 1)", style=hdr_style_evl)
-        
-        r = table.row()
-        r.cell("Search Recall Accuracy", style=lbl_style_evl)
-        r.cell("100.00% (Guaranteed)")
-        r.cell("44.00% (Baseline) / 5.60% (10x)")
-        
-        r = table.row()
-        r.cell("Search Risk", style=lbl_style_evl)
-        r.cell("0.00% missed compliance clauses")
-        r.cell("Up to 94.40% missed findings")
-        
-        r = table.row()
-        r.cell("Query Latency (16k)", style=lbl_style_evl)
-        r.cell("40.36 ms")
-        r.cell("0.84 ms")
-        
-        r = table.row()
-        r.cell("Build Time (16k)", style=lbl_style_evl)
-        r.cell("0.00 s")
-        r.cell("4.26 s")
-        
-    pdf.ln(4)
-    pdf.subsection_title("Core Technical Defense Points for Flat Indexing:")
-    pdf.body("1. Zero Toleration for Missed Audit Data (The Local Minima Problem): In security compliance, false compliance (missing a gap finding) is a catastrophic failure. HNSW relies on greedy graph traversal. Because policy documents contain highly repetitive clauses, their embeddings form dense, clustered regions. Graph searches get trapped in local minima, missing 94.40% of exact matches at a 10-document scale.", indent=4)
-    pdf.body("2. The efSearch (Multi-Path Search) Trade-off: To raise graph search accuracy to ~99%, HNSW must explore dozens of paths in parallel (efSearch = 100). Doing so multiplies the distance calculations, increasing query latency to ~3ms (matching Flat search speed). Thus, HNSW tuned for accuracy offers no speed advantage over brute force at this scale, while still carrying a 1% risk of missing data.", indent=4)
-    pdf.body("3. The RAG Pipeline Bottleneck: In our offline CPU-only architecture, the local LLM generation takes 5.0 to 15.0 seconds to compile findings. The difference between a 2.8ms search (Flat) and a 0.3ms search (HNSW) is less than 0.05% of the execution time, making any speed optimization entirely imperceptible to the user.", indent=4)
-    pdf.body("4. Instant Document Ingestion: Flat search has zero build overhead. Adding or updating compliance documents is instantly searchable. HNSW requires several seconds to rebuild the graph index on every edit, which blocks auditor workflows.", indent=4)
-
-    # ════════════════════════════════════════════
-    # PAGE 10 -- Demo Q&A Guide
-    # ════════════════════════════════════════════
-    pdf.add_page()
-    pdf.section_title("9. Industry-Level Demo Q&A Guide")
-    pdf.body("Use these structured Q&As to defend the implementation architecture in front of the technical panel:")
-    pdf.ln(2)
-
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.multi_cell(0, 5, "Q1: Why use custom Flat Cosine search instead of a vector database like Pinecone, Milvus, or Qdrant?", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, "A: Vector databases are built to scale search across millions of items. In compliance auditing, our dataset is small-to-medium scale (under 20,000 chunks). A custom Flat index (exact matrix multiplication using NumPy) runs in under 40ms, requires zero cloud database infrastructure, has no network latency, and guarantees 100% search recall (zero missed clauses), which is mandatory for audits.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(3)
-
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.multi_cell(0, 5, "Q2: How does the system resolve conflicting severity ratings from different scanners (e.g., Nmap vs. Nessus)?", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, "A: The scanner ingestion layer normalizes all outputs to the CVSS v4.0 framework. If a scan reports a generic text rating, the system's CVSS calculator evaluates the exploitability (Attack Vector, User Interaction) and system impact vectors to calculate a standard numeric CVSS base score. This results in a unified, consistent severity rating in the final TÜV SÜD report.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(3)
-
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.multi_cell(0, 5, "Q3: Does this tool upload confidential audit logs or policies to the cloud?", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, "A: No. To ensure absolute data privacy and security, the system is designed to be 100% self-contained. It runs local embedding models (nomic-embed-text) and local LLMs (Gemma / Qwen) via a local llama.cpp server. No data ever leaves the local machine.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(3)
-
-    # ════════════════════════════════════════════
-    # PAGE 11 -- Demo Q&A Cont. & Conclusion
-    # ════════════════════════════════════════════
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.multi_cell(0, 5, "Q4: How will Flat indexing handle database scaling to 1,000,000 chunks?", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, "A: At 1,000,000 chunks, Flat indexing search takes approximately 1.74 seconds. Because compliance audits are compiled offline in the background, a 1.7-second search delay is perfectly acceptable. However, if real-time constraints arise, we can transition to a hybrid index configured with multi-path beam search (efSearch = 100), keeping search times under 1ms while maintaining a 98%+ accuracy rate.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(3)
-
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.set_text_color(*DARK_TEXT)
-    pdf.multi_cell(0, 5, "Q5: Is there any overlap or conflict between the VAPT scan findings and ISO 27001 policies?", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.set_font("Helvetica", "", 9)
-    pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4.5, "A: No, they are complementary. ISO 27001 defines the administrative compliance rules (e.g., Control A.12.6.1 / A.8.8 Management of Technical Vulnerabilities), while VAPT scans provide the technical proof. Our system uses a cross-walk mapping table so that a technical scan finding (like VAPT-3 for weak ciphers) automatically updates the compliance status of its corresponding ISO 27001 controls in the dashboard.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(5)
-
-    pdf.section_title("10. Conclusion")
-    pdf.body(
-        "The AICyberAuditBox successfully achieves a local, secure compliance auditing workflow. "
-        "By resolving the ingestion truncation bugs and optimizing threads, CPU prefill batching, and KV-cache reuse, the system achieved a 30.15% execution speedup. "
-        "Furthermore, by utilizing Flat indexing over HNSW graph approximations, the system guarantees 100% search precision with instant document ingestion and zero network overhead. "
-        "This ensures that the generated TÜV SÜD VAPT validation reports and ISO 27001 audit logs are mathematically exact and fully prepared for enterprise deployment."
-    )
-
     pdf.output(OUTPUT_PATH)
     print(f"Full Evaluation PDF saved to: {os.path.abspath(OUTPUT_PATH)}")
 

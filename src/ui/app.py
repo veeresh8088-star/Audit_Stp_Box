@@ -5378,20 +5378,17 @@ if run or st.session_state.get("start_analysis_on_next_run"):
             if active_controls:
                 for uc in USE_CASES:
                     pending[f"ctrl_chk_{uc['sl']}"] = (uc["use_case"] in active_controls)
-                st.session_state.pending_ctrl_checks = pending
-                
-                if warning_msg:
-                    st.sidebar.warning(warning_msg)
-                    
-                # Set rerun flag to update multiselect before thread starts
-                st.session_state.start_analysis_on_next_run = True
-                st.rerun()
             else:
-                # Scoping failed or LLM offline: do not start background audit on all 108 controls
-                st.session_state.start_analysis_on_next_run = False
-                st.sidebar.error("⚠️ **AI Scoping failed or found no matching controls.**\n\nPlease ensure your local LLM server is active, or select **Manual Scoping** to specify controls manually.")
-                st.stop()
-
+                for uc in USE_CASES:
+                    pending[f"ctrl_chk_{uc['sl']}"] = True
+            st.session_state.pending_ctrl_checks = pending
+                    
+            if warning_msg:
+                st.sidebar.warning(warning_msg)
+                
+            # Set rerun flag to update multiselect before thread starts
+            st.session_state.start_analysis_on_next_run = True
+            st.rerun()
 
         # Re-evaluate selected_sls based on updated checkbox states
         selected_ucs = [u for u in filtered_use_cases if st.session_state.get(f"ctrl_chk_{u['sl']}", True)]
@@ -5506,8 +5503,7 @@ _resumable = get_resumable_checkpoint(st.session_state.active_chat_id)
 if not _resumable:
     _resumable = get_global_resumable_checkpoint()
 
-if _resumable and _resumable.session_id not in _bg_running and not st.session_state.get("findings") and st.session_state.get("stage") != 5:
-
+if _resumable and _resumable.session_id not in _bg_running:
     _done  = _resumable.completed_batches
     _total_b = (_resumable.total_controls + _resumable.batch_size - 1) // max(_resumable.batch_size, 1)
     _pct   = max(0, min(100, int((_done / max(_total_b, 1)) * 100)))
