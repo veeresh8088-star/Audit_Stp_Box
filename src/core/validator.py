@@ -659,10 +659,17 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     finding["hallucination_check"] = grounded_state
 
     print(f"[VALIDATOR DEBUG] GATE 2+3 (Grounding): {control_id} -> {grounded_state}", flush=True)
-    if grounded_state == "NOT_GROUNDED":
+    raw_status_upper = str(raw_status).upper().strip()
+    is_false_positive_or_inapplicable = any(fp_kw in raw_status_upper for fp_kw in ["FALSE_POSITIVE", "FALSE POSITIVE", "OUT_OF_SCOPE", "OUT OF SCOPE", "INAPPLICABLE"])
+
+    if is_false_positive_or_inapplicable:
+        finding["status"] = "FALSE_POSITIVE"
+        finding["hallucination_check"] = "OUT_OF_SCOPE"
+        finding["validator_note"] = "Control evaluated as FALSE_POSITIVE / INAPPLICABLE"
+        print(f"[VALIDATOR DEBUG] [OK] {control_id}: PASSED all gates as FALSE_POSITIVE / INAPPLICABLE!", flush=True)
+    elif grounded_state == "NOT_GROUNDED":
         print(f"[VALIDATOR DEBUG] [FAIL] {control_id}: REJECTED by Grounding Gate! Evidence not found in document.", flush=True)
         print(f"[VALIDATOR DEBUG]   Evidence (first 100 chars): {evidence_clean[:100]}", flush=True)
-        raw_status_upper = str(raw_status).upper().strip()
         # Check for COMPLIANT or PARTIAL, but NOT NON_COMPLIANT (which contains "COMPLIANT" as substring)
         is_compliant_claim = (raw_status_upper == "COMPLIANT" or raw_status_upper == "PARTIAL"
                               or raw_status_upper == "PARTIALLY_COMPLIANT")
