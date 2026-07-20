@@ -26,7 +26,19 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
         auditor_approver = st.session_state.get("auditor_approver", "Mr. Atul Srivastava")
         report_doc_id = st.session_state.get("report_doc_id", "3153142723")
-        target_client = st.session_state.get("target_entity", st.session_state.get("auditor_client", "Motorola Solutions, Inc"))
+        
+        # Extract client name from uploaded document filename or active session state
+        file_registry = st.session_state.get("file_registry", {})
+        uploaded_names = list(file_registry.keys()) if file_registry else []
+        extracted_client = ""
+        if uploaded_names:
+            first_fname = uploaded_names[0]
+            base_fname = os.path.splitext(os.path.basename(first_fname))[0]
+            clean_name = base_fname.split("_")[0].upper()
+            if len(clean_name) >= 3:
+                extracted_client = clean_name
+                
+        target_client = st.session_state.get("target_entity") or st.session_state.get("auditor_client") or extracted_client or "NOCPL"
         submitted_to = st.session_state.get("submitted_to", "Ashish Jaiswal")
         designation = st.session_state.get("designation", "Head of India Channel Sales")
         email = st.session_state.get("client_email", "ashish.jaiswal1@motorolasolutions.com")
@@ -36,7 +48,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         auditor_reviewer = "Ms. Prianka Singla"
         auditor_approver = "Mr. Atul Srivastava"
         report_doc_id = "3153142723"
-        target_client = "Motorola Solutions, Inc"
+        target_client = "NOCPL"
         submitted_to = "Ashish Jaiswal"
         designation = "Head of India Channel Sales"
         email = "ashish.jaiswal1@motorolasolutions.com"
@@ -745,7 +757,18 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
         auditor_approver = st.session_state.get("auditor_approver", "Mr. Atul Srivastava")
         report_doc_id = st.session_state.get("report_doc_id", "3153142723")
-        target_client = st.session_state.get("target_entity", st.session_state.get("auditor_client", "Motorola Solutions, Inc"))
+        # Extract client name from uploaded document filename or active session state
+        file_registry = st.session_state.get("file_registry", {})
+        uploaded_names = list(file_registry.keys()) if file_registry else []
+        extracted_client = ""
+        if uploaded_names:
+            first_fname = uploaded_names[0]
+            base_fname = os.path.splitext(os.path.basename(first_fname))[0]
+            clean_name = base_fname.split("_")[0].upper()
+            if len(clean_name) >= 3:
+                extracted_client = clean_name
+                
+        target_client = st.session_state.get("target_entity") or st.session_state.get("auditor_client") or extracted_client or "NOCPL"
         logo_path = st.session_state.get("auditor_logo_path")
     except Exception:
         auditor_lead = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
@@ -753,7 +776,7 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         auditor_reviewer = "Ms. Prianka Singla"
         auditor_approver = "Mr. Atul Srivastava"
         report_doc_id = "3153142723"
-        target_client = "Motorola Solutions, Inc"
+        target_client = "NOCPL"
         logo_path = None
 
 
