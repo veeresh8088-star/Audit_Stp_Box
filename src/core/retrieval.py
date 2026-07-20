@@ -316,26 +316,14 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     Phase 5: Token-budget accumulation: TARGET=4000 tokens, HARD_MAX=5000 tokens.
     Phase 8: Returns retrieved_chunk_metas for evidence source provenance.
     """
-    # Token budget: smaller for 12B on CPU to cut prefill (KV-cache fill) time.
-    # Prefill scales linearly with prompt length — reducing from 5000→3000 tokens
-    # can cut the pre-generation wait from ~3min to ~1.5min on a CPU-only VM.
-    import os
-    backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
-    is_12b = any("12b" in m.lower() for m in [ollama_model])
-    if backend in ("llama.cpp", "llamacpp"):
-        TARGET_CONTEXT_TOKENS = 1200
-        HARD_MAX_CONTEXT_TOKENS = 1500
-
-    else:
-        TARGET_CONTEXT_TOKENS = 2500 if is_12b else 4000
-        HARD_MAX_CONTEXT_TOKENS = 3000 if is_12b else 5000
+    # Token budget: optimized for CPU execution on Azure VM to prevent prefill bottlenecks.
+    TARGET_CONTEXT_TOKENS = 1200
+    HARD_MAX_CONTEXT_TOKENS = 1500
 
     # RAG BYPASS: If the total document text is small,
     # bypass chunk retrieval entirely and pass the full document text as context.
     # This guarantees 100% information coverage and prevents chunk-slicing errors.
     bypass_limit = 35000
-    if backend in ("llama.cpp", "llamacpp"):
-        bypass_limit = 12000  # Keep within 4096 token context limit
     if context and len(context) < bypass_limit:
         print(f"[RAG BYPASS] Document text is small ({len(context)} chars). Bypassing RAG chunking and passing full text to ensure 100% accuracy.", flush=True)
         src_file = file_names_list[0] if file_names_list else "Policy Document"
@@ -390,39 +378,34 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     # Fallback: paragraph split from raw context if DB empty
     paragraphs = []
     if not db_chunks:
-        paragraphs = [p.strip() for p in context.split('\n\n') if len(p.strip()) > 40]
+        paragraphs = [p.strip() for p in context.split('\n\n') if p.strip()]
         if not paragraphs:
-            paragraphs = [p.strip() for p in context.split('\n') if len(p.strip()) > 40]
+            paragraphs = [context]
 
-    stop_words = {
-        "this", "that", "with", "from", "your", "have", "will", "must",
-        "should", "ensure", "under", "these", "against", "about", "their", "where"
-    }
+    # Keyword synonyms expansion
+    expanded_terms = set()
+    for c in controls_batch:
+        raw_words = set(re.findall(r'\b[a-zA-Z0-9_\-]{3,}\b', c['control'].lower()))
+        raw_words.update(re.findall(r'\b[a-zA-Z0-9_\-]{3,}\b', c.get('label', '').lower()))
+        for w in raw_words:
+            expanded_terms.add(w)
+            if w in KEYWORD_SYNONYMS:
+                for syn in KEYWORD_SYNONYMS[w]:
+                    expanded_terms.add(syn.lower())
 
-    # Step 1: Build merged keyword set from all controls in batch
+    # Build weighted keyword dictionary
     batch_keywords = {}
     for c in controls_batch:
-        c_keywords = {}
-        main_text = f"{c['control']} {c['label']} {c.get('expected', '')}".lower()
-        main_words = re.findall(r'\b[a-z0-9_]{2,}\b', main_text)
-        for w in main_words:
-            if w not in stop_words:
-                c_keywords[w] = max(c_keywords.get(w, 0), 3)
-        inst_text = f"{c.get('prompt_hint', '')}".lower()
-        inst_words = re.findall(r'\b[a-z0-9_]{2,}\b', inst_text)
-        for w in inst_words:
-            if w not in stop_words:
-                c_keywords[w] = max(c_keywords.get(w, 0), 2)
-        for kw in list(c_keywords.keys()):
-            if "access control" in main_text or "access control" in inst_text:
-                for s in KEYWORD_SYNONYMS.get("access control", []):
-                    if s not in c_keywords:
-                        c_keywords[s] = 1.5
-            for base, syns in KEYWORD_SYNONYMS.items():
-                if kw == base or kw in syns:
-                    if base not in c_keywords:
-                        c_keywords[base] = 1.5
-                    for s in syns:
+        c_keywords = c.get('keywords', {})
+        if not c_keywords:
+            c_keywords = {}
+            for w in re.findall(r'\b[a-zA-Z0-9_\-]{3,}\b', c['control'].lower()):
+                c_keywords[w] = 2.0
+            for w in re.findall(r'\b[a-zA-Z0-9_\-]{3,}\b', c.get('label', '').lower()):
+                c_keywords[w] = 1.0
+            for syn_w in list(c_keywords.keys()):
+                if syn_w in KEYWORD_SYNONYMS:
+                    for s in KEYWORD_SYNONYMS[syn_w]:
                         if s not in c_keywords:
                             c_keywords[s] = 1.5
         for kw, weight in c_keywords.items():
@@ -467,7 +450,6 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     
     vector_similarities = {}
     if query_vector is not None:
-        # Check global cache safely without triggering thread-safety errors
         embeddings_store = _chunk_embeddings_cache
             
         chunks_to_embed = []
@@ -497,7 +479,6 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
                 if vector is not None:
                     embeddings_store[key] = vector
             
-            # Persist the newly generated embeddings cache to disk
             try:
                 with open(CACHE_FILE, "wb") as f:
                     pickle.dump(embeddings_store, f)
@@ -528,7 +509,6 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
         norm_kw = (kw_score / max_kw_score) if max_kw_score > 0 else 0.0
         
         if query_vector is not None:
-            # 40% Keyword score + 60% Vector Semantic score
             hybrid_score = 0.4 * norm_kw + 0.6 * vec_sim
         else:
             hybrid_score = kw_score
@@ -575,25 +555,19 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     reranker = get_reranker(rerank_mode)
     
     if reranker is not None and deduplicated:
-        # Take the top candidates (up to 20) for re-ranking
         candidates = deduplicated[:20]
         try:
-            # Build Query-Chunk pairs
             pairs = [(query_text, item[1]) for item in candidates]
-            # Predict semantic relevance scores (0.0 to 1.0)
             rerank_scores = reranker.predict(pairs)
             
             reranked_candidates = []
             for i, item in enumerate(candidates):
-                # Combine scores: 30% Hybrid Score + 70% Rerank Score
                 h_score = item[0]
                 r_score = float(rerank_scores[i])
                 final_score = 0.3 * h_score + 0.7 * r_score
                 reranked_candidates.append((final_score, item[1], item[2], item[3], item[4]))
                 
-            # Re-sort candidates by new score
             reranked_candidates.sort(key=lambda x: x[0], reverse=True)
-            # Replace the top of deduplicated list with reranked items
             deduplicated = reranked_candidates + deduplicated[20:]
             print(f"[RERANK SUCCESS] Reranked {len(candidates)} candidate chunks using mode '{rerank_mode.upper()}'.", flush=True)
         except Exception as re_err:
@@ -618,13 +592,16 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
                 deduplicated.insert(insert_at, best_for_file)
                 print(f"[RAG DIVERSITY] Injected chunk from '{missing_fname}' for multi-document evidence.")
 
-    # Limit to configured top_k chunks
     deduplicated = deduplicated[:configured_top_k]
 
-    # Token Budget Accumulation
+    # Dynamic Relevance-Cutoff Token Budget Accumulation
     selected_chunks = []
     current_tokens = 0
     for item in deduplicated:
+        relevance_score = item[0]
+        # Dynamic cutoff: if score drops below relevance threshold and we already have evidence, stop immediately!
+        if relevance_score < 0.05 and selected_chunks:
+            break
         chunk_tokens = len(item[1]) // 4
         if current_tokens + chunk_tokens > HARD_MAX_CONTEXT_TOKENS:
             break
