@@ -5578,9 +5578,13 @@ st.markdown(f"""
 </div>""", unsafe_allow_html=True)
 
 # ── RESUME INTERRUPTED AUDIT BANNER ───────────────────────────────────────────────
-_resumable = get_resumable_checkpoint(st.session_state.active_chat_id)
-if not _resumable:
-    _resumable = get_global_resumable_checkpoint()
+_is_session_complete = (st.session_state.stage == 5 or len(st.session_state.findings) > 0 or st.session_state.get("audit_status") in ("Pending Review", "Completed"))
+
+_resumable = None
+if not _is_session_complete:
+    _resumable = get_resumable_checkpoint(st.session_state.active_chat_id)
+    if not _resumable:
+        _resumable = get_global_resumable_checkpoint()
 
 if _resumable and _resumable.session_id not in _bg_running:
     _done  = _resumable.completed_batches
