@@ -6511,7 +6511,7 @@ with _main_wrap:
 
                                 pol_res = f_data.get("policy_result", "Compliant") if f_data else "Compliant"
                                 evi_res = f_data.get("evidence_result", "Compliant") if f_data else "Compliant"
-                                sev_score = f_data.get("severity_score", 0.0) if f_data else 0.0
+                                sev_score = f_data.get("severity_score", None) if f_data else None
                                 
                                 def get_result_badge(val):
                                     v = str(val).strip()
@@ -6524,7 +6524,8 @@ with _main_wrap:
                                 
                                 pol_badge = get_result_badge(pol_res)
                                 evi_badge = get_result_badge(evi_res)
-                                sev_score_html = f"<span style='font-size:0.75rem; background:#94a3b822; border:1px solid #94a3b8; color:#94a3b8; padding:2px 8px; border-radius:6px; font-weight:700;'>Score: {sev_score:.1f}</span>"
+                                # Only show score badge for non-compliant findings; compliant controls have no severity score
+                                sev_score_html = f"<span style='font-size:0.75rem; background:#22c55e22; border:1px solid #22c55e; color:#22c55e; padding:2px 8px; border-radius:6px; font-weight:700;'>Score: {sev_score:.1f}</span>" if (sev_score is not None and sev_score > 0) else ""
 
                                 st.markdown(f"""<div style='background:rgba(34,197,94,0.07);border:1px solid #22c55e;border-left:5px solid #22c55e;border-radius:10px;padding:18px 22px;margin:10px 0;color:#f8fafc'>
 <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px'>
