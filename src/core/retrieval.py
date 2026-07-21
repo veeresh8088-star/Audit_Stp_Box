@@ -320,15 +320,11 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     TARGET_CONTEXT_TOKENS = 1200
     HARD_MAX_CONTEXT_TOKENS = 1500
 
-    # RAG BYPASS: If the total document text is small,
-    # bypass chunk retrieval entirely and pass the full document text as context.
-    # This guarantees 100% information coverage and prevents chunk-slicing errors.
-    bypass_limit = 35000
-    if context and len(context) < bypass_limit:
-        print(f"[RAG BYPASS] Document text is small ({len(context)} chars). Bypassing RAG chunking and passing full text to ensure 100% accuracy.", flush=True)
-        src_file = file_names_list[0] if file_names_list else "Policy Document"
-        metas = [{"source_file": src_file, "chunk_id": "full_document_bypass"}]
-        return context, 1, metas
+    # Smart Vector Chunking for ALL documents (no bypass).
+    # All documents go through: Parent-Child Sentence Windows →
+    # Hybrid Keyword+Vector Scoring → Cross-Encoder Reranking.
+    # Fallback to full text at line ~671 if chunking yields nothing.
+    print(f"[RAG SMART CHUNK] Document text is {len(context)} chars. Routing through full Smart Vector Chunking pipeline.", flush=True)
 
     # 1. Ensure chunks exist for ALL uploaded files
     chunks_count = 0
