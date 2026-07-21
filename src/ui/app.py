@@ -6707,13 +6707,20 @@ with _main_wrap:
                     reasoning   = f.get("reasoning",        "")
                     control_id  = f.get("control_id",       f.get("control", ""))
 
-                    ev_color_map = {
-                        "Strong Evidence": "#22c55e",
-                        "Some Evidence":   "#eab308",
-                        "No Evidence":     "#ef4444",
-                        "Not Relevant":    "#64748b",
-                    }
-                    ev_color = ev_color_map.get(ev_found, "#94a3b8")
+                    if audit_status == "Non-Compliant":
+                        if ev_found in ("Strong Evidence", "Some Evidence"):
+                            disp_ev_found = "Verified Vulnerability Proof"
+                            ev_color = "#f97316"  # Amber/Orange for vulnerability proof
+                        else:
+                            disp_ev_found = "No Supporting Evidence"
+                            ev_color = "#ef4444"  # Red
+                    else:
+                        if ev_found in ("Strong Evidence", "Some Evidence"):
+                            disp_ev_found = "Verified Compliant Evidence"
+                            ev_color = "#22c55e"  # Green for compliant evidence
+                        else:
+                            disp_ev_found = "No Evidence"
+                            ev_color = "#ef4444"
 
                     compliance_badge_color = {"Non-Compliant": "#ef4444", "False Positive": "#94a3b8", "Compliant": "#22c55e"}.get(audit_status, "#3b82f6")
                     if f.get("hallucination_check") == "GROUNDED_WITH_OCR_WARNING":
@@ -6953,7 +6960,7 @@ with _main_wrap:
                             {sev_score_html}
                           </div>
                           <div style='margin-bottom:4px;'>
-                            <span style='font-size:0.75rem; background:{ev_color}22; border:1px solid {ev_color}; color:{ev_color}; padding:2px 9px; border-radius:8px; font-weight:600;'>🔍 {ev_found}</span>
+                            <span style='font-size:0.75rem; background:{ev_color}22; border:1px solid {ev_color}; color:{ev_color}; padding:2px 9px; border-radius:8px; font-weight:600;'>🔍 {disp_ev_found}</span>
                           </div>
                           {'<div style="background:rgba(255,255,255,0.04); border-left:3px solid ' + ev_color + '; border-radius:4px; padding:8px 12px; margin:8px 0; font-size:0.82rem; color:#cbd5e1; font-style:italic;">💬 &ldquo;' + ev_snippet + '&rdquo;</div>' if ev_snippet else ''}
                           <span style='color:#cbd5e1'>📌 <b>Finding:</b> {f.get('finding','')}</span><br>
