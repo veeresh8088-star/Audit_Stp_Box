@@ -4046,9 +4046,9 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
                 "evidence_snippet": "",
                 "status": "Non-Compliant",
                 "severity": c["severity"] or "P3 Medium",
-                "finding": f"No response returned from LangGraph agent for {c['control']} ({c['label']}).",
+                "finding": f"No documented evidence found for {c['label']}. Relevant procedures or operational records are missing in the uploaded evidence repository.",
                 "recommendation": c["recommendation"] or f"Establish, document, and implement procedures to satisfy {c['control']} ({c['label']}).",
-                "reasoning": "Fallback result — graph agent execution failed.",
+                "reasoning": f"No matching policy or technical evidence for {c['control']} detected in the scanned documents.",
                 "source_files": scanned_files_str,
             })
 
@@ -6930,7 +6930,7 @@ with _main_wrap:
                         pol_badge = get_result_badge(pol_res)
                         evi_badge = get_result_badge(evi_res)
                         sev_score_color = "#ef4444" if sev_score >= 9.0 else ("#f97316" if sev_score >= 7.0 else ("#eab308" if sev_score >= 4.0 else ("#22c55e" if sev_score >= 0.1 else "#94a3b8")))
-                        sev_score_html = f"<span style='font-size:0.75rem; background:{sev_score_color}22; border:1px solid {sev_score_color}; color:{sev_score_color}; padding:2px 8px; border-radius:6px; font-weight:700;'>Score: {sev_score:.1f}</span>"
+                        sev_score_html = f"<span style='font-size:0.75rem; background:{sev_score_color}22; border:1px solid {sev_score_color}; color:{sev_score_color}; padding:2px 8px; border-radius:6px; font-weight:700;'>Score: {sev_score:.1f}</span>" if (sev_score is not None and sev_score > 0) else ""
 
                         st.markdown(f"""
                         <div class='{css}' style='margin-bottom:0px; border-bottom-left-radius:0px; border-bottom-right-radius:0px;'>
