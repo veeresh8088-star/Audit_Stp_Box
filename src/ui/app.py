@@ -6327,9 +6327,15 @@ with _main_wrap:
                 active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected", "Compliant", "Out Of Scope", "Out of Scope") or (f.get("requires_human_review") and f.get("status") not in ("Dismissed", "Rejected"))]
                 counts = {"P1 Critical": 0, "P2 High": 0, "P3 Medium": 0, "P4 Low": 0}
                 for f in active_findings:
-                    sev = f.get("severity", "P3 Medium")
-                    if sev in counts:
-                        counts[sev] += 1
+                    s_raw = str(f.get("severity", "")).upper()
+                    if "CRITICAL" in s_raw or "P1" in s_raw:
+                        counts["P1 Critical"] += 1
+                    elif "HIGH" in s_raw or "P2" in s_raw:
+                        counts["P2 High"] += 1
+                    elif "MEDIUM" in s_raw or "P3" in s_raw:
+                        counts["P3 Medium"] += 1
+                    elif "LOW" in s_raw or "P4" in s_raw:
+                        counts["P4 Low"] += 1
 
                 sf = st.session_state.get("severity_filter", set())
                 if not isinstance(sf, set):
@@ -6771,7 +6777,20 @@ with _main_wrap:
                 
                 disp_findings = active_findings
                 if sf:
-                    disp_findings = [f for f in active_findings if f.get("severity") in sf]
+                    def _matches_filter(f_obj, filter_set):
+                        s_raw = str(f_obj.get("severity", "")).upper()
+                        for flt in filter_set:
+                            flt_u = str(flt).upper()
+                            if ("CRITICAL" in flt_u or "P1" in flt_u) and ("CRITICAL" in s_raw or "P1" in s_raw):
+                                return True
+                            if ("HIGH" in flt_u or "P2" in flt_u) and ("HIGH" in s_raw or "P2" in s_raw):
+                                return True
+                            if ("MEDIUM" in flt_u or "P3" in flt_u) and ("MEDIUM" in s_raw or "P3" in s_raw):
+                                return True
+                            if ("LOW" in flt_u or "P4" in flt_u) and ("LOW" in s_raw or "P4" in s_raw):
+                                return True
+                        return False
+                    disp_findings = [f for f in active_findings if _matches_filter(f, sf)]
                 
                 if not disp_findings:
                     st.info("No technical vulnerability findings match the selected severity filters.")
