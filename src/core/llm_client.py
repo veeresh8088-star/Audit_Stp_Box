@@ -27,13 +27,11 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
             "prompt": prompt,
             "temperature": temperature,
             "stream": False,
-            "n_predict": 1024 if format == "json" else -1,
-
+            "n_predict": 1024,
+            "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>"]
         }
         if format == "json":
             payload["response_format"] = {"type": "json_object"}
-        if stop:
-            payload["stop"] = stop
             
         r = requests.post(url, json=payload, timeout=timeout)
         if r.status_code == 200:
