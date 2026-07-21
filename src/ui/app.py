@@ -3579,8 +3579,10 @@ def _enrich_finding_metadata(r, db_chunks):
 
     # 2b. Map Policy/Evidence present and result statuses
     r["policy_present"] = r.get("policy_present", "No")
-    r["evidence_present"] = r.get("evidence_present", "No")
-    r["severity_score"] = float(r.get("severity_score", 0.0))
+    cvss_val = r.get("severity_score") or r.get("cvss") or r.get("cvss_score") or 0.0
+    r["severity_score"] = float(cvss_val)
+    rel_val = r.get("relevance_score") or r.get("relevance") or r.get("rag_score") or 50
+    r["relevance_score"] = int(rel_val)
     
     if r.get("status") == "Out of Scope":
         r["policy_result"] = "Out of Scope"
