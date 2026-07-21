@@ -3589,6 +3589,11 @@ def _enrich_finding_metadata(r, db_chunks):
         pol_pres = str(r["policy_present"]).strip().capitalize()
         evi_pres = str(r["evidence_present"]).strip().capitalize()
         
+        # Strict Compliance Rule: Overall status is ONLY Compliant if BOTH Policy AND Evidence are present
+        if pol_pres == "No" or evi_pres == "No":
+            r["status"] = "Non-Compliant"
+            r["evidence_state"] = "INSUFFICIENT"
+            
         status_abbr = "Compliant" if r.get("status") == "Compliant" else "Non-Compliant"
         
         if pol_pres == "No" and evi_pres == "No":
@@ -3596,9 +3601,9 @@ def _enrich_finding_metadata(r, db_chunks):
             r["evidence_result"] = "Both missing"
         elif pol_pres == "No":
             r["policy_result"] = "Policy doc missing"
-            r["evidence_result"] = status_abbr
+            r["evidence_result"] = "Compliant" if evi_pres == "Yes" else "Non-Compliant"
         elif evi_pres == "No":
-            r["policy_result"] = status_abbr
+            r["policy_result"] = "Compliant" if pol_pres == "Yes" else "Non-Compliant"
             r["evidence_result"] = "Evidence missing"
         else:
             r["policy_result"] = status_abbr
