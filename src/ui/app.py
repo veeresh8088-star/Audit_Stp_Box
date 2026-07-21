@@ -4706,15 +4706,21 @@ with st.sidebar:
         _custom_ucs = _load_custom_use_cases()
 
         if selected_standard == "All Standards":
-            filtered_use_cases = list(USE_CASES) + _custom_ucs
+            raw_ucs = list(USE_CASES) + _custom_ucs
         else:
             mapped_use_cases = STANDARD_MAPPINGS.get(selected_standard, [])
-            # Also include custom controls whose use_case name was returned by scoping
             scoped_names = set(mapped_use_cases)
-            filtered_use_cases = (
+            raw_ucs = (
                 [u for u in USE_CASES if u["use_case"] in scoped_names]
-                + _custom_ucs  # always show custom controls to auditor
+                + _custom_ucs
             )
+
+        seen_sls = set()
+        filtered_use_cases = []
+        for u in raw_ucs:
+            if u["sl"] not in seen_sls:
+                seen_sls.add(u["sl"])
+                filtered_use_cases.append(u)
 
 
         # Initialize check states in session state
