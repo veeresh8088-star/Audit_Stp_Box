@@ -1521,17 +1521,305 @@ from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from src.core.pii_redactor import redact_pii
 
+
+def _export_iso_template_docx(session_title, findings, resolved_list, status, comments=""):
+    """
+    Generates an ISO audit DOCX report using `VAPT/Sample report.docx` as the master template.
+    Replaces metadata tables and rebuilds Table 6 (Observations) with live audit findings.
+    Falls back to programmatic creation if template not found.
+    """
+    import io as _io
+    import os
+    from copy import deepcopy
+    from datetime import datetime
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Cm
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    today = datetime.now().strftime("%d.%m.%Y")
+
+    # ── Read sidebar branding from session_state ──────────────────────────────
+    try:
+        import streamlit as st
+        auditor_lead     = st.session_state.get("auditor_lead",     "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")
+        auditor_firm     = st.session_state.get("auditor_firm",     "Digital Age Strategies Pvt Ltd")
+        auditor_reviewer = st.session_state.get("auditor_reviewer", "Mr. Subhash Rao")
+        auditor_approver = st.session_state.get("auditor_approver", "Mr. Dinesh S Shastry")
+        report_doc_id    = st.session_state.get("report_doc_id",    "DigAge:0001:2025-26")
+        target_client    = st.session_state.get("target_entity") or st.session_state.get("auditor_client") or "Client Organization"
+        submitted_to     = st.session_state.get("submitted_to",     "Audit Committee")
+        designation      = st.session_state.get("designation",      "IS Audit Lead")
+        testing_dates    = st.session_state.get("testing_dates",    today)
+    except Exception:
+        auditor_lead     = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
+        auditor_firm     = "Digital Age Strategies Pvt Ltd"
+        auditor_reviewer = "Mr. Subhash Rao"
+        auditor_approver = "Mr. Dinesh S Shastry"
+        report_doc_id    = "DigAge:0001:2025-26"
+        target_client    = "Client Organization"
+        submitted_to     = "Audit Committee"
+        designation      = "IS Audit Lead"
+        testing_dates    = today
+
+    # ── Load template (search multiple paths) ─────────────────────────────────
+    template_path = None
+    _base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    for candidate in [
+        os.path.join(_base, "VAPT", "Sample report.docx"),
+        os.path.join(_base, "Sample report.docx"),
+        r"c:\Users\HP\Desktop\llama,cpp\au\VAPT\Sample report.docx",
+    ]:
+        if os.path.exists(candidate):
+            template_path = candidate
+            break
+
+    if not template_path:
+        # Graceful fallback — call the original programmatic generator
+        return None  # caller will use old code path
+
+    doc = Document(template_path)
+
+    # ── Helper: set cell text preserving paragraph formatting ─────────────────
+    def _set_cell_text(cell, text):
+        for para in cell.paragraphs:
+            for run in para.runs:
+                run.text = ""
+        if cell.paragraphs:
+            cell.paragraphs[0].text = text
+        else:
+            cell.add_paragraph(text)
+
+    def _set_cell_bg(cell, hex_color):
+        tcPr = cell._tc.get_or_add_tcPr()
+        shd = OxmlElement("w:shd")
+        shd.set(qn("w:val"),   "clear")
+        shd.set(qn("w:color"), "auto")
+        shd.set(qn("w:fill"),  hex_color.upper())
+        tcPr.append(shd)
+
+    # ── Replace cover page paragraphs ─────────────────────────────────────────
+    audit_label = f"IS Audit Report for {session_title}"
+    for para in doc.paragraphs:
+        if "IS Audit Report for e-Office" in para.text or "IS Audit Report for Attendance" in para.text:
+            for run in para.runs:
+                run.text = run.text.replace("e-Office", session_title).replace("Attendance System Application", session_title)
+        if "e-Office" in para.text:
+            for run in para.runs:
+                run.text = run.text.replace("e-Office", session_title)
+
+    # ── Table 0: Document Control ──────────────────────────────────────────────
+    #  Row[1]: Document Title
+    #  Row[2]: Document ID
+    #  Row[4]: Prepared by
+    #  Row[5]: Reviewed by
+    #  Row[6]: Approved by
+    #  Row[8]: Release date
+    t0 = doc.tables[0]
+    _set_cell_text(t0.rows[1].cells[1], f"Information Security Audit - {session_title}")
+    _set_cell_text(t0.rows[2].cells[1], report_doc_id)
+    _set_cell_text(t0.rows[4].cells[1], auditor_lead)
+    _set_cell_text(t0.rows[5].cells[1], auditor_reviewer)
+    _set_cell_text(t0.rows[6].cells[1], auditor_approver)
+    _set_cell_text(t0.rows[8].cells[1], today)
+
+    # ── Table 3: Details of Auditee ───────────────────────────────────────────
+    #  Row[0]: Name of Organization
+    #  Row[1]: Audit Area
+    #  Row[3]: Auditee Representatives
+    t3 = doc.tables[3]
+    _set_cell_text(t3.rows[0].cells[2], target_client)
+    _set_cell_text(t3.rows[1].cells[2], f"IS Audit of {session_title}")
+    _set_cell_text(t3.rows[3].cells[2], submitted_to)
+
+    # ── Table 4: Details of Auditor ───────────────────────────────────────────
+    #  Row[0]: Lead Auditor
+    #  Row[1]: Co-Auditor (reuse lead)
+    #  Row[2]: Audit dates
+    #  Row[3]: Report Date
+    t4 = doc.tables[4]
+    _set_cell_text(t4.rows[0].cells[2], auditor_lead)
+    _set_cell_text(t4.rows[1].cells[2], auditor_firm)
+    _set_cell_text(t4.rows[2].cells[2], testing_dates)
+    _set_cell_text(t4.rows[3].cells[2], today)
+
+    # ── Count findings by risk level ──────────────────────────────────────────
+    active_findings = [
+        f for f in (findings or [])
+        if f.get("status", "Open") not in ("Dismissed", "Rejected", "Out of Scope", "Out Of Scope", "False Positive")
+    ]
+    accepted_findings = [
+        f for f in (findings or [])
+        if str(f.get("display_status", f.get("status", ""))).lower() in ("accepted", "compliant")
+    ]
+
+    def _risk_level(f):
+        sev = str(f.get("severity", f.get("risk", "Low"))).upper()
+        status_str = str(f.get("display_status", f.get("status", ""))).lower()
+        if status_str in ("accepted", "compliant"):
+            return "Accepted"
+        if "CRITICAL" in sev or "P1" in sev or "HIGH" in sev or "P2" in sev:
+            return "High"
+        if "MEDIUM" in sev or "P3" in sev:
+            return "Medium"
+        return "Low"
+
+    high_nc   = [f for f in active_findings if _risk_level(f) == "High"]
+    med_nc    = [f for f in active_findings if _risk_level(f) == "Medium"]
+    low_nc    = [f for f in active_findings if _risk_level(f) == "Low"]
+    acc       = accepted_findings
+
+    # ── Table 5: Summary of Findings ──────────────────────────────────────────
+    # Row[2]: HIGH   | count | complied | not-complied
+    # Row[3]: MEDIUM | count | complied | not-complied
+    # Row[4]: LOW    | count | complied | not-complied
+    # Row[5]: Accepted | count | - | -
+    t5 = doc.tables[5]
+    def _update_summary_row(row, label, total, complied, not_complied):
+        _set_cell_text(row.cells[1], label)
+        _set_cell_text(row.cells[2], str(total))
+        _set_cell_text(row.cells[3], str(complied))
+        _set_cell_text(row.cells[4], str(not_complied))
+
+    _update_summary_row(t5.rows[2], "HIGH",     len(high_nc), 0, len(high_nc))
+    _update_summary_row(t5.rows[3], "MEDIUM",   len(med_nc),  0, len(med_nc))
+    _update_summary_row(t5.rows[4], "LOW",      len(low_nc),  0, len(low_nc))
+    _update_summary_row(t5.rows[5], "Accepted", len(acc),     len(acc), 0)
+
+    # ── Table 6: Rebuild Observations ─────────────────────────────────────────
+    # Columns: S.No. | Control points | Policy Reference | Observations | Risk | Impact | Suggestion | Evidence
+    # Keep header row only (row 0), remove all other rows, add live findings
+    t6 = doc.tables[6]
+
+    # Remove all data rows (keep header row 0 only)
+    while len(t6.rows) > 1:
+        tr = t6.rows[-1]._tr
+        t6._tbl.remove(tr)
+
+    # Color map
+    RISK_COLORS = {
+        "High":     ("FFC0C0", "C00000"),  # light red bg, dark red text
+        "Medium":   ("FFFF99", "7F6000"),  # yellow bg, dark text
+        "Low":      ("E2EFDA", "375623"),  # light green bg, dark green text
+        "Accepted": ("DDEEFF", "1F4E79"),  # blue-grey bg, navy text
+    }
+    SECTION_BG = "D9D9D9"
+
+    # Helper to add a row to t6
+    def _add_obs_row(sno, control_pt, policy_ref, observation, risk, impact, suggestion, evidence, is_section=False):
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
+        import copy
+
+        # Clone the template row format from the header row (row 0)
+        hdr_tr = t6.rows[0]._tr
+        new_tr = copy.deepcopy(hdr_tr)
+        t6._tbl.append(new_tr)
+
+        # Get the newly appended row
+        new_row = t6.rows[-1]
+        cells = new_row.cells
+
+        values = [str(sno), str(control_pt), str(policy_ref), str(observation), str(risk), str(impact), str(suggestion), str(evidence)]
+        for ci, (cell, val) in enumerate(zip(cells, values)):
+            # Clear all runs
+            for para in cell.paragraphs:
+                for run in para.runs:
+                    run.text = ""
+            if cell.paragraphs:
+                run = cell.paragraphs[0].add_run(val)
+                run.font.size = Pt(9)
+                if is_section:
+                    run.bold = True
+            else:
+                p = cell.add_paragraph()
+                run = p.add_run(val)
+                run.font.size = Pt(9)
+
+            # Apply background color
+            if is_section:
+                _set_cell_bg(cell, SECTION_BG)
+            elif risk in RISK_COLORS:
+                bg_hex, _ = RISK_COLORS[risk]
+                _set_cell_bg(cell, bg_hex)
+
+    # Build grouped findings: group by VAPT control category
+    section_counters = {}
+    section_letters = {}
+    letter_idx = 0
+    ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    sno_counter = 1
+
+    # Group findings by control category
+    from collections import OrderedDict
+    control_groups = OrderedDict()
+
+    for f in (active_findings + acc):
+        ctrl = str(f.get("control_id") or f.get("control") or "General").strip()
+        # Use use_case name if available
+        uc_name = f.get("use_case") or f.get("control_category") or ctrl
+        cat_key = str(uc_name).split(".")[0].strip() if "." in str(uc_name) else str(uc_name)
+        if cat_key not in control_groups:
+            control_groups[cat_key] = []
+        control_groups[cat_key].append(f)
+
+    for grp_key, grp_findings in control_groups.items():
+        # Section header row
+        if grp_key not in section_letters:
+            section_letters[grp_key] = ALPHABET[letter_idx % 26]
+            letter_idx += 1
+        sec_letter = section_letters[grp_key]
+        _add_obs_row(sec_letter, grp_key, "", "", "", "", "", "", is_section=True)
+
+        # Finding rows
+        for f in grp_findings:
+            ctrl_pt    = str(f.get("use_case") or f.get("control") or f.get("control_id") or "")
+            policy_ref = str(f.get("policy_reference") or f.get("reference") or f.get("control_id") or "")
+            obs        = str(f.get("gap_description") or f.get("reasoning") or f.get("observation") or f.get("finding") or "")[:800]
+            display_s  = str(f.get("display_status") or f.get("status") or "Open")
+            risk_lbl   = _risk_level(f)
+            impact     = str(f.get("impact") or f.get("risk_impact") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Business Risk"))
+            suggestion = str(f.get("recommendation") or f.get("suggestion") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Remediate as per IS guidelines."))[:400]
+            evidence   = str(f.get("source_files") or f.get("evidence_quote") or f.get("evidence") or "Audit Evidence Files")[:200]
+
+            _add_obs_row(
+                sno=sno_counter,
+                control_pt=ctrl_pt,
+                policy_ref=policy_ref,
+                observation=obs,
+                risk=display_s if display_s.lower() in ("accepted","compliant") else risk_lbl,
+                impact=impact,
+                suggestion=suggestion,
+                evidence=evidence,
+            )
+            sno_counter += 1
+
+    # ── Save and return bytes ─────────────────────────────────────────────────
+    buf = _io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf.read()
+
+
 def export_docx_report(session_title, findings, resolved_list, status, comments=""):
     import streamlit as st
-    st_std = st.session_state.get("selected_standard", "") if "selected_standard" in dir(st) and hasattr(st, "session_state") else ""
-    is_vapt = (
-        "VAPT" in str(session_title).upper()
-        or "VULNERABILITY" in str(session_title).upper()
-        or "VAPT" in str(st_std).upper()
-        or any("VAPT" in str(f.get("control_id", "")).upper() or "VAPT" in str(f.get("control", "")).upper() for f in (findings or []))
-    )
+    # ── FIXED: Only check selected_standard — not finding contents ───────────
+    # This prevents ISO audits with VAPT-related findings from using VAPT format.
+    try:
+        st_std = st.session_state.get("selected_standard", "")
+    except Exception:
+        st_std = str(session_title)
+    is_vapt = "VAPT" in str(st_std).upper() or "VULNERABILITY" in str(st_std).upper()
+
     if is_vapt:
         return _export_vapt_docx(session_title, findings, resolved_list, status, comments)
+
+    # ── ISO: Use Sample report.docx template ──────────────────────────────────
+    template_result = _export_iso_template_docx(session_title, findings, resolved_list, status, comments)
+    if template_result is not None:
+        return template_result
+
+    # ── Fallback: original programmatic DOCX (if template not found) ─────────
     doc = Document()
 
     
@@ -1955,13 +2243,9 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         import streamlit as st
         st_std = st.session_state.get("selected_standard", "")
     except Exception:
-        st_std = ""
-    is_vapt = (
-        "VAPT" in str(session_title).upper()
-        or "VULNERABILITY" in str(session_title).upper()
-        or "VAPT" in str(st_std).upper()
-        or any("VAPT" in str(f.get("control_id", "")).upper() or "VAPT" in str(f.get("control", "")).upper() for f in (findings or []))
-    )
+        st_std = str(session_title)
+    # FIXED: Only check selected_standard — not finding contents
+    is_vapt = "VAPT" in str(st_std).upper() or "VULNERABILITY" in str(st_std).upper()
     if is_vapt:
         return _export_vapt_pdf(session_title, findings, resolved_list, status, comments)
     from fpdf.fonts import FontFace
