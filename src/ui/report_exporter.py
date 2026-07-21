@@ -373,8 +373,8 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_text_color(*BODY_TEXT)
     pdf.multi_cell(0, 3.8, clean_text(
         "Any kind of publication, reproduction, duplication or recording on a storage medium or any form of distribution by printing, "
-        "photocopying, microfilming or in any other way, even in part only with the prior written consent of TÜV SÜD South Asia.\n\n"
-        "By TÜV SÜD South Asia no part of this publication may be published, reproduced, copied or stored in any format or by any means as a print-out of this publication.\n\n"
+        f"photocopying, microfilming or in any other way, even in part only with the prior written consent of {auditor_firm}.\n\n"
+        f"By {auditor_firm} no part of this publication may be published, reproduced, copied or stored in any format or by any means as a print-out of this publication.\n\n"
         "Company, product or service names may be trademarks or service marks of others and are the property of their respective owners."
     ))
 
@@ -384,7 +384,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.ln(2)
 
     toc_items = [
-        ("1 TÜV SÜD Penetration test Methodology", "4"),
+        ("1 Penetration Test Methodology", "4"),
         ("   1.2 Standards-Based Testing and Reporting", "4"),
         ("   1.3 CVSS: Scoring Vulnerabilities", "4"),
         ("   1.4 How to Use This Document", "5"),
@@ -415,7 +415,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
 
     # ── PAGE 4: METHODOLOGY & CVSS V4.0 METRICS ─────────────────────────────
     pdf.add_page()
-    draw_banner("1 TÜV SÜD PENETRATION TEST METHODOLOGY")
+    draw_banner("1 PENETRATION TEST METHODOLOGY")
 
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
@@ -423,7 +423,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
     pdf.multi_cell(0, 4, clean_text(
-        "Our penetration test plans are performed according to internally developed guidelines by TÜV SÜD South Asia penetration test experts. "
+        f"Our penetration test plans are performed according to internally developed guidelines by {auditor_firm} penetration test experts. "
         "Our test cases, where possible, are grounded in publicly available standards published by organizations such as OWASP, OSSTMM, NIST, "
         "along with our experience as a penetration test team. As an extension to these test cases, additional test cases may be identified based on penetration tester experience and the attack surface of target of evaluation."
     ))
@@ -435,7 +435,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
     pdf.multi_cell(0, 4, clean_text(
-        "The overarching goal of a penetration test is to identify the vulnerabilities in a target of evaluation. To assist in the prioritization of vulnerability remediation, TÜV SÜD South Asia utilizes the Common Vulnerability Scoring System (CVSS v4.0). "
+        f"The overarching goal of a penetration test is to identify the vulnerabilities in a target of evaluation. To assist in the prioritization of vulnerability remediation, {auditor_firm} utilizes the Common Vulnerability Scoring System (CVSS v4.0). "
         "CVSS assists in the assessment of a vulnerability's severity by providing a standard set of characteristics by which the vulnerability is scored. These scores are then used to calculate an overall severity score from 1-10; 1 being lowest and 10 being highest."
     ))
     pdf.ln(2.5)
