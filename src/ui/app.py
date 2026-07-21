@@ -5127,7 +5127,6 @@ with st.sidebar:
             st.session_state.file_registry = {}
 
         if st.session_state.user_role != "auditee":
-            st.divider()
             if "auditor_duplicate_warnings" in st.session_state and st.session_state.auditor_duplicate_warnings:
                 for warn in st.session_state.auditor_duplicate_warnings:
                     st.warning(warn)
