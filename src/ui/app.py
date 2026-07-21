@@ -6621,6 +6621,24 @@ with _main_wrap:
                     else:
                         st.info("No controls resolved yet. Upload evidence and run the analysis.")
 
+                    # Also render any Out of Scope selected controls so all selected controls are visible
+                    oos_findings = [f for f in findings if f.get("status") in ("Out of Scope", "Out Of Scope")]
+                    if oos_findings:
+                        with st.expander(f"⚙️ Out of Scope / Non-Matching Selected Controls ({len(oos_findings)})", expanded=False):
+                            for oos_f in oos_findings:
+                                c_id = oos_f.get("control_id") or oos_f.get("control", "")
+                                c_name = oos_f.get("control", c_id)
+                                reason = oos_f.get("reasoning") or oos_f.get("finding", "Control does not apply to the provided evidence type.")
+                                st.markdown(f"""
+                                <div style='background:rgba(100,116,139,0.08);border:1px solid #475569;border-radius:8px;padding:12px 16px;margin:6px 0;'>
+                                    <div style='display:flex;justify-content:space-between;align-items:center;'>
+                                        <b style='color:#cbd5e1;font-size:0.9rem;'>{c_name}</b>
+                                        <span style='font-size:0.75rem;background:#475569;color:#f8fafc;padding:2px 8px;border-radius:10px;'>OUT OF SCOPE</span>
+                                    </div>
+                                    <div style='font-size:0.8rem;color:#94a3b8;margin-top:4px;'>{reason}</div>
+                                </div>
+                                """, unsafe_allow_html=True)
+
                 st.markdown(f"<br><small style='color:#64748b'>Generated · {datetime.now().strftime('%d %b %Y %H:%M:%S')} · {selected_standard} ({len(selected_ucs)} Controls)</small>", unsafe_allow_html=True)
                 st.divider()
 
