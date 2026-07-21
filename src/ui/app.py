@@ -4723,6 +4723,12 @@ with st.sidebar:
             key="selected_target_framework"
         )
         selected_standard = _std_key_map[_selected_label]
+        # Clear stale findings when framework changes
+        if selected_standard != st.session_state.get("selected_standard", selected_standard):
+            st.session_state.findings = []
+            st.session_state.resolved_list = []
+            st.session_state.severity_filter = set()
+            st.session_state.stage = 0
         st.session_state["selected_standard"] = selected_standard
 
         # Info explainer: cross-walk architecture note
@@ -4823,7 +4829,15 @@ with st.sidebar:
                     label_visibility="collapsed",
                     key="vapt_assessment_mode_radio"
                 )
+                _prev_mode = st.session_state.get("_prev_assessment_mode", st.session_state.assessment_mode)
                 st.session_state.assessment_mode = "Technical findings only" if "Technical" in mode_choice else "Control-mapped audit"
+                if _prev_mode != st.session_state.assessment_mode:
+                    # Mode changed — clear severity filter & findings to avoid stale state
+                    st.session_state.severity_filter = set()
+                    st.session_state.findings = []
+                    st.session_state.resolved_list = []
+                    st.session_state.stage = 0
+                st.session_state["_prev_assessment_mode"] = st.session_state.assessment_mode
                 if st.session_state.assessment_mode == "Technical findings only":
                     st.caption("💡 **Technical findings only**: Flat vulnerability list with zero compliance verdicts. Shows CVSS, target IPs, CVEs, and remediation per finding.")
                 else:
@@ -6219,7 +6233,17 @@ with _main_wrap:
 
             elif st.session_state.stage == 5:
                 is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
-                findings = st.session_state.findings
+                if not st.session_state.get("findings") and st.session_state.get("file_registry"):
+                    from src.core.parsers import parse_tool_file
+                    auto_findings = []
+                    for fname, ftext in st.session_state.file_registry.items():
+                        acts, _ = parse_tool_file(fname, ftext or "")
+                        for a in acts:
+                            auto_findings.append(a.to_dict() if hasattr(a, "to_dict") else dict(a))
+                    if auto_findings:
+                        st.session_state.findings = auto_findings
+
+                findings = st.session_state.get("findings", [])
                 resolved_list = st.session_state.get("resolved_list", [])
             
                 # --- ISO & VAPT CONTROL FILTER (SIDEBAR CHECKBOXES) ---

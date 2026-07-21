@@ -806,10 +806,28 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         }
     ]
 
-    list_to_render = active_findings if active_findings else default_findings_detail
+    # ── Smart rendering: Top 30 critical/high get full detail cards, rest in summary table ──
+    if active_findings:
+        # Sort: Critical first, then High, Medium, Low
+        def _sev_order(f):
+            s = str(f.get("severity", "LOW")).upper()
+            if "CRITICAL" in s: return 0
+            if "HIGH" in s: return 1
+            if "MEDIUM" in s: return 2
+            return 3
+        
+        sorted_findings = sorted(active_findings, key=_sev_order)
+        detail_findings = sorted_findings[:30]          # Full detail cards for top 30
+        summary_findings = sorted_findings[30:]         # Remaining in compact table
+    else:
+        detail_findings = default_findings_detail
+        summary_findings = []
+
+    list_to_render = detail_findings
 
     for idx, f in enumerate(list_to_render, 1):
-        if idx > 1:
+        # Start new page if less than 60mm remains (not enough for a full card)
+        if pdf.get_y() > 220:
             pdf.add_page()
             
         vuln_title = html.unescape(str(f.get("title") or f.get("finding") or f.get("control") or f"Finding 3.3.{idx}"))
@@ -894,9 +912,39 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             pdf.add_page()
             pdf.image(extra_img, x=15, y=20, w=175)
 
-    # ── PAGE 12: APPENDIX ─────────────────────────────────────────────────
+    # ── COMPACT SUMMARY TABLE: Remaining findings (beyond top 30) ───────────
+    if summary_findings:
+        pdf.add_page()
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.cell(0, 5.5, f"3.4 Additional Findings Summary ({len(summary_findings)} findings)", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_text_color(*BODY_TEXT)
+        pdf.cell(0, 4, "The following findings are listed in summary format. Full remediation details follow the same guidance as Section 3.3.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
+        with pdf.table(col_widths=(10, 95, 20, 25, 30), text_align="L") as tbl:
+            hrow = tbl.row()
+            hrow.cell("#",          style=hdr_blue)
+            hrow.cell("Vulnerability",  style=hdr_blue)
+            hrow.cell("CVSS",       style=hdr_blue)
+            hrow.cell("Severity",   style=hdr_blue)
+            hrow.cell("Target",     style=hdr_blue)
+            for sidx, sf_item in enumerate(summary_findings, len(detail_findings) + 1):
+                st_title  = clean_text((sf_item.get("title") or sf_item.get("control") or f"Finding {sidx}")[:80])
+                st_score  = str(sf_item.get("severity_score", sf_item.get("score", "—")))
+                st_sev    = str(sf_item.get("severity", "—")).split()[-1].upper()[:8]
+                st_target = clean_text(str(sf_item.get("target") or sf_item.get("control_id") or "—")[:30])
+                srow = tbl.row()
+                srow.cell(f"{sidx}.", style=body_style)
+                srow.cell(st_title,   style=body_style)
+                srow.cell(st_score,   style=body_style)
+                srow.cell(st_sev,     style=body_style)
+                srow.cell(st_target,  style=body_style)
+
+    # ── APPENDIX ─────────────────────────────────────────────────
     pdf.add_page()
     draw_banner("4 APPENDIX")
+
 
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
