@@ -14,7 +14,7 @@ def _resolve_host(url=None, default_port=11434):
         url = f"http://{url}" if ":" in url else f"http://{url}:{default_port}"
     return url
 
-def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=4, timeout=120, stop=None):
+def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=4, timeout=600, stop=None):
     """Sends a non-streaming prompt completion request to the configured LLM backend."""
     backend = get_llm_backend()
     host = _resolve_host()
@@ -82,7 +82,7 @@ def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=4)
             "temperature": temperature,
             "stream": True,
         }
-        r = requests.post(url, json=payload, stream=True, timeout=90)
+        r = requests.post(url, json=payload, stream=True, timeout=300)
         if r.status_code != 200:
             raise Exception(f"llama.cpp server error: {r.status_code} - {r.text}")
             
@@ -109,7 +109,7 @@ def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=4)
             },
             "keep_alive": "15m"
         }
-        r = requests.post(url, json=payload, stream=True, timeout=90)
+        r = requests.post(url, json=payload, stream=True, timeout=300)
         if r.status_code != 200:
             raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
             
