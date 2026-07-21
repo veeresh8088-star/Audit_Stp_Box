@@ -6183,10 +6183,26 @@ with _main_wrap:
         with tab_report:
             is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
             findings = st.session_state.get("findings", [])
+            resolved_list = st.session_state.get("resolved_list", [])
             active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected", "Compliant", "Out Of Scope", "Out of Scope") or (f.get("requires_human_review") and f.get("status") not in ("Dismissed", "Rejected"))]
             sf = st.session_state.get("severity_filter", set())
             if not isinstance(sf, set):
                 sf = set()
+            open_sev_filters = sf - {"RESOLVED"}
+            audited_names = {f.get("control_id") or f.get("control") for f in findings if f.get("control_id") or f.get("control")} | set(resolved_list)
+            checked_control_ids = set()
+            for c_name in audited_names:
+                if not c_name: continue
+                c_clean = str(c_name).strip()
+                checked_control_ids.add(c_clean)
+                for u in USE_CASES:
+                    uc_name = u["use_case"]
+                    uc_sl = u["sl"]
+                    if c_clean == uc_sl or c_clean == uc_name or c_clean in uc_name or uc_name.startswith(c_clean):
+                        checked_control_ids.add(uc_name)
+                        checked_control_ids.add(uc_sl)
+            auditor_uploaded_filenames = set()
+
             with _bg_lock:
                 is_currently_running = st.session_state.active_chat_id in _bg_running
             
