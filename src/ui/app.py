@@ -6181,6 +6181,7 @@ with _main_wrap:
 
     if tab_report is not None:
         with tab_report:
+            is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
             with _bg_lock:
                 is_currently_running = st.session_state.active_chat_id in _bg_running
             
