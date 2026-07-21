@@ -1,0 +1,3 @@
+Authentication is done based on multiple parameters like auth-token, machine ID, client ID, SA, and IP 
+address assigned. There are firewall rules with whitelisting of such Sub-AUA IP addresses to further 
+control the authentication process.

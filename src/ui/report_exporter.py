@@ -614,14 +614,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     except Exception:
         dynamic_ips = None
 
-    default_ips = [
-        "40.113.64.39", "20.16.45.35", "51.124.236.137",
-        "40.113.70.57", "51.124.236.134", "20.160.172.53",
-        "13.79.32.252", "20.166.55.139", "20.224.131.202",
-        "52.169.16.121", "13.94.107.40", "51.124.236.151",
-        "40.113.64.127", "13.74.56.244", "52.164.122.235"
-    ]
-    ip_list = dynamic_ips if dynamic_ips else default_ips
+    ip_list = dynamic_ips if dynamic_ips else ["Target Systems Ingested from Scan File"]
     pdf.set_font("Helvetica", "", 8)
     with pdf.table(col_widths=(60, 60, 60), text_align="C") as table:
         for i in range(0, len(ip_list), 3):

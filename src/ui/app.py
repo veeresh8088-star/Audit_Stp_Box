@@ -4365,7 +4365,6 @@ if st.session_state._last_loaded_chat_id != st.session_state.active_chat_id:
             st.session_state.findings = snap.get("findings", [])
             st.session_state.resolved_list = snap.get("resolved_list", [])
             st.session_state["resolved_count"] = len(st.session_state.resolved_list) if st.session_state.resolved_list else 0
-            st.session_state["resolved_controls"] = set(st.session_state.resolved_list) if st.session_state.resolved_list else set()
             st.session_state.stage = snap.get("stage", 5)
             st.session_state["ollama_error"] = snap.get("error", None)
             st.session_state.context = snap.get("context", "")
@@ -4373,6 +4372,55 @@ if st.session_state._last_loaded_chat_id != st.session_state.active_chat_id:
             st.session_state.audit_status = snap.get("audit_status", "Draft")
             st.session_state.auditor_comments = snap.get("auditor_comments", "")
         except Exception: pass
+
+def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls):
+    """
+    100% Instant Pure-Python Technical VAPT Finding Extraction.
+    Zero LLM required, completes in < 0.5 seconds directly via vapt_parsers & control_mapper.
+    """
+    all_findings = []
+    resolved_ctrls = set()
+    try:
+        from src.core.parsers import parse_tool_file, map_finding_to_control
+        
+        for fd in files_data:
+            fname = fd.get("name", "")
+            ftext = fd.get("text", "")
+            if not ftext and fd.get("bytes"):
+                try:
+                    ftext = fd.get("bytes").decode("utf-8", errors="ignore")
+                except Exception:
+                    ftext = ""
+            
+            actionable, info = parse_tool_file(fname, ftext or "")
+            for f in actionable:
+                c_id = map_finding_to_control(f)
+                f_dict = f.to_dict() if hasattr(f, "to_dict") else dict(f)
+                f_dict["control_id"] = c_id
+                f_dict["control"] = f_dict.get("control") or c_id
+                f_dict["status"] = "Non-Compliant"
+                f_dict["display_status"] = "Open"
+                all_findings.append(f_dict)
+                resolved_ctrls.add(c_id)
+
+        with _bg_lock:
+            _bg_results[bg_key] = {
+                "findings": all_findings,
+                "resolved_list": list(resolved_ctrls),
+                "resolved_count": len(resolved_ctrls),
+                "resolved_controls": resolved_ctrls,
+                "error": None,
+                "completed": True
+            }
+            _bg_running.discard(bg_key)
+    except Exception as e:
+        with _bg_lock:
+            _bg_results[bg_key] = {
+                "findings": [],
+                "error": str(e),
+                "completed": True
+            }
+            _bg_running.discard(bg_key)
 
 uc = USE_CASES[st.session_state.sel_uc]
 
@@ -4759,8 +4807,34 @@ with st.sidebar:
             key = f"ctrl_chk_{sl}"
             st.session_state[key] = st.session_state.ctrl_states[sl]
 
-        # 🛡️ AUDIT MODE
+        # ⚙️ ASSESSMENT WORKFLOW MODE (SCREEN 1 MODE SELECT - PURE VAPT SPECIFIC)
+        is_vapt_standard = selected_standard in ("VAPT Framework Controls", "VAPT") or (isinstance(selected_standard, str) and "VAPT" in selected_standard.upper() and "ISO" not in selected_standard.upper() and "ALL STANDARDS" not in selected_standard.upper())
+        
         if st.session_state.user_role != "auditee":
+            if is_vapt_standard:
+                st.markdown("**⚙️ Assessment Mode (Chosen before upload)**")
+                if "assessment_mode" not in st.session_state:
+                    st.session_state.assessment_mode = "Technical findings only"
+                
+                mode_choice = st.radio(
+                    "Assessment Mode Selection",
+                    options=["⚙️ Technical findings only (Recommended)", "🛡️ Control-mapped audit (VAPT-1..15)"],
+                    index=0 if "Technical" in st.session_state.get("assessment_mode", "Technical") else 1,
+                    label_visibility="collapsed",
+                    key="vapt_assessment_mode_radio"
+                )
+                st.session_state.assessment_mode = "Technical findings only" if "Technical" in mode_choice else "Control-mapped audit"
+                if st.session_state.assessment_mode == "Technical findings only":
+                    st.caption("💡 **Technical findings only**: Flat vulnerability list with zero compliance verdicts. Shows CVSS, target IPs, CVEs, and remediation per finding.")
+                else:
+                    st.caption("🛡️ **Control-mapped audit**: Maps findings into VAPT-1..15. Evaluates policy docs, technical evidence, and enforces human approval gate.")
+                st.divider()
+            else:
+                # ISO 27001 is ALWAYS a Control-Mapped Audit
+                st.session_state.assessment_mode = "Control-mapped audit"
+
+        # 🛡️ AUDIT MODE (Relevant when running Control-Mapped Audit or ISO 27001)
+        if st.session_state.user_role != "auditee" and (st.session_state.assessment_mode == "Control-mapped audit" or not is_vapt_standard):
             st.markdown("**🛡️ Audit Mode**")
             if "audit_mode" not in st.session_state:
                 st.session_state.audit_mode = "Deep"
@@ -5258,14 +5332,12 @@ with st.sidebar:
                 st.toast(f"Removed '{_to_remove}' from memory")
                 st.rerun()
 
-        if st.session_state.user_role != "auditee":
-            st.divider()
-
+        run = False
         with _bg_lock:
             is_current_running = st.session_state.active_chat_id in _bg_running
 
-        run = False
         if st.session_state.user_role != "auditee":
+            st.divider()
             col_run, col_rst = st.columns([2,1])
             if is_current_running:
                 if col_run.button("Stop Scan", type="primary", use_container_width=True, key="stop_scan_main_btn"):
@@ -5280,9 +5352,9 @@ with st.sidebar:
                 is_manual = st.session_state.get("scoping_mode", "Manual Scoping") == "Manual Scoping"
                 if not selected_ucs:
                     st.warning("No controls selected. Please check at least one control above to analyze.")
-                    run = col_run.button("Run Analysis", type="primary", use_container_width=True, disabled=is_manual)
+                    run = col_run.button("Run Analysis", type="primary", use_container_width=True, disabled=is_manual, key="btn_run_analysis_no_ctrls")
                 else:
-                    run = col_run.button("Run Analysis", type="primary", use_container_width=True)
+                    run = col_run.button("Run Analysis", type="primary", use_container_width=True, key="btn_run_analysis_main")
             
             if col_rst.button("↺", use_container_width=True):
                 with _bg_lock:
@@ -5564,17 +5636,28 @@ if run or st.session_state.get("start_analysis_on_next_run"):
                 json.dumps({"findings": [], "resolved_list": [], "stage": 5})
             )
             
-            from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-            thread = threading.Thread(
-                target=_run_ollama_bg,
-                args=(bg_key, files_data, set(selected_sls), ai_model),
-                kwargs={
+            is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
+            
+            if is_tech_only:
+                target_bg_func = _run_fast_technical_vapt_bg
+                thread_args = (bg_key, files_data, set(selected_sls))
+                thread_kwargs = {}
+            else:
+                target_bg_func = _run_ollama_bg
+                thread_args = (bg_key, files_data, set(selected_sls), ai_model)
+                thread_kwargs = {
                     "session_id": st.session_state.active_chat_id,
                     "audit_mode": st.session_state.get("audit_mode", "Deep"),
                     "custom_docs": dict(st.session_state.get("custom_control_documents", {})),
                     "custom_evidence": dict(st.session_state.get("custom_evidence_mappings", {})),
                     "file_registry": dict(st.session_state.get("file_registry", {}))
-                },
+                }
+            
+            from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+            thread = threading.Thread(
+                target=target_bg_func,
+                args=thread_args,
+                kwargs=thread_kwargs,
                 daemon=True
             )
             add_script_run_ctx(thread, get_script_run_ctx())
@@ -5984,7 +6067,8 @@ def _render_document_viewer_fragment(doc_view_scope_select):
 @st.fragment(run_every=timedelta(seconds=3))
 def _render_running_progress(bg_key):
     with _bg_lock:
-        prog_data = _bg_store["progress"].get(bg_key, "Deep AI Scanning In Progress...")
+        default_msg = "⚡ Extracting technical findings with Pure Python Engine (0ms LLM)..." if st.session_state.get("assessment_mode") == "Technical findings only" else "Deep AI Scanning In Progress..."
+        prog_data = _bg_store["progress"].get(bg_key, default_msg)
     if isinstance(prog_data, dict):
         prog_msg = prog_data.get("text", "")
         prog_pct = max(0, min(100, int(prog_data.get("percent", 0))))
@@ -6127,14 +6211,23 @@ with _main_wrap:
                 findings = st.session_state.findings
                 resolved_list = st.session_state.get("resolved_list", [])
             
-                # --- ISO CONTROL FILTER (SIDEBAR CHECKBOXES) ---
-                # Define selected_ucs based on the controls that were actually audited in this session
-                # rather than the current sidebar checklist states, which may have reset due to expander collapse.
-                audited_names = {f.get("control_id") or f.get("control") for f in findings} | set(resolved_list)
-                selected_ucs = [u for u in USE_CASES if u["use_case"] in audited_names]
-                checked_control_ids = {u["use_case"] for u in selected_ucs}
-                findings = [f for f in findings if (f.get("control_id") or f.get("control")) in checked_control_ids]
-                resolved_list = [ctrl for ctrl in resolved_list if ctrl in checked_control_ids]
+                # --- ISO & VAPT CONTROL FILTER (SIDEBAR CHECKBOXES) ---
+                audited_names = {f.get("control_id") or f.get("control") for f in findings if f.get("control_id") or f.get("control")} | set(resolved_list)
+                checked_control_ids = set()
+                for c_name in audited_names:
+                    if not c_name: continue
+                    c_clean = str(c_name).strip()
+                    checked_control_ids.add(c_clean)
+                    for u in USE_CASES:
+                        uc_name = u["use_case"]
+                        uc_sl = u["sl"]
+                        if c_clean == uc_sl or c_clean == uc_name or c_clean in uc_name or uc_name.startswith(c_clean):
+                            checked_control_ids.add(uc_name)
+                            checked_control_ids.add(uc_sl)
+
+                if checked_control_ids:
+                    findings = [f for f in findings if (f.get("control_id") or f.get("control") or "VAPT") in checked_control_ids or any(c in str(f.get("control_id") or f.get("control")) for c in checked_control_ids)]
+                    resolved_list = [ctrl for ctrl in resolved_list if ctrl in checked_control_ids]
             
                 # Query auditor-uploaded filenames to display badges
                 with force_master():
@@ -6244,12 +6337,21 @@ with _main_wrap:
                         st.session_state.severity_filter = new_sf
                         st.rerun()
 
-                c1, c2, c3, c4, c5 = st.columns(5)
-                _stat_card(c1, "#ef4444", counts['P1 Critical'], "P1 · Critical",   "P1 Critical", "flt_crit", "🔴")
-                _stat_card(c2, "#f97316", counts['P2 High'],    "P2 · High",        "P2 High",     "flt_high", "🟠")
-                _stat_card(c3, "#eab308", counts['P3 Medium'],  "P3 · Medium",      "P3 Medium",   "flt_med",  "🟡")
-                _stat_card(c4, "#22c55e", counts['P4 Low'],     "P4 · Low",         "P4 Low",      "flt_low",  "🟢")
-                _stat_card(c5, "#22c55e", len(resolved_list),   "✓ Compliant",      "RESOLVED",    "flt_res",  "✅")
+                is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
+                
+                if is_tech_only:
+                    c1, c2, c3, c4 = st.columns(4)
+                    _stat_card(c1, "#ef4444", counts['P1 Critical'], "Critical", "P1 Critical", "flt_crit", "🔴")
+                    _stat_card(c2, "#f97316", counts['P2 High'],    "High",     "P2 High",     "flt_high", "🟠")
+                    _stat_card(c3, "#eab308", counts['P3 Medium'],  "Medium",   "P3 Medium",   "flt_med",  "🟡")
+                    _stat_card(c4, "#22c55e", counts['P4 Low'],     "Low",      "P4 Low",      "flt_low",  "🟢")
+                else:
+                    c1, c2, c3, c4, c5 = st.columns(5)
+                    _stat_card(c1, "#ef4444", counts['P1 Critical'], "P1 · Critical",   "P1 Critical", "flt_crit", "🔴")
+                    _stat_card(c2, "#f97316", counts['P2 High'],    "P2 · High",        "P2 High",     "flt_high", "🟠")
+                    _stat_card(c3, "#eab308", counts['P3 Medium'],  "P3 · Medium",      "P3 Medium",   "flt_med",  "🟡")
+                    _stat_card(c4, "#22c55e", counts['P4 Low'],     "P4 · Low",         "P4 Low",      "flt_low",  "🟢")
+                    _stat_card(c5, "#22c55e", len(resolved_list),   "✓ Compliant",      "RESOLVED",    "flt_res",  "✅")
 
                 _fc = {"P1 Critical":"#ef4444","P2 High":"#f97316","P3 Medium":"#eab308","P4 Low":"#22c55e","RESOLVED":"#22c55e"}
                 _fl = {"P1 Critical":"P1 · Critical","P2 High":"P2 · High","P3 Medium":"P3 · Medium","P4 Low":"P4 · Low","RESOLVED":"✓ Compliant"}
@@ -6638,7 +6740,52 @@ with _main_wrap:
                                                         orig_f["comment"] = comp_cmt
                                                 save_current_findings_snapshot()
                     else:
-                        st.info("No controls resolved yet. Upload evidence and run the analysis.")
+                        if not is_tech_only:
+                            st.info("No controls resolved yet. Upload evidence and run the analysis.")
+
+            if is_tech_only:
+                st.markdown("### 2. After analysis — technical findings report", unsafe_allow_html=True)
+                st.markdown("<br>", unsafe_allow_html=True)
+                
+                disp_findings = active_findings
+                if sf:
+                    disp_findings = [f for f in active_findings if f.get("severity") in sf]
+                
+                if not disp_findings:
+                    st.info("No technical vulnerability findings match the selected severity filters.")
+                else:
+                    for f in disp_findings:
+                        t = f.get("title") or f.get("finding") or "Vulnerability Finding"
+                        sev_raw = str(f.get("severity", "P4 Low")).upper()
+                        if "CRITICAL" in sev_raw or "P1" in sev_raw:
+                            sev_label, sev_color = "Critical", "#ef4444"
+                        elif "HIGH" in sev_raw or "P2" in sev_raw:
+                            sev_label, sev_color = "High", "#f97316"
+                        elif "MEDIUM" in sev_raw or "P3" in sev_raw:
+                            sev_label, sev_color = "Medium", "#eab308"
+                        else:
+                            sev_label, sev_color = "Low", "#22c55e"
+                        
+                        cve_val = f.get("cve_list") or f.get("cve") or []
+                        cves = ", ".join(cve_val) if isinstance(cve_val, list) else str(cve_val)
+                        score = float(f.get("severity_score") or f.get("score") or 2.3)
+                        target_host = f.get("target") or f.get("host") or "Scoped Target Systems"
+                        remed = f.get("recommendation") or f.get("remediation") or "Upgrade or apply vendor security updates."
+
+                        st.markdown(f"""
+                        <div style='background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; border-radius: 12px; padding: 18px; margin-bottom: 14px;'>
+                            <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                <b style='font-size: 1.05rem; color: #f8fafc;'>{t}</b>
+                                <span style='background: {sev_color}22; border: 1px solid {sev_color}; color: {sev_color}; padding: 3px 12px; border-radius: 12px; font-weight: 700; font-size: 0.8rem;'>{sev_label}</span>
+                            </div>
+                            <div style='color: #94a3b8; font-size: 0.88rem; margin-top: 8px;'>
+                                {'<b>' + cves + '</b> · ' if cves else ''}<b>CVSS {score:.1f}</b> · <b>hosts:</b> {target_host}
+                            </div>
+                            <div style='color: #cbd5e1; font-size: 0.88rem; margin-top: 8px; border-top: 1px dashed #334155; padding-top: 8px;'>
+                                <b style='color: #86efac;'>Remediation:</b> {remed}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
 
                     # Also render any Out of Scope selected controls so all selected controls are visible
                     oos_findings = [f for f in findings if f.get("status") in ("Out of Scope", "Out Of Scope")]
@@ -6978,6 +7125,7 @@ with _main_wrap:
                           {'<div style="background:rgba(255,255,255,0.04); border-left:3px solid ' + ev_color + '; border-radius:4px; padding:8px 12px; margin:8px 0; font-size:0.82rem; color:#cbd5e1; font-style:italic;">💬 &ldquo;' + ev_snippet + '&rdquo;</div>' if ev_snippet else ''}
                           <span style='color:#cbd5e1'>📌 <b>Finding:</b> {f.get('finding','')}</span><br>
                           <span style='color:#86efac'>→ <b>Recommendation:</b> {f.get('recommendation','')}</span>
+                          {'<div style="margin-top:6px; font-size:0.8rem; color:#93c5fd;">🔗 <b>References:</b> ' + (", ".join(f.get("see_also")) if isinstance(f.get("see_also"), list) else str(f.get("see_also") or f.get("cve_list") or f.get("cve") or "N/A")) + '</div>' if f.get("see_also") or f.get("cve_list") or f.get("cve") else ''}
                           {'<div style="margin-top:8px; background:rgba(59,130,246,0.06); border-left:3px solid #3b82f6; border-radius:4px; padding:8px 12px; font-size:0.82rem; color:#93c5fd;"><b>🧠 Auditor Reasoning:</b> ' + reasoning + '</div>' if reasoning else ''}
                           <div style='margin-top:8px; font-size:0.8rem; color:#94a3b8; border-top:1px dashed #334155; padding-top:6px; display:flex; flex-direction:column; gap:4px;'>
                             <div style='display:flex; align-items:center; gap:6px;'>

@@ -26,6 +26,87 @@ class NessusParser(BaseParser):
         actionable_findings: List[Finding] = []
         info_findings: List[Finding] = []
 
+        # 1. First check section-wrapper divs (Nessus HTML report exports like NOCPL_vu0k9r.html)
+        wrappers = soup.find_all('div', class_='section-wrapper')
+        if wrappers:
+            for w in wrappers:
+                txt = w.get_text()
+                header = w.find_previous_sibling('div')
+                h_text = header.get_text().strip() if header else ''
+                
+                m_header = re.search(r'(\d+)\s*\(\d+\)\s*-\s*(.+)', h_text)
+                plugin_id = m_header.group(1).strip() if m_header else ''
+                title = m_header.group(2).strip() if m_header else (h_text or "Nessus Vulnerability Finding")
+
+                m_rf = re.search(r'Risk Factor\s*\n*\s*(Critical|High|Medium|Low|None|Informational)', txt, re.IGNORECASE)
+                raw_sev = m_rf.group(1).strip() if m_rf else "INFO"
+                if raw_sev.lower() in ("none", "informational"):
+                    severity = "INFO"
+                else:
+                    severity = raw_sev.upper()
+
+                score = 2.3
+                m_cvss = re.search(r'CVSS v3\.0 Base Score\s*\n*\s*([\d\.]+)', txt)
+                if m_cvss:
+                    try:
+                        score = float(m_cvss.group(1))
+                    except Exception:
+                        score = 2.3
+                elif severity == "CRITICAL":
+                    score = 9.8
+                elif severity == "HIGH":
+                    score = 7.5
+                elif severity == "MEDIUM":
+                    score = 5.3
+                else:
+                    score = 2.3
+
+                m_vec = re.search(r'\(CVSS:3\.0/([^\)]+)\)', txt)
+                cvss_vector = f"CVSS:3.0/{m_vec.group(1)}" if m_vec else None
+
+                cves = sorted(list(set(re.findall(r'CVE-\d{4}-\d{4,7}', txt, re.IGNORECASE))))
+
+                desc = ""
+                m_desc = re.search(r'Description\s*\n\s*(.*?)(?=\n\s*(?:See Also|Solution|Risk Factor|Plugin Information|Plugin Output|$))', txt, re.DOTALL)
+                if m_desc:
+                    desc = m_desc.group(1).strip()
+
+                remed = ""
+                m_sol = re.search(r'Solution\s*\n\s*(.*?)(?=\n\s*(?:Risk Factor|Plugin Information|Plugin Output|See Also|$))', txt, re.DOTALL)
+                if m_sol:
+                    remed = m_sol.group(1).strip()
+
+                targets = []
+                for h2 in w.find_all(['h2', 'h3']):
+                    t_str = h2.get_text().strip()
+                    m_ip = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', t_str)
+                    if m_ip:
+                        targets.append(m_ip.group(1))
+
+                t_host = ", ".join(sorted(list(set(targets)))) if targets else "Scoped Host Targets"
+
+                finding = Finding(
+                    plugin_id=plugin_id,
+                    title=title,
+                    severity=severity,
+                    score=score,
+                    cvss_vector=cvss_vector,
+                    cve_list=cves,
+                    description=desc,
+                    remediation=remed,
+                    target=t_host,
+                    evidence_snippet=txt[:300]
+                )
+
+                if severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+                    actionable_findings.append(finding)
+                else:
+                    info_findings.append(finding)
+
+            if actionable_findings or info_findings:
+                return map_findings_list(actionable_findings), info_findings
+
+        # 2. Fallback to generic leaf div search
         for div in soup.find_all('div'):
             txt = div.get_text()
             if 'Risk Factor' in txt and 'Synopsis' in txt and 'Description' in txt:

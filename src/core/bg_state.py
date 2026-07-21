@@ -1,15 +1,15 @@
-import streamlit as st
 import threading
 
-@st.cache_resource
 def _get_bg_store():
-    return {
-        "results": {},
-        "running": set(),
-        "progress": {},
-        "lock": threading.Lock(),
-        "summaries": {}
-    }
+    if not hasattr(_get_bg_store, "_instance"):
+        _get_bg_store._instance = {
+            "results": {},
+            "running": set(),
+            "progress": {},
+            "lock": threading.Lock(),
+            "summaries": {}
+        }
+    return _get_bg_store._instance
 
 _bg_store = _get_bg_store()
 _bg_results = _bg_store["results"]
