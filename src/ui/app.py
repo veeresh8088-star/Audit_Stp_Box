@@ -4386,13 +4386,23 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls):
         for fd in files_data:
             fname = fd.get("name", "")
             ftext = fd.get("text", "")
-            if not ftext and fd.get("bytes"):
+            fname_lower = fname.lower()
+            # For HTML/HTM files: ALWAYS prefer raw bytes so NessusParser
+            # gets the full HTML structure (div.section-wrapper etc).
+            # Text-extracted content strips all HTML tags → 0 findings.
+            if fname_lower.endswith((".html", ".htm")) and fd.get("bytes"):
+                try:
+                    ftext = fd.get("bytes").decode("utf-8", errors="ignore")
+                except Exception:
+                    pass
+            elif not ftext and fd.get("bytes"):
                 try:
                     ftext = fd.get("bytes").decode("utf-8", errors="ignore")
                 except Exception:
                     ftext = ""
             
             actionable, info = parse_tool_file(fname, ftext or "")
+
             for f in actionable:
                 c_id = map_finding_to_control(f)
                 f_dict = f.to_dict() if hasattr(f, "to_dict") else dict(f)
@@ -5186,9 +5196,21 @@ with st.sidebar:
                                         pass
                             except Exception as _grd_err:
                                 print(f"[GUARDRAIL WARNING] Scan failed for {f.name}: {_grd_err}", flush=True)
-                            st.session_state.file_registry[f.name] = text
+                            # For HTML/HTM files (Nessus scan reports), store RAW HTML so
+                            # NessusParser can parse `div.section-wrapper` correctly.
+                            # If we store text-extracted content, all HTML structure is lost.
+                            _fname_lower = f.name.lower()
+                            if _fname_lower.endswith((".html", ".htm")):
+                                try:
+                                    _raw_html = f.getvalue().decode("utf-8", errors="ignore")
+                                    st.session_state.file_registry[f.name] = _raw_html
+                                except Exception:
+                                    st.session_state.file_registry[f.name] = text
+                            else:
+                                st.session_state.file_registry[f.name] = text
                             save_document_chunks(f.name, text)
                             new_files_added = True
+
                         except Exception as ex:
                             st.session_state.file_registry[f.name] = f"[Error extracting text: {ex}]"
                             new_files_added = True
