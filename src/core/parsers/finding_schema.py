@@ -49,3 +49,11 @@ class Finding:
         
         clean_title = (self.title or "unnamed").lower().strip()
         return f"{tool}:{clean_title}"
+
+    def to_dict(self) -> dict:
+        from dataclasses import asdict
+        d = asdict(self)
+        d["finding"] = self.title
+        d["score"] = self.severity_score
+        d["evidence_snippet"] = self.evidence
+        return d

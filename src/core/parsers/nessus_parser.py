@@ -89,13 +89,14 @@ class NessusParser(BaseParser):
                     plugin_id=plugin_id,
                     title=title,
                     severity=severity,
-                    score=score,
+                    severity_score=score,
                     cvss_vector=cvss_vector,
                     cve_list=cves,
                     description=desc,
                     remediation=remed,
                     target=t_host,
-                    evidence_snippet=txt[:300]
+                    evidence=txt[:300],
+                    source_tool="Nessus"
                 )
 
                 if severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
