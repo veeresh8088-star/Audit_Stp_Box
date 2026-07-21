@@ -6208,6 +6208,7 @@ with _main_wrap:
                 st.info("Select compliance framework and individual controls in the sidebar, upload your evidence document(s), and click **Run Analysis** to automatically detect security gaps.")
 
             elif st.session_state.stage == 5:
+                is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
                 findings = st.session_state.findings
                 resolved_list = st.session_state.get("resolved_list", [])
             
