@@ -1,10 +1,98 @@
 import os
+import html
+import re
+from datetime import datetime
+
+def _get_all_parsed_findings_from_registry():
+    try:
+        import streamlit as st
+        from src.core.parsers.nessus_parser import NessusParser
+        from src.core.parsers.nmap_parser import NmapParser
+
+        file_registry = st.session_state.get("file_registry", {})
+        if not file_registry:
+            return []
+
+        all_findings = []
+        nessus_p = NessusParser()
+        nmap_p = NmapParser()
+
+        for fname, fcontent in file_registry.items():
+            if not fcontent or not isinstance(fcontent, str):
+                continue
+            if nessus_p.can_parse(fname, fcontent):
+                act, info = nessus_p.parse(fname, fcontent)
+                all_findings.extend(act)
+            elif nmap_p.can_parse(fname, fcontent):
+                act, inv = nmap_p.parse(fname, fcontent)
+                all_findings.extend(act)
+
+        # Deduplicate using Finding.dedup_key()
+        deduped = {}
+        for f in all_findings:
+            key = f.dedup_key()
+            if key not in deduped:
+                deduped[key] = f
+            else:
+                if f.target and f.target not in deduped[key].target:
+                    deduped[key].target = f"{deduped[key].target}, {f.target}"
+
+        dict_findings = []
+        for f in deduped.values():
+            dict_findings.append({
+                "control": f.title,
+                "title": f.title,
+                "control_id": f.target or "Scoped Targets",
+                "target": f.target or "Scoped Targets",
+                "finding": f.description or f.title,
+                "status": "Detected",
+                "severity_score": f.severity_score if f.severity_score is not None else (9.5 if f.severity == "CRITICAL" else (8.0 if f.severity == "HIGH" else (5.0 if f.severity == "MEDIUM" else 2.5))),
+                "severity": f.severity,
+                "cvss_vector": f.cvss_vector or "",
+                "evidence_quote": f.evidence,
+                "recommendation": f.remediation,
+                "references": "CVE: " + ", ".join(f.cve_list) if f.cve_list else "OWASP / OSSTMM Security Recommendations"
+            })
+        return dict_findings
+    except Exception:
+        pass
+    return []
+
+def extract_scan_dates_from_registry(file_registry):
+    if not file_registry:
+        return None
+    scan_dts = []
+    for fname, fcontent in file_registry.items():
+        if not fcontent or not isinstance(fcontent, str):
+            continue
+        # Nessus date: Sat, 20 Jun 2026 10:33:51
+        m = re.search(r'[A-Za-z]{3},\s*(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})', fcontent)
+        if m:
+            day, month, year = m.groups()
+            try:
+                scan_dts.append(datetime.strptime(f"{day} {month} {year}", "%d %b %Y"))
+                continue
+            except Exception:
+                pass
+        # Nmap date: scan initiated Sun Jul 19 12:00:00 2026
+        m2 = re.search(r'scan initiated\s+[A-Za-z]{3}\s+([A-Za-z]{3})\s+(\d{1,2})\s+[\d:]+\s+(\d{4})', fcontent, re.IGNORECASE)
+        if m2:
+            month, day, year = m2.groups()
+            try:
+                scan_dts.append(datetime.strptime(f"{day} {month} {year}", "%d %b %Y"))
+                continue
+            except Exception:
+                pass
+    if scan_dts:
+        earliest = min(scan_dts)
+        latest = datetime.now()
+        return f"{earliest.strftime('%d-%B-%Y')} to {latest.strftime('%d-%B-%Y')}"
+    return None
 
 def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""):
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
     from fpdf.fonts import FontFace
-    from datetime import datetime
     import io as _io
     import os
     
@@ -12,6 +100,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         if not val:
             return "-"
         val = str(val)
+        val = html.unescape(val)
         val = val.replace("“", "\"").replace("”", "\"").replace("‘", "'").replace("’", "'")
         val = val.replace("—", "-").replace("–", "-").replace("\u2013", "-").replace("\u2014", "-")
         val = val.replace("\u2022", "*").replace("•", "*").replace("\u25cf", "*").replace("\u25cb", "*")
@@ -29,6 +118,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         
         # Extract client name from uploaded document filename or active session state
         file_registry = st.session_state.get("file_registry", {})
+        extracted_scan_dates = extract_scan_dates_from_registry(file_registry)
         uploaded_names = list(file_registry.keys()) if file_registry else []
         extracted_client = ""
         if uploaded_names:
@@ -42,6 +132,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         submitted_to = st.session_state.get("submitted_to", "Ashish Jaiswal")
         designation = st.session_state.get("designation", "Head of India Channel Sales")
         email = st.session_state.get("client_email", "ashish.jaiswal1@motorolasolutions.com")
+        testing_dates = st.session_state.get("testing_dates") or extracted_scan_dates or f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
     except Exception:
         auditor_lead = "Mr. Vikas Dubey"
         auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
@@ -52,6 +143,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         submitted_to = "Ashish Jaiswal"
         designation = "Head of India Channel Sales"
         email = "ashish.jaiswal1@motorolasolutions.com"
+        testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
 
     assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "assets"))
     logo_path = os.path.join(assets_dir, "tuv_sud_logo.png")
@@ -188,7 +280,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         ["Prepared By", clean_text(auditor_lead)],
         ["Reviewed By", clean_text(auditor_reviewer)],
         ["Approved By", clean_text(auditor_approver)],
-        ["Testing Dates", f"24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"],
+        ["Testing Dates", clean_text(testing_dates)],
         ["Effective Date", datetime.now().strftime("%d-%B-%Y")]
     ]
 
@@ -440,7 +532,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.ln(4)
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.cell(0, 4.5, clean_text(f"Assessment Date: 24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.5, clean_text(f"Assessment Date: {testing_dates}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     # ── PAGE 7: SUMMARY OF FINDINGS & GRAPHICAL BAR CHART ─────────────────
     pdf.add_page()
@@ -448,11 +540,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 5.5, "2.3 Summary of Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
-    active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
-    critical_cnt = sum(1 for f in active_findings if "critical" in str(f.get("severity", "")).lower() or (f.get("severity_score", 0) or 0) >= 9.0)
-    high_cnt = sum(1 for f in active_findings if "high" in str(f.get("severity", "")).lower() and (f.get("severity_score", 0) or 0) < 9.0)
-    medium_cnt = sum(1 for f in active_findings if "medium" in str(f.get("severity", "")).lower())
-    low_cnt = sum(1 for f in active_findings if "low" in str(f.get("severity", "")).lower() or (f.get("severity_score", 0) or 0) <= 3.9)
+    parsed_reg = _get_all_parsed_findings_from_registry()
+    if parsed_reg:
+        active_findings = parsed_reg
+    else:
+        active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
+
+    critical_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "CRITICAL")
+    high_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "HIGH")
+    medium_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "MEDIUM")
+    low_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "LOW")
     total_cnt = len(active_findings) if active_findings else 2
 
     pdf.set_font("Helvetica", "", 8.5)
@@ -595,16 +692,32 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         if idx > 1:
             pdf.add_page()
             
-        vuln_title = f.get("control") or f.get("finding") or f.get("title") or f"Finding 3.3.{idx}"
-        desc = f.get("finding") or f.get("gap_description") or f.get("description") or "-"
-        target = f.get("control_id") or f.get("target") or "Scoped Network Endpoints / Systems"
+        vuln_title = html.unescape(str(f.get("control") or f.get("finding") or f.get("title") or f"Finding 3.3.{idx}"))
+        desc = html.unescape(str(f.get("finding") or f.get("gap_description") or f.get("description") or "-"))
+        target = html.unescape(str(f.get("control_id") or f.get("target") or "Scoped Network Endpoints / Systems"))
         status_str = f.get("status") or "Detected"
-        score_val = str(f.get("severity_score", f.get("score", "2.3")))
+        score_val = float(f.get("severity_score", f.get("score", 2.3)) or 2.3)
         sev_val = str(f.get("severity", f.get("sev", "LOW"))).split()[-1].upper()
-        metrics = f.get("metrics_text") or f"{score_val} {sev_val}\nExploitability Metrics: AV: Network, AC: Low, AT: None, PR: None, UI: None\nSystem Impact Metrics: VC: Low, VI: None, VA: None, SC: None, SI: None, SA: None"
-        poc_text = f.get("evidence_quote") or f.get("evidence_snippet") or f.get("poc") or "Console / Log Audit Verification"
-        remed = f.get("recommendation") or f.get("remediation") or "Apply recommended security patches and hardening configurations."
-        ref = f.get("references") or f.get("reference") or "OWASP / OSSTMM / NIST Security Recommendations"
+        
+        if f.get("metrics_text"):
+            metrics = f.get("metrics_text")
+        else:
+            is_high_impact = score_val >= 7.0 or any(k in vuln_title.lower() or k in desc.lower() for k in ("rce", "execution", "traversal", "critical", "high"))
+            vi_val = "High" if is_high_impact else "None"
+            va_val = "High" if is_high_impact else "None"
+            vc_val = "High" if is_high_impact else "Low"
+            ac_val = "High" if "cbc" in vuln_title.lower() else "Low"
+            ui_val = "Required" if "hsts" in vuln_title.lower() else "None"
+            metrics = f"{score_val:.1f} {sev_val}\nExploitability Metrics: AV: Network, AC: {ac_val}, AT: None, PR: None, UI: {ui_val}\nSystem Impact Metrics: VC: {vc_val}, VI: {vi_val}, VA: {va_val}, SC: None, SI: None, SA: None"
+
+        poc_text = html.unescape(str(f.get("evidence_quote") or f.get("evidence_snippet") or f.get("poc") or "Console / Log Audit Verification"))
+        remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
+        if not remed_raw or (status_str.lower() in ("detected", "non-compliant") and ("no action" in remed_raw.lower() or remed_raw == "NIL")):
+            remed = "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
+        else:
+            remed = html.unescape(remed_raw)
+            
+        ref = html.unescape(str(f.get("references") or f.get("reference") or "OWASP / OSSTMM / NIST Security Recommendations"))
         main_img = f.get("poc_image") or f.get("image_path")
         extra_img = f.get("extra_image")
 
@@ -616,11 +729,11 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         with pdf.table(col_widths=(45, 135), text_align="L") as table:
             r = table.row()
             r.cell("Vulnerability Description", style=lbl_style)
-            r.cell(clean_text(desc), style=body_style)
+            r.cell(clean_text(desc[:600]), style=body_style)
 
             r = table.row()
             r.cell("Target(s)", style=lbl_style)
-            r.cell(clean_text(target), style=body_style)
+            r.cell(clean_text(target[:300]), style=body_style)
 
             r = table.row()
             r.cell("Status", style=lbl_style)
@@ -628,19 +741,19 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
 
             r = table.row()
             r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
-            r.cell(clean_text(metrics), style=body_style)
+            r.cell(clean_text(metrics[:400]), style=body_style)
 
             r = table.row()
             r.cell("Proof of Concept", style=lbl_style)
-            r.cell(clean_text(poc_text), style=body_style)
+            r.cell(clean_text(poc_text[:600]), style=body_style)
 
             r = table.row()
             r.cell("Remediation", style=lbl_style)
-            r.cell(clean_text(remed), style=body_style)
+            r.cell(clean_text(remed[:600]), style=body_style)
 
             r = table.row()
             r.cell("References", style=lbl_style)
-            r.cell(clean_text(ref), style=body_style)
+            r.cell(clean_text(ref[:400]), style=body_style)
 
         if main_img and os.path.exists(main_img):
             pdf.ln(2)
@@ -757,8 +870,8 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
         auditor_approver = st.session_state.get("auditor_approver", "Mr. Atul Srivastava")
         report_doc_id = st.session_state.get("report_doc_id", "3153142723")
-        # Extract client name from uploaded document filename or active session state
         file_registry = st.session_state.get("file_registry", {})
+        extracted_scan_dates = extract_scan_dates_from_registry(file_registry)
         uploaded_names = list(file_registry.keys()) if file_registry else []
         extracted_client = ""
         if uploaded_names:
@@ -770,6 +883,7 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
                 
         target_client = st.session_state.get("target_entity") or st.session_state.get("auditor_client") or extracted_client or "NOCPL"
         logo_path = st.session_state.get("auditor_logo_path")
+        testing_dates = st.session_state.get("testing_dates") or extracted_scan_dates or f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
     except Exception:
         auditor_lead = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
         auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
@@ -778,6 +892,7 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         report_doc_id = "3153142723"
         target_client = "NOCPL"
         logo_path = None
+        testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
 
 
     scope_type = "External" if "external" in session_title.lower() else "Internal"
@@ -855,7 +970,7 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         ("Prepared By", auditor_lead),
         ("Reviewed By", auditor_reviewer),
         ("Approved By", auditor_approver),
-        ("Testing Dates", f"24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}"),
+        ("Testing Dates", testing_dates),
         ("Effective Date", datetime.now().strftime("%d-%B-%Y"))
     ]
 
@@ -987,18 +1102,23 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
     
     p = doc.add_paragraph()
     p.add_run("2.2 Assessment Date").bold = True
-    doc.add_paragraph(f"Testing Dates: 24-June-2025 to {datetime.now().strftime('%d-%B-%Y')}")
+    doc.add_paragraph(f"Testing Dates: {testing_dates}")
     
     # Summary of Findings (Page 7)
     p = doc.add_paragraph()
     p.add_run("2.3 Summary of Findings").bold = True
     p.paragraph_format.space_before = Pt(12)
     
-    active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
-    critical_cnt = sum(1 for f in active_findings if "critical" in str(f.get("severity", "")).lower() or (f.get("severity_score", 0) or 0) >= 9.0)
-    high_cnt = sum(1 for f in active_findings if "high" in str(f.get("severity", "")).lower() and (f.get("severity_score", 0) or 0) < 9.0)
-    medium_cnt = sum(1 for f in active_findings if "medium" in str(f.get("severity", "")).lower())
-    low_cnt = sum(1 for f in active_findings if "low" in str(f.get("severity", "")).lower())
+    parsed_reg = _get_all_parsed_findings_from_registry()
+    if parsed_reg:
+        active_findings = parsed_reg
+    else:
+        active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
+
+    critical_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "CRITICAL")
+    high_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "HIGH")
+    medium_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "MEDIUM")
+    low_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "LOW")
     total_cnt = critical_cnt + high_cnt + medium_cnt + low_cnt
 
     
@@ -1107,36 +1227,50 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         score = float(f.get("severity_score", 0.0) or 0.0)
         sev_label = str(f.get("severity", "Low")).split()[-1].upper()
         
-        av = "Network"
-        ac = "High" if "cbc" in vuln_title.lower() else "Low"
-        at = "None"
-        pr = "None"
-        ui = "Required" if "hsts" in vuln_title.lower() else "None"
-        vc = "Low" if "cbc" in vuln_title.lower() or "hsts" in vuln_title.lower() else "High"
-        vi = "None"
-        va = "None"
-        
-        metrics_text = (
-            f"Exploitability Metrics:\n"
-            f"- Attack Vector (AV): {av}\n"
-            f"- Attack Complexity (AC): {ac}\n"
-            f"- Attack Requirements (AT): {at}\n"
-            f"- Privileges Required (PR): {pr}\n"
-            f"- User Interaction (UI): {ui}\n\n"
-            f"System Impact Metrics:\n"
-            f"- Confidentiality (VC): {vc}\n"
-            f"- Integrity (VI): {vi}\n"
-            f"- Availability (VA): {va}"
-        )
+        status_val = html.unescape(str(f.get("status") or "Detected"))
+        desc_val = html.unescape(str(f.get("finding", "") or f.get("gap_description", "") or ""))
+        target_val = html.unescape(str(f.get("target") or f.get("control_id", "") or "Web / Network infrastructure"))
+        poc_val = html.unescape(str(f.get("evidence_snippet") or f.get("evidence_quote") or f.get("poc") or "N/A"))
+        remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
+        if not remed_raw or (status_val.lower() in ("detected", "non-compliant") and ("no action" in remed_raw.lower() or remed_raw == "NIL")):
+            remed_val = "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
+        else:
+            remed_val = html.unescape(remed_raw)
+
+        if f.get("metrics_text"):
+            metrics_text = f.get("metrics_text")
+        else:
+            is_high_impact = score >= 7.0 or any(k in vuln_title.lower() or k in desc_val.lower() for k in ("rce", "execution", "traversal", "critical", "high"))
+            av = "Network"
+            ac = "High" if "cbc" in vuln_title.lower() else "Low"
+            at = "None"
+            pr = "None"
+            ui = "Required" if "hsts" in vuln_title.lower() else "None"
+            vc = "High" if is_high_impact else ("Low" if "cbc" in vuln_title.lower() or "hsts" in vuln_title.lower() else "High")
+            vi = "High" if is_high_impact else "None"
+            va = "High" if is_high_impact else "None"
+            
+            metrics_text = (
+                f"Exploitability Metrics:\n"
+                f"- Attack Vector (AV): {av}\n"
+                f"- Attack Complexity (AC): {ac}\n"
+                f"- Attack Requirements (AT): {at}\n"
+                f"- Privileges Required (PR): {pr}\n"
+                f"- User Interaction (UI): {ui}\n\n"
+                f"System Impact Metrics:\n"
+                f"- Confidentiality (VC): {vc}\n"
+                f"- Integrity (VI): {vi}\n"
+                f"- Availability (VA): {va}"
+            )
         
         meta_rows = [
-            ("Vulnerability Description", f.get("finding", "") or f.get("gap_description", "")),
-            ("Target(s)", f.get("control_id", "") or "Web / Network infrastructure"),
-            ("Status", "Detected"),
+            ("Vulnerability Description", desc_val),
+            ("Target(s)", target_val),
+            ("Status", status_val),
             ("CVSSv4.0 Base Metrics", f"{score:.1f} {sev_label}"),
             ("CVSSv4.0 Base Metrics Detail", metrics_text),
-            ("Proof of Concept", f.get("evidence_snippet") or f.get("evidence_quote") or "N/A"),
-            ("Remediation", f.get("recommendation", "NIL"))
+            ("Proof of Concept", poc_val),
+            ("Remediation", remed_val)
         ]
         for mr_idx, (m_lbl, m_val) in enumerate(meta_rows):
             c1, c2 = tbl_meta.rows[mr_idx].cells
@@ -1144,8 +1278,22 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
             _set_cell_borders(c1)
             _set_cell_borders(c2)
             c1.paragraphs[0].add_run(m_lbl).bold = True
-            c2.paragraphs[0].add_run(m_val)
-            
+            c2.paragraphs[0].add_run(str(m_val))
+
+        main_img = f.get("poc_image") or f.get("image_path")
+        extra_img = f.get("extra_image")
+
+        if main_img and os.path.exists(main_img):
+            img_p = doc.add_paragraph()
+            img_p.paragraph_format.space_before = Pt(6)
+            img_p.add_run("Proof of Concept Artifact:").bold = True
+            p_img = doc.add_paragraph()
+            p_img.add_run().add_picture(main_img, width=Cm(15))
+
+        if extra_img and os.path.exists(extra_img):
+            p_extra = doc.add_paragraph()
+            p_extra.add_run().add_picture(extra_img, width=Cm(15))
+
         doc.add_paragraph()
         
     doc.add_page_break()

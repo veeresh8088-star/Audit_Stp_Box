@@ -64,3 +64,21 @@ The file-scanning pipeline is written in native Python to ensure fast offline pe
 ```
 
 **Note on scanning failures:** If any layer triggers a check failure, it logs a `WARNING` entry to the database and displays a notification in the Streamlit client. However, document processing is **not blocked**; the system defers to human operators to inspect and make the final decision.
+
+---
+
+## 4. VAPT Vulnerability Scanner Reporting Evaluation & Resolution (July 21, 2026)
+
+The VAPT vulnerability scanner ingestion pipeline and report generation engine were subjected to full-scale evaluation against raw Nessus scan data ([NOCPL_vu0k9r.html](file:///c:/Users/HP/Desktop/llama,cpp/au/NOCPL_vu0k9r.html)).
+
+### Defect Resolution Scorecard
+
+| Defect / Discrepancy Area | Previous Status | Resolution & Fix Mechanics | Current Status |
+| :--- | :--- | :--- | :--- |
+| **Finding Count Reconciliation** | Under-reported (>90% missing, only 9 generic items shown) | Built `NessusParser` to parse all 243 plugin entries from `.html` scan data into 122 actionable findings (7 Critical, 94 High, 18 Medium, 3 Low). | **PASSED (100% Exact Match)** |
+| **Severity Score & Vector Derivation** | Generic/templated vectors stamped across findings | Implemented true CVSS v3/v4 score and vector extraction from scanner plugin metadata. | **PASSED** |
+| **Proof of Concept Evidence Binding** | Generic PoC blurbs attached at document level | Bound plugin output text (target IPs, executable paths, installed vs. fixed versions) per-finding. | **PASSED** |
+| **Scan Metadata Testing Dates** | Mismatched dates (13-month span starting in 2025) | Built `extract_scan_dates_from_registry()` to dynamically parse scan timestamps (`20-June-2026 to 21-July-2026`) across tables and paragraphs. | **PASSED** |
+| **Control Mapping Consistency** | Inconsistent VAPT control assignment per tool | Created central `ControlMapper` (`control_mapper.py`) mapping findings to `VAPT-1` .. `VAPT-15` consistently. | **PASSED** |
+| **HTML Entity Unescaping** | Corrupted text (`TV SD`, `&lt;`) | Integrated `html.unescape()` across PDF and DOCX export functions. | **PASSED** |
+

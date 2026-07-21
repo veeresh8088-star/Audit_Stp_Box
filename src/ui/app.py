@@ -7157,42 +7157,84 @@ with _main_wrap:
                         "Source Scope":      f.get("source_files", "All uploaded documents"),
                         "Auditor Comment":   f.get("comment", "")
                     } for f in active_findings]
+                    from src.ui.report_exporter import _get_all_parsed_findings_from_registry, export_docx_report, export_pdf_report
+                    
+                    st.markdown("---")
+                    st.markdown("### 🔍 Pre-Download Auditor Review & Approval")
+                    
+                    parsed_review_list = _get_all_parsed_findings_from_registry()
+                    review_items = parsed_review_list if parsed_review_list else active_findings
+                    
+                    c_crit = sum(1 for f in review_items if str(f.get("severity", "")).upper() == "CRITICAL")
+                    c_high = sum(1 for f in review_items if str(f.get("severity", "")).upper() == "HIGH")
+                    c_med  = sum(1 for f in review_items if str(f.get("severity", "")).upper() == "MEDIUM")
+                    c_low  = sum(1 for f in review_items if str(f.get("severity", "")).upper() == "LOW")
+                    c_tot  = len(review_items)
+                    
+                    m1, m2, m3, m4, m5 = st.columns(5)
+                    m1.metric("Critical", c_crit)
+                    m2.metric("High", c_high)
+                    m3.metric("Medium", c_med)
+                    m4.metric("Low", c_low)
+                    m5.metric("Total Findings", c_tot)
+                    
+                    with st.expander(f"📋 Review Parsed Findings Index ({c_tot} Actionable Vulnerabilities)", expanded=False):
+                        if review_items:
+                            df_preview = [{
+                                "#": idx,
+                                "Vulnerability Title": f.get("title", f.get("control", "")),
+                                "Target(s)": f.get("target", f.get("control_id", "")),
+                                "CVSS": f.get("severity_score", 0.0),
+                                "Severity": f.get("severity", "LOW"),
+                                "CVE / Ref": f.get("references", "")[:40]
+                            } for idx, f in enumerate(review_items, 1)]
+                            st.dataframe(df_preview, use_container_width=True)
+                        else:
+                            st.info("No scan findings detected in registry.")
+
+                    auditor_approved = st.checkbox(
+                        "✅ I have reviewed and verified all vulnerability findings, target IPs, and audit metadata.",
+                        value=False,
+                        key="auditor_review_approval_chk"
+                    )
+                    
                     csv_data = _dict_list_to_csv(_export_rows)
                     st.download_button("📊 Export Report CSV", csv_data, "iso27001_audit_report.csv", use_container_width=True)
-                    
-                    from src.ui.report_exporter import export_docx_report, export_pdf_report
-                    
-                    docx_data = export_docx_report(
-                        session_title=selected_standard,
-                        findings=findings,
-                        resolved_list=resolved_list,
-                        status=st.session_state.get("audit_status", "Draft"),
-                        comments=st.session_state.get("auditor_comments", "")
-                    )
-                    st.download_button(
-                        label="⬇️ Export Report DOCX",
-                        data=docx_data,
-                        file_name=f"{selected_standard.replace(' ', '_')}_Report.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
-                        key="active_docx_export_btn"
-                    )
-                    
-                    pdf_data = export_pdf_report(
-                        session_title=selected_standard,
-                        findings=findings,
-                        resolved_list=resolved_list,
-                        status=st.session_state.get("audit_status", "Draft"),
-                        comments=st.session_state.get("auditor_comments", "")
-                    )
-                    st.download_button(
-                        label="📄 Export Report PDF",
-                        data=pdf_data,
-                        file_name=f"{selected_standard.replace(' ', '_')}_Report.pdf",
-                        mime="application/pdf",
-                        use_container_width=True,
-                        key="active_pdf_export_btn"
-                    )
+
+                    if auditor_approved:
+                        docx_data = export_docx_report(
+                            session_title=selected_standard,
+                            findings=findings,
+                            resolved_list=resolved_list,
+                            status=st.session_state.get("audit_status", "Draft"),
+                            comments=st.session_state.get("auditor_comments", "")
+                        )
+                        st.download_button(
+                            label="⬇️ Download Approved DOCX Report",
+                            data=docx_data,
+                            file_name=f"{selected_standard.replace(' ', '_')}_Report.docx",
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            use_container_width=True,
+                            key="active_docx_export_btn"
+                        )
+                        
+                        pdf_data = export_pdf_report(
+                            session_title=selected_standard,
+                            findings=findings,
+                            resolved_list=resolved_list,
+                            status=st.session_state.get("audit_status", "Draft"),
+                            comments=st.session_state.get("auditor_comments", "")
+                        )
+                        st.download_button(
+                            label="📄 Download Approved PDF Report",
+                            data=pdf_data,
+                            file_name=f"{selected_standard.replace(' ', '_')}_Report.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key="active_pdf_export_btn"
+                        )
+                    else:
+                        st.info("ℹ️ Please check the verification box above to approve and unlock DOCX and PDF report downloads.")
 
     if tab_docs is not None:
         with tab_docs:

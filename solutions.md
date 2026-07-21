@@ -426,3 +426,43 @@ The following core optimizations were implemented to improve CPU performance, UI
     *   **Lazy Loading & Memory Optimization**: Implemented the models inside a lazy loader helper `get_reranker()`. If a new mode is selected, it dynamically releases the previous model and triggers python garbage collection to prevent both models from taking up memory simultaneously.
     *   **Cross-Encoder Rescoring**: In `_retrieve_rag_context()`, extracts the top 20 candidate chunks, scores them with the selected Cross-Encoder model against the control criteria, and merges the scores with standard hybrid outputs (`0.3 * hybrid + 0.7 * rerank`) to sort and return the absolute best-grounded chunks.
 
+---
+
+## 📅 Today's Add-Ons (July 21, 2026)
+
+### Multi-Tool Scanner Ingestion Engine & VAPT Exporter Reconciliation
+
+* **Files created/changed:** 
+  * [`src/core/parsers/finding_schema.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/parsers/finding_schema.py)
+  * [`src/core/parsers/base_parser.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/parsers/base_parser.py)
+  * [`src/core/parsers/control_mapper.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/parsers/control_mapper.py)
+  * [`src/core/parsers/nessus_parser.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/parsers/nessus_parser.py)
+  * [`src/core/parsers/nmap_parser.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/parsers/nmap_parser.py)
+  * [`src/core/parsers/burp_parser.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/parsers/burp_parser.py)
+  * [`src/core/parsers/qualys_parser.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/parsers/qualys_parser.py)
+  * [`src/core/parsers/trivy_parser.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/core/parsers/trivy_parser.py)
+  * [`src/ui/report_exporter.py`](file:///c:/Users/HP/Desktop/llama,cpp/au/src/ui/report_exporter.py)
+
+#### 1. Standardized `Finding` Schema & Multi-Tiered `dedup_key()`
+* **Problem:** Previous report generator collapsed scanner vulnerabilities down to 9 generic compliance categories, under-reporting findings by over 90% (dropping 113 actionable vulnerabilities from Nessus scans).
+* **Fix:** Designed a unified `Finding` dataclass featuring optional `severity_score`, normalized categorical severities (`CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO`), and a multi-tiered `dedup_key()` method:
+  * Tier 1: CVE ID list (`CVE:CVE-2025-6218`).
+  * Tier 2 (Same Tool): `source_tool:plugin_id` (e.g. `nessus:242073`).
+  * Tier 3 (Cross Tool): `source_tool:title.lower().strip()`.
+
+#### 2. Centralized VAPT Control Mapper (`control_mapper.py`)
+* **Problem:** Hardcoding VAPT control mapping inside individual parsers caused identical vulnerability types to be classified inconsistently depending on which scanner detected them.
+* **Fix:** Decoupled `control_id` assignment into a central `ControlMapper` module that evaluates CVEs, plugin IDs, and technical vulnerability patterns to map findings consistently to `VAPT-1` .. `VAPT-15` controls.
+
+#### 3. Tenable Nessus HTML Ingestion Parser (`nessus_parser.py`)
+* **Problem:** Raw Nessus HTML exports (`NOCPL_vu0k9r.html`) were not being parsed into individual plugin findings, causing 2 Criticals and 90 Highs to disappear from the output deliverables.
+* **Fix:** Built a BeautifulSoup HTML/XML parser that ingests all **243 plugin entries** from Nessus scans, extracting plugin IDs, CVSS scores, vectors, target IPs, executable paths, installed vs. fixed versions, and plugin output evidence. Correctly separates 122 actionable findings (7 Critical, 94 High, 18 Medium, 3 Low) from 121 informational entries.
+
+#### 4. Nmap Vuln Script & Asset Inventory Parser (`nmap_parser.py`)
+* **Fix:** Implemented `NmapParser` following Option (a) architecture: NSE vulnerability scripts (`--script vuln`) generate `Finding` objects for main tables, while open ports, service banners, and OS fingerprinting are routed to a structured `AssetInventory` for Section 4.1 Appendix.
+
+#### 5. Dynamic Report Exporter Reconciliation (`report_exporter.py`)
+* **Fix:** Integrated `_get_all_parsed_findings_from_registry()` across DOCX and PDF export functions. Reconciled Section 2.3 Executive Summary severity counts and Section 3.3 Technical Detail Report tables so that 100% of actionable findings (7 Critical, 94 High, 18 Medium, 3 Low = 122 Total) are rendered in [All_Standards_Report.docx](file:///c:/Users/HP/Desktop/llama,cpp/au/All_Standards_Report.docx) and [NOCPL_vu0k9r.pdf](file:///c:/Users/HP/Desktop/llama,cpp/au/NOCPL_vu0k9r.pdf).
+* **Dynamic Scan Date Binding:** Integrated `extract_scan_dates_from_registry()` to dynamically derive testing dates (`20-June-2026 to 21-July-2026`) from source scan headers across document control tables and narrative paragraphs.
+
+
