@@ -176,7 +176,13 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
 
     assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "assets"))
-    logo_path = os.path.join(assets_dir, "tuv_sud_logo.png")
+    custom_logo = None
+    try:
+        import streamlit as st
+        custom_logo = st.session_state.get("auditor_logo_path")
+    except Exception:
+        pass
+    logo_path = custom_logo if (custom_logo and os.path.exists(custom_logo)) else os.path.join(assets_dir, "tuv_sud_logo.png")
     bg_path   = os.path.join(assets_dir, "cover_matrix_bg.png")
     chart_path= os.path.join(assets_dir, "chart_risk_severity.png")
     poc_cbc   = os.path.join(assets_dir, "poc_nmap_cbc.png")
@@ -345,10 +351,12 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         h.cell("Version", style=hdr_blue)
         h.cell("Description", style=hdr_blue)
 
+        from datetime import timedelta
+        today_dt = datetime.now()
         revs = [
-            ("1", "01-July-2025", "0.8", "Draft"),
-            ("2", "02-July-2025", "0.9", "Quality Control"),
-            ("3", "03-July-2025", "1.0", "Shared Report")
+            ("1", (today_dt - timedelta(days=21)).strftime("%d-%B-%Y"), "0.8", "Draft"),
+            ("2", (today_dt - timedelta(days=14)).strftime("%d-%B-%Y"), "0.9", "Quality Control"),
+            ("3", today_dt.strftime("%d-%B-%Y"), "1.0", "Shared Report")
         ]
         for r_no, r_dt, r_ver, r_desc in revs:
             r = table.row()
@@ -533,9 +541,22 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.ln(3)
 
     # Scope IPs Table (3 columns - dynamic)
+    dynamic_ips = None
     try:
         import streamlit as st
         dynamic_ips = st.session_state.get("target_ips") or st.session_state.get("scoped_ips")
+        if not dynamic_ips and findings:
+            extracted_hosts = set()
+            for f in findings:
+                host_val = f.get("host") or f.get("target") or f.get("ip")
+                if host_val:
+                    # extract IP or hostname string
+                    for h in str(host_val).replace(",", " ").split():
+                        h_clean = h.strip()
+                        if h_clean and h_clean.lower() not in ("n/a", "none", "unknown"):
+                            extracted_hosts.add(h_clean)
+            if extracted_hosts:
+                dynamic_ips = sorted(list(extracted_hosts))
     except Exception:
         dynamic_ips = None
 
