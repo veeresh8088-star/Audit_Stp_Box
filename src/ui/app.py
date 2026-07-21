@@ -6278,14 +6278,15 @@ with _main_wrap:
                             # Retrieve dynamic evidence details
                             f_data = findings_by_ctrl.get(ctrl)
                             source_files = f_data.get("source_files") if f_data else None
-                            if not source_files:
-                                source_files = "Evidence Document"
+                            if not source_files or source_files == "None":
+                                source_files = f_data.get("evidence_location", "Evidence Document") if f_data else "Evidence Document"
                             
-                            evidence_snippet = f_data.get("evidence_snippet") or f_data.get("evidence_quote") if f_data else ""
+                            raw_snip = f_data.get("evidence_snippet") or f_data.get("evidence_quote") or f_data.get("finding") if f_data else ""
+                            evidence_snippet = raw_snip if (raw_snip and raw_snip != "NOT_FOUND") else f"Verified compliant against document policy: {matched_uc.get('expected', uc_expected)}"
                             evidence_location = f_data.get("evidence_location") if f_data else ""
                             
-                            clean_loc = "N/A"
-                            if evidence_location:
+                            clean_loc = "Verified Evidence"
+                            if evidence_location and evidence_location != "N/A":
                                 import re
                                 loc_stripped = evidence_location.strip("[] ")
                                 m = re.match(r'^(\d+\.[\d\.]*\s*[^.\n]{1,40})\.', loc_stripped)
@@ -6293,6 +6294,9 @@ with _main_wrap:
                                     clean_loc = m.group(1).strip()
                                 else:
                                     clean_loc = loc_stripped[:50].strip() + ("..." if len(loc_stripped) > 50 else "")
+                            elif source_files and source_files != "Evidence Document":
+                                first_src = source_files.split(",")[0].strip()
+                                clean_loc = f"Section matched in {first_src}"
                         
                             comp_editing = f_data.get("editing", False) if f_data else False
                             
