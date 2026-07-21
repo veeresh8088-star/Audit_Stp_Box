@@ -4894,11 +4894,20 @@ with st.sidebar:
                                                 matched_uc = uc; break
                                                 
                                     if matched_uc:
-                                        custom_evidence[matched_uc["use_case"]] = ev_val
+                                        uc_key = matched_uc["use_case"]
+                                        if uc_key in custom_evidence:
+                                            custom_evidence[uc_key] += f" | {ev_val}"
+                                        else:
+                                            custom_evidence[uc_key] = ev_val
+                                            
                                         if col_document is not None:
                                             doc_val = str(row[col_document]).strip()
                                             if doc_val and doc_val != "nan":
-                                                custom_documents[matched_uc["use_case"]] = doc_val
+                                                if uc_key in custom_documents:
+                                                    if doc_val not in custom_documents[uc_key]:
+                                                        custom_documents[uc_key] += f", {doc_val}"
+                                                else:
+                                                    custom_documents[uc_key] = doc_val
                                         matched_sls.add(matched_uc["sl"])
                                         
                                 if custom_evidence:
@@ -4908,7 +4917,7 @@ with st.sidebar:
                                     for uc in USE_CASES:
                                         st.session_state[f"ctrl_chk_{uc['sl']}"] = (uc["sl"] in matched_sls)
                                     st.session_state.last_parsed_scope_file = file_id
-                                    st.toast(f"Loaded {len(matched_sls)} controls with custom target documents and expected evidence!", icon="✅")
+                                    st.toast(f"Loaded {len(df)} checklist items across {len(matched_sls)} unique controls!", icon="✅")
                                 else:
                                     st.warning("⚠️ No controls matched standard framework lists. Please verify control ID numbers.")
                             else:
