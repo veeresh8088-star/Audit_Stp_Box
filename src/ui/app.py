@@ -3588,8 +3588,8 @@ def _enrich_finding_metadata(r, db_chunks):
         r["policy_result"] = "Out of Scope"
         r["evidence_result"] = "Out of Scope"
     else:
-        pol_pres = str(r["policy_present"]).strip().capitalize()
-        evi_pres = str(r["evidence_present"]).strip().capitalize()
+        pol_pres = str(r.get("policy_present", "No")).strip().capitalize()
+        evi_pres = str(r.get("evidence_present", "No")).strip().capitalize()
         
         # Strict Compliance Rule: Overall status is ONLY Compliant if BOTH Policy AND Evidence are present
         if pol_pres == "No" or evi_pres == "No":
