@@ -637,13 +637,27 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     parsed_reg = _get_all_parsed_findings_from_registry()
     if parsed_reg:
         active_findings = parsed_reg
+    elif findings:
+        active_findings = [f.to_dict() if hasattr(f, "to_dict") else dict(f) for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
     else:
-        active_findings = [f for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
+        active_findings = []
 
-    critical_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "CRITICAL")
-    high_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "HIGH")
-    medium_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "MEDIUM")
-    low_cnt = sum(1 for f in active_findings if str(f.get("severity", "")).strip().upper() == "LOW")
+    critical_cnt = 0
+    high_cnt = 0
+    medium_cnt = 0
+    low_cnt = 0
+
+    for f in active_findings:
+        s_raw = str(f.get("severity", "")).upper()
+        if "CRITICAL" in s_raw or "P1" in s_raw:
+            critical_cnt += 1
+        elif "HIGH" in s_raw or "P2" in s_raw:
+            high_cnt += 1
+        elif "MEDIUM" in s_raw or "P3" in s_raw:
+            medium_cnt += 1
+        elif "LOW" in s_raw or "P4" in s_raw:
+            low_cnt += 1
+
     total_cnt = len(active_findings) if active_findings else 2
 
     pdf.set_font("Helvetica", "", 8.5)
@@ -707,7 +721,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         
         list_to_show = active_findings if active_findings else default_findings
         for idx, f in enumerate(list_to_show, 1):
-            title = f.get("control", "") or f.get("finding", "") or f.get("title", "")
+            title = f.get("title", "") or f.get("finding", "") or f.get("control", "") or f"Vulnerability {idx}"
             score_str = str(f.get("severity_score", f.get("score", "2.3")))
             sev_str = str(f.get("severity", f.get("sev", "LOW"))).split()[-1].upper()
             r = table.row()
@@ -798,9 +812,9 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         if idx > 1:
             pdf.add_page()
             
-        vuln_title = html.unescape(str(f.get("control") or f.get("finding") or f.get("title") or f"Finding 3.3.{idx}"))
+        vuln_title = html.unescape(str(f.get("title") or f.get("finding") or f.get("control") or f"Finding 3.3.{idx}"))
         desc = html.unescape(str(f.get("finding") or f.get("gap_description") or f.get("description") or "-"))
-        target = html.unescape(str(f.get("control_id") or f.get("target") or "Scoped Network Endpoints / Systems"))
+        target = html.unescape(str(f.get("target") or f.get("control_id") or "Scoped Network Endpoints / Systems"))
         status_raw = str(f.get("status") or "Detected").strip()
         if status_raw.lower() in ("non-compliant", "non_compliant", "failed"):
             status_str = "Detected"
@@ -872,7 +886,9 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             pdf.set_font("Helvetica", "B", 8.5)
             pdf.cell(0, 4, "Proof of Concept Artifact:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             pdf.ln(1)
-            pdf.image(main_img, x=15, y=pdf.get_y(), w=175)
+            if pdf.get_y() + 55 > 265:
+                pdf.add_page()
+            pdf.image(main_img, x=15, y=pdf.get_y(), w=170)
 
         if extra_img and os.path.exists(extra_img):
             pdf.add_page()
