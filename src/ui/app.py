@@ -4759,12 +4759,7 @@ with st.sidebar:
             )
             st.session_state.audit_mode = "Deep" if "Full" in audit_mode_ui else "Quick"
             st.caption("ℹ️ **Quick** mode uses a lightweight 80MB cross-encoder (Single-pass). **Deep** mode runs a high-precision 278MB model with reflection loops.")
-            st.checkbox(
-                "Auto-run Analysis on Upload",
-                key="auto_run_after_upload",
-                value=st.session_state.get("auto_run_after_upload", True),
-                help="Automatically starts the audit analysis pipeline as soon as files are uploaded."
-            )
+
             st.divider()
 
         # 🔍 SCOPE DETECTION
@@ -5981,25 +5976,6 @@ def _render_running_progress(bg_key):
             .custom-spinner {{ border: 4px solid rgba(59, 130, 246, 0.1); border-top: 4px solid #3b82f6; border-radius: 50%; width: 48px; height: 48px; animation: spin_loader 1s linear infinite; }}
             @keyframes spin_loader {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
         </style>
-        
-        <script>
-            // Programmatically click the hidden RefreshAudit button to wake up Streamlit and update the progress bar
-            setTimeout(function() {{
-                try {{
-                    const doc = window.parent.document;
-                    const buttons = doc.querySelectorAll('button');
-                    for (const btn of buttons) {{
-                        const text = btn.innerText || "";
-                        if (text.trim() === 'RefreshAudit') {{
-                            btn.click();
-                            break;
-                        }}
-                    }}
-                }} catch(e) {{
-                    console.error("Auto-refresh error:", e);
-                }}
-            }}, 4000);
-        </script>
     </div>
     """, unsafe_allow_html=True)
     st.progress(prog_pct, text=f"**{prog_pct}%** completed")
