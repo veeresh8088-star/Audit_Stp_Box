@@ -22,11 +22,11 @@ if exist "C:\Users\veeresh988V\Desktop\llama\llama-server.exe" (
 )
 
 echo [2/4] Starting llama-server LLM on port 11434...
-start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 8192 -t 8 -b 512 --flash-attn on
+start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 8192 -t 4 -b 512 --flash-attn on
 
 echo.
 echo [3/4] Starting llama-server Embeddings on port 11435...
-start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t 4 --embedding
+start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t 2 --embedding
 
 echo.
 echo Waiting 15 seconds for backend servers to initialize...
@@ -36,5 +36,8 @@ echo.
 echo [4/4] Setting environment variables and launching Streamlit...
 set LLM_BACKEND=llama.cpp
 set EMBEDDING_HOST=http://127.0.0.1:11435
+set OMP_NUM_THREADS=4
+set MKL_NUM_THREADS=4
+set OPENBLAS_NUM_THREADS=4
 
 call run_demo.bat
