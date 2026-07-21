@@ -6182,6 +6182,11 @@ with _main_wrap:
     if tab_report is not None:
         with tab_report:
             is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
+            findings = st.session_state.get("findings", [])
+            active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected", "Compliant", "Out Of Scope", "Out of Scope") or (f.get("requires_human_review") and f.get("status") not in ("Dismissed", "Rejected"))]
+            sf = st.session_state.get("severity_filter", set())
+            if not isinstance(sf, set):
+                sf = set()
             with _bg_lock:
                 is_currently_running = st.session_state.active_chat_id in _bg_running
             
