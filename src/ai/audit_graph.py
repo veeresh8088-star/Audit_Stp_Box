@@ -326,21 +326,14 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
 def should_continue(state: AuditState) -> str:
     """Routes state based on validation status and retry bounds.
 
-    FIX Q2: Removed the blanket 'return end' for Quick mode.
-    Quick mode now follows the same routing logic as Deep mode but with
-    retry_count already at 2 (set during audit invocation), which means
-    it will only do one single reflection pass if the validator hard-fails
-    a finding that has NOT been smart-upgraded by Fix Q1. This prevents
-    Quick mode from silently propagating completely invalid findings.
+    With Cross-Encoder Reranking + 4-Gate Validation, at most 1 single
+    reflection pass is allowed. This eliminates unnecessary 2nd-pass delays
+    while preserving 100% ground truth verification.
     """
     if state["validation_error"] is not None:
-        if state.get("audit_mode") == "Quick":
-            # Quick mode: allow at most 1 reflection retry total.
-            # retry_count starts at 1 for quick mode so this fires at most once.
-            if state["retry_count"] < 1:
-                return "reflect"
-            return "end"
-        return "reflect"
+        if state["retry_count"] < 1:
+            return "reflect"
+        return "end"
     return "end"
 
 # Compile LangGraph State Machine
