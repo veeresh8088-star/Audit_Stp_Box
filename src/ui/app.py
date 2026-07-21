@@ -3559,13 +3559,14 @@ Execution Time: {execution_time_per_control:.2f}s
 
 
 def _enrich_finding_metadata(r, db_chunks):
-    # 1. Map back to UI-expected statuses (only 3 final outputs: Compliant, Non-Compliant, Out of Scope)
+    # 1. Map back to UI-expected statuses (Compliant vs Non-Compliant for selected controls)
     status_val = str(r.get("status", "Non-Compliant")).upper().strip()
     if status_val in ("COMPLIANT",):
         r["status"] = "Compliant"
-    elif status_val in ("FALSE_POSITIVE", "FALSE POSITIVE", "OUT_OF_SCOPE", "OUT OF SCOPE"):
+    elif r.get("is_unselected_control", False):
         r["status"] = "Out of Scope"
     else:
+        # All user-selected controls MUST be evaluated as Compliant or Non-Compliant
         r["status"] = "Non-Compliant"
 
     # 2. Enrich with evidence_state (SUFFICIENT / INSUFFICIENT / NO_EVIDENCE)
@@ -4078,6 +4079,7 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
                 "recommendation": "",
                 "reasoning": "Control is out of scope for the detected document type.",
                 "source_files": scanned_files_str,
+                "is_unselected_control": True,
             })
 
     # Preload chunks for final UI metadata mapping
