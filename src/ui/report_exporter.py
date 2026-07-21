@@ -267,7 +267,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(71, 85, 105)
     pdf.cell(0, 4.5, clean_text("Submitted By:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.cell(0, 4.5, clean_text("TÜV SÜD South Asia"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(0, 4.5, clean_text(auditor_firm), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(6)
     pdf.cell(0, 4.5, clean_text("Version v1.0"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 

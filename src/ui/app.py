@@ -4685,7 +4685,9 @@ with st.sidebar:
             st.text_input("Reviewed By", value="Ms. Prianka Singla", key="auditor_reviewer")
             st.text_input("Approved By", value="Mr. Atul Srivastava", key="auditor_approver")
             st.text_input("Document ID", value="3153142723", key="report_doc_id")
-            st.text_input("Target Organization", value="Motorola Solutions, Inc", key="target_entity")
+            st.text_input("Submitted To (Client Contact)", value="Ashish Jaiswal", key="submitted_to")
+            st.text_input("Client Designation", value="Head of India Channel Sales", key="designation")
+            st.text_input("Client E-mail", value="ashish.jaiswal1@motorolasolutions.com", key="client_email")
             logo_file = st.file_uploader("Upload Brand Logo (PNG/JPG)", type=["png", "jpg", "jpeg"], key="auditor_logo_upload")
             if logo_file is not None:
                 temp_dir = os.path.join("data", "cache")
