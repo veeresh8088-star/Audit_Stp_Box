@@ -5059,73 +5059,12 @@ with st.sidebar:
                 num_selected_in_scope = sum(1 for uc in _all_trackable if st.session_state.get(f"ctrl_chk_{uc['sl']}", True) and uc["use_case"] in active_scope_controls)
                 st.markdown(f"<small style='color:#60a5fa; font-weight:600;'>⚙️ Active Scope: {len(active_scope_controls)} controls in scope ({num_selected_in_scope} selected)</small>", unsafe_allow_html=True)
         
-        total_ctrls = len(filtered_use_cases)
-        sel_ctrls = sum(1 for uc in filtered_use_cases if st.session_state.get(f"ctrl_chk_{uc['sl']}", True))
-
-        st.markdown(f"<div class='section-title-wrapper'>Target Controls to Audit <span class='controls-pill'>{sel_ctrls} / {total_ctrls} selected</span></div>", unsafe_allow_html=True)
-
-        search_query = st.text_input("Search by ID or name...", key="control_search_query", placeholder="Search by ID or name...", label_visibility="collapsed")
-        if search_query:
-            st.info("💡 **Tip:** Search filters the displayed checkboxes. To select *only* specific search results, click **✕ Clear All** first, then check the ones you need.")
-    
-        col_all, col_none = st.columns(2)
-        select_all = col_all.button("Select All", use_container_width=True)
-        clear_all = col_none.button("Clear All", use_container_width=True)
-
-        if select_all:
-            for uc in filtered_use_cases:
-                st.session_state[f"ctrl_chk_{uc['sl']}"] = True
-            st.rerun()
-
-        if clear_all:
-            for uc in filtered_use_cases:
-                st.session_state[f"ctrl_chk_{uc['sl']}"] = False
-            st.rerun()
-    
-        # Apply pending control checkbox updates BEFORE widgets render (avoids StreamlitAPIException)
-        if st.session_state.get("_pending_ctrl_checks"):
-            for sl in st.session_state._pending_ctrl_checks:
-                st.session_state[f"ctrl_chk_{sl}"] = True
-            st.session_state._pending_ctrl_checks = []
-
-        if search_query:
-            q = search_query.lower()
-            filtered_for_selector = [uc for uc in filtered_use_cases if q in uc["label"].lower() or q in uc["standard"].lower()]
-        else:
-            filtered_for_selector = filtered_use_cases
-
-        categories = {}
-        for uc in filtered_for_selector:
-            cat = uc["category"]
-            if cat not in categories:
-                categories[cat] = []
-            categories[cat].append(uc)
-
-        for cat, cat_ucs in categories.items():
-            total_in_cat = len([u for u in filtered_use_cases if u["category"] == cat])
-            selected_in_cat = len([u for u in filtered_use_cases if u["category"] == cat and st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
-        
-            if search_query:
-                total_visible = len(cat_ucs)
-                selected_visible = len([u for u in cat_ucs if st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
-                status_suffix = f"[{selected_visible}/{total_visible} matching, {selected_in_cat}/{total_in_cat} selected]"
-            else:
-                if selected_in_cat == total_in_cat:
-                    status_suffix = "[All]"
-                elif selected_in_cat == 0:
-                    status_suffix = "[None]"
-                else:
-                    status_suffix = f"[{selected_in_cat}/{total_in_cat}]"
-            
-            with st.expander(f"{cat} {status_suffix}", expanded=False, key=f"expander_{cat}"):
-                for uc in cat_ucs:
-                    st.checkbox(uc["label"], key=f"ctrl_chk_{uc['sl']}", disabled=False)
-
         selected_ucs = [u for u in filtered_use_cases if st.session_state.get(f"ctrl_chk_{u['sl']}", True)]
         selected_sls = {u["sl"] for u in selected_ucs}
         if "file_registry" not in st.session_state:
             st.session_state.file_registry = {}
 
+        # ── 1. FILE UPLOADER & INGESTION ──────────────────────────────────────
         if st.session_state.user_role != "auditee":
             if "auditor_duplicate_warnings" in st.session_state and st.session_state.auditor_duplicate_warnings:
                 for warn in st.session_state.auditor_duplicate_warnings:
@@ -5180,7 +5119,6 @@ with st.sidebar:
                         os.makedirs(ev_dir, exist_ok=True)
                         dest_path = os.path.join(ev_dir, "auditor_" + f.name)
                         
-                        # Write bytes to disk
                         buf = f.getvalue()
                         with open(dest_path, "wb") as out_f:
                             out_f.write(buf)
@@ -5205,9 +5143,6 @@ with st.sidebar:
                     if f.name not in st.session_state.file_registry:
                         try:
                             text = extract_text(f)
-                            # ── Input Guardrail (Fix G5) ─────────────────────
-                            # Run 4-layer structural scan BEFORE ingestion.
-                            # Warn-only: never blocks the upload or audit flow.
                             try:
                                 _raw_bytes = f.getvalue() if hasattr(f, 'getvalue') else b""
                                 _grd_safe, _grd_reason = _scan_document(f.name, _raw_bytes, text or "")
@@ -5217,7 +5152,6 @@ with st.sidebar:
                                     st.session_state.guardrail_warnings.append(
                                         f"⚠️ Security warning for '{f.name}': {_grd_reason}"
                                     )
-                                    # Log to SystemEvent for traceability
                                     try:
                                         import json as _grd_json
                                         _grd_event = SystemEvent(
@@ -5238,7 +5172,6 @@ with st.sidebar:
                                         pass
                             except Exception as _grd_err:
                                 print(f"[GUARDRAIL WARNING] Scan failed for {f.name}: {_grd_err}", flush=True)
-                            # ─────────────────────────────────────────────────
                             st.session_state.file_registry[f.name] = text
                             save_document_chunks(f.name, text)
                             new_files_added = True
@@ -5264,7 +5197,6 @@ with st.sidebar:
                 ]
         
             if new_files_added:
-                # Track the most recently added file for scope detection
                 last_added_text = ""
                 for f in uploaded:
                     if f.name in st.session_state.file_registry:
@@ -5272,21 +5204,17 @@ with st.sidebar:
                 if last_added_text:
                     st.session_state.scope_detection_context = last_added_text
 
-                # Reset scope hash so the LLM re-scopes based on the new document
                 st.session_state.auto_scoping_done_hash = None
 
-                # Rebuild full context from all uploaded files
                 auto_ctx = ""
                 for fname, ftext in st.session_state.file_registry.items():
                     if ftext is not None:
                         auto_ctx += f"--- FILE: {fname} ---\n{ftext}\n\n"
                 st.session_state.context = auto_ctx.strip()
                 
-                # Auto-run trigger
                 if st.session_state.get("auto_run_after_upload", True):
                     st.session_state.start_analysis_on_next_run = True
                 st.rerun()
-
 
         # Display accumulated files in the UI with per-file deselect buttons
         if st.session_state.user_role != "auditee" and st.session_state.get("file_registry"):
@@ -5320,10 +5248,8 @@ with st.sidebar:
                         _to_remove = fname
             if _to_remove:
                 del st.session_state.file_registry[_to_remove]
-                # remove from last_uploaded_names
                 _names = [n.strip() for n in st.session_state.get("last_uploaded_names", "").split(",") if n.strip() and n.strip() != _to_remove]
                 st.session_state.last_uploaded_names = ", ".join(_names)
-                # rebuild context
                 _auto_ctx = ""
                 for _fn, _ft in st.session_state.file_registry.items():
                     _auto_ctx += f"--- FILE: {_fn} ---\n{_ft}\n\n"
@@ -5331,6 +5257,69 @@ with st.sidebar:
                 st.toast(f"Removed '{_to_remove}' from memory")
                 st.rerun()
 
+        # ── 2. TARGET CONTROLS TO AUDIT ───────────────────────────────────────
+        total_ctrls = len(filtered_use_cases)
+        sel_ctrls = sum(1 for uc in filtered_use_cases if st.session_state.get(f"ctrl_chk_{uc['sl']}", True))
+
+        st.markdown(f"<div class='section-title-wrapper'>Target Controls to Audit <span class='controls-pill'>{sel_ctrls} / {total_ctrls} selected</span></div>", unsafe_allow_html=True)
+
+        search_query = st.text_input("Search by ID or name...", key="control_search_query", placeholder="Search by ID or name...", label_visibility="collapsed")
+        if search_query:
+            st.info("💡 **Tip:** Search filters the displayed checkboxes. To select *only* specific search results, click **✕ Clear All** first, then check the ones you need.")
+    
+        col_all, col_none = st.columns(2)
+        select_all = col_all.button("Select All", use_container_width=True)
+        clear_all = col_none.button("Clear All", use_container_width=True)
+
+        if select_all:
+            for uc in filtered_use_cases:
+                st.session_state[f"ctrl_chk_{uc['sl']}"] = True
+            st.rerun()
+
+        if clear_all:
+            for uc in filtered_use_cases:
+                st.session_state[f"ctrl_chk_{uc['sl']}"] = False
+            st.rerun()
+    
+        if st.session_state.get("_pending_ctrl_checks"):
+            for sl in st.session_state._pending_ctrl_checks:
+                st.session_state[f"ctrl_chk_{sl}"] = True
+            st.session_state._pending_ctrl_checks = []
+
+        if search_query:
+            q = search_query.lower()
+            filtered_for_selector = [uc for uc in filtered_use_cases if q in uc["label"].lower() or q in uc["standard"].lower()]
+        else:
+            filtered_for_selector = filtered_use_cases
+
+        categories = {}
+        for uc in filtered_for_selector:
+            cat = uc["category"]
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(uc)
+
+        for cat, cat_ucs in categories.items():
+            total_in_cat = len([u for u in filtered_use_cases if u["category"] == cat])
+            selected_in_cat = len([u for u in filtered_use_cases if u["category"] == cat and st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
+        
+            if search_query:
+                total_visible = len(cat_ucs)
+                selected_visible = len([u for u in cat_ucs if st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
+                status_suffix = f"[{selected_visible}/{total_visible} matching, {selected_in_cat}/{total_in_cat} selected]"
+            else:
+                if selected_in_cat == total_in_cat:
+                    status_suffix = "[All]"
+                elif selected_in_cat == 0:
+                    status_suffix = "[None]"
+                else:
+                    status_suffix = f"[{selected_in_cat}/{total_in_cat}]"
+            
+            with st.expander(f"{cat} {status_suffix}", expanded=False, key=f"expander_{cat}"):
+                for uc in cat_ucs:
+                    st.checkbox(uc["label"], key=f"ctrl_chk_{uc['sl']}", disabled=False)
+
+        # ── 3. RUN ANALYSIS ACTION BUTTON ──────────────────────────────────────
         run = False
         with _bg_lock:
             is_current_running = st.session_state.active_chat_id in _bg_running
