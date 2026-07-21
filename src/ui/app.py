@@ -4804,6 +4804,16 @@ with st.sidebar:
                             import re as _re
                             
                             df = pd.read_excel(scope_file)
+                            
+                            # Header row auto-detection if top rows contain NaNs / Unnamed columns
+                            if any("unnamed" in str(c).lower() for c in df.columns):
+                                for h_idx in range(min(5, len(df))):
+                                    row_vals = [str(v).strip().lower() for v in df.iloc[h_idx].values if pd.notna(v)]
+                                    if any(k in v for v in row_vals for k in ("audit", "check", "control", "file", "doc", "evidence", "expected")):
+                                        df.columns = [str(c).strip() for c in df.iloc[h_idx]]
+                                        df = df.iloc[h_idx+1:].reset_index(drop=True)
+                                        break
+                            
                             col_control = None
                             col_document = None
                             col_evidence = None
@@ -4813,17 +4823,17 @@ with st.sidebar:
                                 col_str = str(col).lower()
                                 if any(k in col_str for k in ("evidence", "expected", "proof")):
                                     col_evidence = col
-                                elif any(k in col_str for k in ("use_case", "sl", "number")) or "id" in col_str.split() or col_str == "control":
+                                elif any(k in col_str for k in ("use_case", "sl", "number", "audit", "check")) or "id" in col_str.split() or col_str == "control":
                                     col_control = col
-                                elif any(k in col_str for k in ("doc", "file", "policy", "source")):
+                                elif any(k in col_str for k in ("doc", "file", "policy", "source", "name")):
                                     col_document = col
                                     
                             if col_control is None or col_evidence is None:
-                                # Fallback to column index 0 and 1 (or 2 if 3 columns exist)
+                                # Fallback to column index 1 and 2 if 3+ columns exist
                                 if len(df.columns) >= 3:
-                                    col_control = df.columns[0]
-                                    col_document = df.columns[1]
-                                    col_evidence = df.columns[2]
+                                    col_control = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+                                    col_evidence = df.columns[2] if len(df.columns) > 2 else df.columns[1]
+                                    col_document = df.columns[2] if len(df.columns) > 2 else None
                                 elif len(df.columns) >= 2:
                                     col_control = df.columns[0]
                                     col_evidence = df.columns[1]
@@ -4835,6 +4845,7 @@ with st.sidebar:
                                 digit_re = _re.compile(r'(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)')
                                 vapt_re = _re.compile(r'(vapt-\d{1,2})', _re.IGNORECASE)
                                 
+                                from src.core.controls_data import USE_CASES as _UC_LIST
                                 for _, row in df.iterrows():
                                     ctrl_val = str(row[col_control]).strip()
                                     ev_val = str(row[col_evidence]).strip()
@@ -4849,23 +4860,38 @@ with st.sidebar:
                                     
                                     if match_vapt:
                                         target_vapt = match_vapt.group(1).upper()
-                                        for uc in USE_CASES:
+                                        for uc in _UC_LIST:
                                             if uc["use_case"].upper().startswith(target_vapt):
                                                 matched_uc = uc
                                                 break
                                     elif match_id:
                                         target_id = match_id.group(1)
-                                        for uc in USE_CASES:
+                                        for uc in _UC_LIST:
                                             uc_id = uc["use_case"].split(" ")[0]
                                             if uc_id == target_id:
                                                 matched_uc = uc
                                                 break
                                     else:
-                                        # Substring match fallback
-                                        for uc in USE_CASES:
-                                            if ctrl_val.lower() in uc["use_case"].lower():
-                                                matched_uc = uc
-                                                break
+                                        c_lower = ctrl_val.lower()
+                                        for uc in _UC_LIST:
+                                            uc_uc = str(uc.get("use_case", "")).lower()
+                                            uc_desc = str(uc.get("description", "")).lower()
+                                            if 'ntp' in c_lower and any(k in uc_uc or k in uc_desc for k in ('clock', 'time', 'sync')):
+                                                matched_uc = uc; break
+                                            elif ('multifactor' in c_lower or 'mfa' in c_lower) and any(k in uc_uc or k in uc_desc for k in ('mfa', 'multi-factor', 'authentication')):
+                                                matched_uc = uc; break
+                                            elif 'pam' in c_lower and any(k in uc_uc or k in uc_desc for k in ('privilege', 'access', 'pam')):
+                                                matched_uc = uc; break
+                                            elif 'fraud' in c_lower and any(k in uc_uc or k in uc_desc for k in ('fraud', 'security', 'policy')):
+                                                matched_uc = uc; break
+                                            elif 'log' in c_lower and any(k in uc_uc or k in uc_desc for k in ('log', 'logging', 'archive')):
+                                                matched_uc = uc; break
+                                            elif 'cpu' in c_lower and any(k in uc_uc or k in uc_desc for k in ('capacity', 'resource', 'monitoring')):
+                                                matched_uc = uc; break
+                                            elif 'authentication' in c_lower and any(k in uc_uc or k in uc_desc for k in ('authentication', 'access')):
+                                                matched_uc = uc; break
+                                            elif c_lower in uc_uc:
+                                                matched_uc = uc; break
                                                 
                                     if matched_uc:
                                         custom_evidence[matched_uc["use_case"]] = ev_val
