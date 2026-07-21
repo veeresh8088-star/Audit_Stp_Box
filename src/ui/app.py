@@ -4871,22 +4871,24 @@ with st.sidebar:
                                     else:
                                         c_lower = ctrl_val.lower()
                                         for uc in _UC_LIST:
+                                            uc_id = uc["use_case"].split(" ")[0]
                                             uc_uc = str(uc.get("use_case", "")).lower()
                                             uc_desc = str(uc.get("description", "")).lower()
-                                            if 'ntp' in c_lower and any(k in uc_uc or k in uc_desc for k in ('clock', 'time', 'sync')):
-                                                matched_uc = uc; break
-                                            elif ('multifactor' in c_lower or 'mfa' in c_lower) and any(k in uc_uc or k in uc_desc for k in ('mfa', 'multi-factor', 'authentication')):
-                                                matched_uc = uc; break
-                                            elif 'pam' in c_lower and any(k in uc_uc or k in uc_desc for k in ('privilege', 'access', 'pam')):
-                                                matched_uc = uc; break
-                                            elif 'fraud' in c_lower and any(k in uc_uc or k in uc_desc for k in ('fraud', 'security', 'policy')):
-                                                matched_uc = uc; break
-                                            elif 'log' in c_lower and any(k in uc_uc or k in uc_desc for k in ('log', 'logging', 'archive')):
-                                                matched_uc = uc; break
-                                            elif 'cpu' in c_lower and any(k in uc_uc or k in uc_desc for k in ('capacity', 'resource', 'monitoring')):
-                                                matched_uc = uc; break
-                                            elif 'authentication' in c_lower and any(k in uc_uc or k in uc_desc for k in ('authentication', 'access')):
-                                                matched_uc = uc; break
+                                            
+                                            if 'ntp' in c_lower:
+                                                if uc_id == "8.17": matched_uc = uc; break
+                                            elif 'multifactor' in c_lower or 'mfa' in c_lower:
+                                                if uc_id in ("5.17", "8.5"): matched_uc = uc; break
+                                            elif 'pam' in c_lower:
+                                                if uc_id in ("5.15", "8.2", "5.18"): matched_uc = uc; break
+                                            elif 'fraud' in c_lower:
+                                                if uc_id in ("5.1", "5.15"): matched_uc = uc; break
+                                            elif 'archived' in c_lower or 'archival' in c_lower or 'logging' in c_lower:
+                                                if uc_id in ("8.15", "5.33"): matched_uc = uc; break
+                                            elif any(k in c_lower for k in ('cpu', 'memory', 'disk', 'utilization')):
+                                                if uc_id in ("8.16", "8.6"): matched_uc = uc; break
+                                            elif 'authentication' in c_lower:
+                                                if uc_id in ("5.17", "5.15"): matched_uc = uc; break
                                             elif c_lower in uc_uc:
                                                 matched_uc = uc; break
                                                 
