@@ -6817,14 +6817,14 @@ with _main_wrap:
             if is_tech_only:
                 st.markdown("### 2. Technical Findings Report", unsafe_allow_html=True)
                 
-                # ── OPTION 1 & OPTION 2: SEARCH, STATUS FILTER & QUICK REVIEW TABLE TOGGLE ──
-                search_col1, search_col2, search_col3 = st.columns([5, 3, 4])
+                # ── SEARCH, STATUS FILTER & 3 LAYOUT MODES ─────────────────────────────
+                search_col1, search_col2, search_col3 = st.columns([4, 3, 5])
                 with search_col1:
                     search_q = st.text_input("🔍 Search Findings", key="vapt_search_q", placeholder="Search title, CVE, target IP, host, or keyword...")
                 with search_col2:
                     status_flt = st.selectbox("🚦 Workflow Status Filter", options=["All Statuses", "Unreviewed / Open Only", "Accepted Only", "Modified Only", "Rejected Only"], key="vapt_status_flt")
                 with search_col3:
-                    vapt_view_mode = st.radio("Layout Mode", options=["📱 Detailed Cards", "📊 Quick Review Table"], horizontal=True, key="vapt_layout_mode")
+                    vapt_view_mode = st.radio("Layout Mode", options=["📱 Compact Summary", "📊 Quick Review Table", "🛠️ Detailed Audit Cards (Modifiable)"], horizontal=True, key="vapt_layout_mode")
 
                 disp_findings = active_findings
                 if sf:
@@ -6843,7 +6843,7 @@ with _main_wrap:
                         return False
                     disp_findings = [f for f in active_findings if _matches_filter(f, sf)]
 
-                # Apply Quick Search Filter (Option 1)
+                # Apply Quick Search Filter
                 if search_q.strip():
                     sq_lower = search_q.strip().lower()
                     def _matches_q(f):
@@ -6855,7 +6855,7 @@ with _main_wrap:
                         return title_m or host_m or cve_m or ctrl_m or remed_m
                     disp_findings = [f for f in disp_findings if _matches_q(f)]
 
-                # Apply Workflow Status Filter (Option 1)
+                # Apply Workflow Status Filter
                 if status_flt == "Unreviewed / Open Only":
                     disp_findings = [f for f in disp_findings if f.get("display_status", f.get("status", "Open")) in ("Open", "Non-Compliant", "Partially Compliant")]
                 elif status_flt == "Accepted Only":
@@ -6872,7 +6872,7 @@ with _main_wrap:
                     st.info("No technical vulnerability findings match the search query and selected filters.")
                 else:
                     if vapt_view_mode == "📊 Quick Review Table":
-                        # ── OPTION 2: COMPACT QUICK REVIEW TABLE VIEW ─────────────────
+                        # ── MODE 2: COMPACT QUICK REVIEW TABLE VIEW ─────────────────
                         if "vapt_table_editing_idx" not in st.session_state:
                             st.session_state.vapt_table_editing_idx = None
 
@@ -6945,8 +6945,106 @@ with _main_wrap:
 
                             st.markdown("<div style='margin-bottom: 4px;'></div>", unsafe_allow_html=True)
 
+                    elif vapt_view_mode == "🛠️ Detailed Audit Cards (Modifiable)":
+                        # ── MODE 3: FULL DETAILED AUDIT CARDS (MODIFIABLE - Picture 3) ──
+                        for idx, f in enumerate(disp_findings):
+                            t = f.get("title") or f.get("finding") or "Vulnerability Finding"
+                            c_id = f.get("control_id") or f.get("control") or f"VAPT-{idx+1}"
+                            c_name = f.get("control") or c_id
+                            sev_raw = str(f.get("severity", "P4 Low")).upper()
+                            if "CRITICAL" in sev_raw or "P1" in sev_raw:
+                                sev_label, sev_color = "CRITICAL", "#ef4444"
+                            elif "HIGH" in sev_raw or "P2" in sev_raw:
+                                sev_label, sev_color = "HIGH", "#f97316"
+                            elif "MEDIUM" in sev_raw or "P3" in sev_raw:
+                                sev_label, sev_color = "MEDIUM", "#eab308"
+                            else:
+                                sev_label, sev_color = "LOW", "#22c55e"
+
+                            audit_status = f.get("status", "Non-Compliant")
+                            wf_status = f.get("display_status", "Open")
+                            score = float(f.get("severity_score") or f.get("score") or 10.0)
+                            synopsis = f.get("synopsis") or f.get("evidence_snippet") or f.get("finding") or "Vulnerability identified during automated scan."
+                            desc = f.get("reasoning") or f.get("description") or "Security flaw requires remediation as per guidelines."
+                            remed = f.get("recommendation") or f.get("remediation") or "Upgrade or apply vendor security updates."
+                            src_files = f.get("source_files") or f.get("evidence_location") or "All uploaded documents"
+                            editing = f.get("editing", False)
+
+                            if editing:
+                                with st.container(border=True):
+                                    st.markdown(f"### ✏️ Edit Finding — {c_id}")
+                                    new_title = st.text_input("Finding Name", value=t, key=f"det_title_{idx}")
+                                    new_remed = st.text_area("Remediation Instruction", value=remed, key=f"det_remed_{idx}", height=90)
+                                    col_s1, col_s2 = st.columns(2)
+                                    with col_s1:
+                                        if st.button("💾 Save Changes", key=f"det_save_{idx}", type="primary", use_container_width=True):
+                                            f["finding"] = new_title
+                                            f["title"] = new_title
+                                            f["recommendation"] = new_remed
+                                            f["remediation"] = new_remed
+                                            f["editing"] = False
+                                            st.rerun()
+                                    with col_s2:
+                                        if st.button("❌ Cancel", key=f"det_cancel_{idx}", use_container_width=True):
+                                            f["editing"] = False
+                                            st.rerun()
+                            else:
+                                st.markdown(f"""
+                                <div style='background: rgba(30, 41, 59, 0.7); border: 2px solid {sev_color}; border-radius: 12px; padding: 20px; margin-bottom: 16px;'>
+                                    <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;'>
+                                        <b style='font-size:1.1rem; color:{sev_color}'>● {sev_label}</b>
+                                        <div>
+                                            <span style='background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:3px 10px; border-radius:10px; font-weight:700; font-size:0.75rem; margin-right:6px;'>{audit_status.upper()}</span>
+                                            <span style='background:#3b82f622; border:1px solid #3b82f6; color:#93c5fd; padding:3px 10px; border-radius:10px; font-size:0.75rem;'>Relevance: —/100</span>
+                                        </div>
+                                    </div>
+                                    <div style='color:#94a3b8; font-size:0.82rem; margin-bottom:10px;'>Control ID: <b>{c_id}</b></div>
+                                    <div style='font-size:0.95rem; font-weight:700; color:#f8fafc; margin-bottom:8px;'>Control: {c_name}</div>
+                                    <div style='display:flex; gap:8px; align-items:center; margin-bottom:12px;'>
+                                        <span style='background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:2px 8px; border-radius:6px; font-size:0.75rem;'>Policy: Non-Compliant</span>
+                                        <span style='background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:2px 8px; border-radius:6px; font-size:0.75rem;'>Evidence: Non-Compliant</span>
+                                        <span style='background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:2px 8px; border-radius:6px; font-size:0.75rem; font-weight:700;'>Score: {score:.1f}</span>
+                                    </div>
+                                    <div style='background:rgba(15,23,42,0.6); border:1px solid #334155; border-radius:8px; padding:12px; margin-bottom:12px;'>
+                                        <div style='font-size:0.82rem; color:#cbd5e1; margin-bottom:6px;'>💭 <i><b>Synopsis:</b> {synopsis}</i></div>
+                                        <div style='font-size:0.82rem; color:#94a3b8;'><b>Description:</b> {desc[:300]}</div>
+                                    </div>
+                                    <div style='font-size:0.9rem; font-weight:700; color:#f8fafc; margin-bottom:4px;'>📌 Finding: {t}</div>
+                                    <div style='font-size:0.88rem; color:#86efac; margin-bottom:8px;'><b>➜ Recommendation:</b> {remed}</div>
+                                    <div style='font-size:0.78rem; color:#94a3b8; border-top:1px dashed #334155; padding-top:6px;'>
+                                        📁 <b>Source File Scope:</b> <i>{src_files}</i>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                                # Action Buttons Row
+                                c_a1, c_a2, c_a3, c_a4 = st.columns([1.5, 1.5, 1.5, 5])
+                                with c_a1:
+                                    if wf_status == "Accepted":
+                                        if st.button("Undo", key=f"det_undo_{idx}", use_container_width=True):
+                                            f["display_status"] = "Open"
+                                            st.rerun()
+                                    else:
+                                        if st.button("Accept", key=f"det_acc_{idx}", type="primary", use_container_width=True):
+                                            f["display_status"] = "Accepted"
+                                            f["status"] = "Accepted"
+                                            st.rerun()
+                                with c_a2:
+                                    if st.button("Modify", key=f"det_mod_{idx}", use_container_width=True):
+                                        f["editing"] = True
+                                        st.rerun()
+                                with c_a3:
+                                    if st.button("Reject", key=f"det_rej_{idx}", use_container_width=True):
+                                        f["display_status"] = "Rejected"
+                                        f["status"] = "Rejected"
+                                        st.rerun()
+                                with c_a4:
+                                    comment_val = st.text_input("Auditor Notes", value=f.get("comment", ""), key=f"det_cmt_{idx}", label_visibility="collapsed", placeholder="Add auditor notes or comments...")
+                                    if comment_val != f.get("comment", ""):
+                                        f["comment"] = comment_val
+
                     else:
-                        # ── DETAILED CARDS VIEW ───────────────────────────────────────
+                        # ── MODE 1: COMPACT SUMMARY VIEW (Picture 2) ──────────────────
                         for f in disp_findings:
                             t = f.get("title") or f.get("finding") or "Vulnerability Finding"
                             sev_raw = str(f.get("severity", "P4 Low")).upper()
@@ -6979,6 +7077,7 @@ with _main_wrap:
                                 </div>
                             </div>
                             """, unsafe_allow_html=True)
+
 
 
 
