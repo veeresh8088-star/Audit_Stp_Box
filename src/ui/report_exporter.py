@@ -1773,7 +1773,21 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
         # Finding rows
         for f in grp_findings:
-            ctrl_pt    = str(f.get("use_case") or f.get("control") or f.get("control_id") or "")
+            # ── Clean Control points text (avoid duplicate title string concatenation) ──
+            audit_chk = f.get("audit_check") or f.get("control_check") or f.get("check") or f.get("scenario")
+            if audit_chk:
+                ctrl_pt = str(audit_chk).strip()
+            else:
+                u_c = str(f.get("use_case") or "").strip()
+                c_n = str(f.get("control") or "").strip()
+                c_id = str(f.get("control_id") or "").strip()
+                if u_c and c_n and u_c.lower() == c_n.lower():
+                    ctrl_pt = u_c
+                elif u_c and c_n and (u_c in c_n or c_n in u_c):
+                    ctrl_pt = max(u_c, c_n, key=len)
+                else:
+                    ctrl_pt = f"{c_id} {u_c or c_n}".strip() if c_id and (c_id not in (u_c or c_n)) else (u_c or c_n or c_id)
+
             policy_ref = str(f.get("policy_reference") or f.get("reference") or f.get("control_id") or "")
             obs        = str(f.get("gap_description") or f.get("reasoning") or f.get("observation") or f.get("finding") or "")[:800]
             display_s  = str(f.get("display_status") or f.get("status") or "Open")
@@ -1781,6 +1795,7 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
             impact     = str(f.get("impact") or f.get("risk_impact") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Business Risk"))
             suggestion = str(f.get("recommendation") or f.get("suggestion") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Remediate as per IS guidelines."))[:400]
             evidence   = str(f.get("source_files") or f.get("evidence_quote") or f.get("evidence") or "Audit Evidence Files")[:200]
+
 
             _add_obs_row(
                 sno=sno_counter,
