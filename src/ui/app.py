@@ -4826,12 +4826,21 @@ with st.sidebar:
         # ⚙️ ASSESSMENT WORKFLOW MODE (SCREEN 1 MODE SELECT - PURE VAPT SPECIFIC)
         is_vapt_standard = selected_standard in ("VAPT Framework Controls", "VAPT") or (isinstance(selected_standard, str) and "VAPT" in selected_standard.upper() and "ISO" not in selected_standard.upper() and "ALL STANDARDS" not in selected_standard.upper())
         
+        # ── PREVENT STATE CONFLICT BETWEEN ISO AND VAPT STANDARDS ─────────────
+        prev_std = st.session_state.get("_prev_selected_standard")
+        if prev_std != selected_standard:
+            st.session_state["_prev_selected_standard"] = selected_standard
+            if is_vapt_standard:
+                st.session_state.assessment_mode = "VAPT validation"
+            else:
+                st.session_state.assessment_mode = "Compliance audit assessment"
+            st.session_state.severity_filter = set()
+            st.session_state.findings = []
+            st.session_state.resolved_list = []
+
         if st.session_state.user_role != "auditee":
             if is_vapt_standard:
                 st.markdown("**⚙️ Assessment Mode (Chosen before upload)**")
-                if "assessment_mode" not in st.session_state or ("vapt_assessment_mode_radio" not in st.session_state and st.session_state.assessment_mode != "VAPT validation"):
-                    st.session_state.assessment_mode = "VAPT validation"
-                
                 curr_mode = st.session_state.get("assessment_mode", "VAPT validation")
                 default_idx = 0 if curr_mode == "VAPT validation" else 1
 
@@ -4840,7 +4849,7 @@ with st.sidebar:
                     options=["⚙️ VAPT validation (Recommended)", "🛡️ Compliance audit assessment (VAPT-1..15)"],
                     index=default_idx,
                     label_visibility="collapsed",
-                    key="vapt_assessment_mode_radio"
+                    key=f"vapt_assessment_mode_radio_{selected_standard}"
                 )
                 _prev_mode = st.session_state.get("_prev_assessment_mode", st.session_state.assessment_mode)
                 st.session_state.assessment_mode = "VAPT validation" if "VAPT validation" in mode_choice else "Compliance audit assessment"
@@ -6210,7 +6219,8 @@ with _main_wrap:
 
     if tab_report is not None:
         with tab_report:
-            is_tech_only = st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only")
+            is_vapt_std = selected_standard in ("VAPT Framework Controls", "VAPT") or (isinstance(selected_standard, str) and "VAPT" in selected_standard.upper() and "ISO" not in selected_standard.upper() and "ALL STANDARDS" not in selected_standard.upper())
+            is_tech_only = is_vapt_std and (st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only"))
             findings = st.session_state.get("findings", [])
             resolved_list = st.session_state.get("resolved_list", [])
             active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected", "Compliant", "Out Of Scope", "Out of Scope") or (f.get("requires_human_review") and f.get("status") not in ("Dismissed", "Rejected"))]
@@ -6259,7 +6269,8 @@ with _main_wrap:
                 st.info("Select compliance framework and individual controls in the sidebar, upload your evidence document(s), and click **Run Analysis** to automatically detect security gaps.")
 
             elif st.session_state.stage == 5:
-                is_tech_only = st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only")
+                is_vapt_std = selected_standard in ("VAPT Framework Controls", "VAPT") or (isinstance(selected_standard, str) and "VAPT" in selected_standard.upper() and "ISO" not in selected_standard.upper() and "ALL STANDARDS" not in selected_standard.upper())
+                is_tech_only = is_vapt_std and (st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only"))
 
                 if not st.session_state.get("findings") and st.session_state.get("file_registry"):
                     from src.core.parsers import parse_tool_file
@@ -6410,7 +6421,8 @@ with _main_wrap:
                         st.session_state.severity_filter = new_sf
                         st.rerun()
 
-                is_tech_only = st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only")
+                is_vapt_std = selected_standard in ("VAPT Framework Controls", "VAPT") or (isinstance(selected_standard, str) and "VAPT" in selected_standard.upper() and "ISO" not in selected_standard.upper() and "ALL STANDARDS" not in selected_standard.upper())
+                is_tech_only = is_vapt_std and (st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only"))
 
                 
                 if is_tech_only:
