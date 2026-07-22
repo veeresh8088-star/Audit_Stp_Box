@@ -6914,12 +6914,27 @@ with _main_wrap:
                         if x.get("severity", "P3 Medium") in SEV_ORDER else 3
                 )
 
+                def _matches_sev(f_sev, filter_set):
+                    s_u = str(f_sev or "").upper()
+                    for flt in filter_set:
+                        flt_u = str(flt).upper()
+                        if ("CRITICAL" in flt_u or "P1" in flt_u) and ("CRITICAL" in s_u or "P1" in s_u):
+                            return True
+                        if ("HIGH" in flt_u or "P2" in flt_u) and ("HIGH" in s_u or "P2" in s_u):
+                            return True
+                        if ("MEDIUM" in flt_u or "P3" in flt_u) and ("MEDIUM" in s_u or "P3" in s_u):
+                            return True
+                        if ("LOW" in flt_u or "P4" in flt_u) and ("LOW" in s_u or "P4" in s_u):
+                            return True
+                    return False
+
                 if sf and not open_sev_filters:
                     displayed_findings = []
                 elif open_sev_filters:
-                    displayed_findings = [f for f in open_findings_sorted if f.get("severity", "P3 Medium") in open_sev_filters]
+                    displayed_findings = [f for f in open_findings_sorted if _matches_sev(f.get("severity"), open_sev_filters)]
                 else:
                     displayed_findings = open_findings_sorted
+
 
                 for idx, f in enumerate(displayed_findings):
                     audit_status   = f.get("status", "Non-Compliant")   # Compliant / Partially Compliant / Non-Compliant
