@@ -6967,9 +6967,16 @@ with _main_wrap:
                             audit_status = f.get("status", "Non-Compliant")
                             wf_status = f.get("display_status", "Open")
                             score = float(f.get("severity_score") or f.get("score") or 10.0)
-                            synopsis = f.get("synopsis") or f.get("evidence_snippet") or f.get("finding") or "Vulnerability identified during automated scan."
-                            desc = f.get("reasoning") or f.get("description") or "Security flaw requires remediation as per guidelines."
-                            remed = f.get("recommendation") or f.get("remediation") or "Upgrade or apply vendor security updates."
+                            
+                            raw_syn = f.get("synopsis") or f.get("evidence_snippet") or f.get("finding") or "Vulnerability identified during automated scan."
+                            synopsis = re.sub(r'<[^>]+>', '', str(raw_syn)).strip()
+
+                            raw_desc = f.get("reasoning") or f.get("description") or "Security flaw requires remediation as per guidelines."
+                            desc = re.sub(r'<[^>]+>', '', str(raw_desc)).strip()
+
+                            raw_remed = f.get("recommendation") or f.get("remediation") or "Upgrade or apply vendor security updates."
+                            remed = re.sub(r'<[^>]+>', '', str(raw_remed)).strip()
+
                             src_files = f.get("source_files") or f.get("evidence_location") or "All uploaded documents"
                             editing = f.get("editing", False)
 
