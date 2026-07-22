@@ -7395,6 +7395,23 @@ with _main_wrap:
                                                     orig_f["policy_result"] = status_abbr
                                                     orig_f["evidence_result"] = status_abbr
                                     save_current_findings_snapshot()
+                                    try:
+                                        with force_master():
+                                            _db_learn = SessionLocal()
+                                            _db_learn.add(AuditorLearningRule(
+                                                control_id=str(f.get("control_id") or f.get("control", "")),
+                                                pattern_key=str(new_finding)[:250],
+                                                action="MODIFIED",
+                                                original_text=str(f.get("finding", "")),
+                                                auditor_feedback=f"Auditor modified ISO control '{new_ctrl}' finding to '{new_finding}' and recommendation to '{new_rec}'",
+                                                adjusted_remediation=str(new_rec),
+                                                created_by=st.session_state.get("username", "Auditor")
+                                            ))
+                                            _db_learn.commit()
+                                            _db_learn.close()
+                                    except Exception:
+                                        pass
+                                    st.toast("🧠 Auditor Learning Rule saved to LLM Memory!")
                                     st.rerun()
                             with col_cancel:
                                 if st.button("✕ Cancel", key=f"cancel_edit_{idx}", use_container_width=True):
@@ -7535,6 +7552,22 @@ with _main_wrap:
                                         if orig_f.get("control_id") == f.get("control_id") and orig_f["finding"] == f["finding"]:
                                             orig_f["status"] = "Rejected"
                                     save_current_findings_snapshot()
+                                    try:
+                                        with force_master():
+                                            _db_learn = SessionLocal()
+                                            _db_learn.add(AuditorLearningRule(
+                                                control_id=str(f.get("control_id") or f.get("control", "")),
+                                                pattern_key=str(f.get("finding", ""))[:250],
+                                                action="FALSE_POSITIVE",
+                                                original_text=str(f.get("finding", "")),
+                                                auditor_feedback=f"Auditor rejected ISO finding for control '{f.get('control', '')}' as False Positive.",
+                                                created_by=st.session_state.get("username", "Auditor")
+                                            ))
+                                            _db_learn.commit()
+                                            _db_learn.close()
+                                    except Exception:
+                                        pass
+                                    st.toast("🧠 LLM learned to suppress this False Positive in future ISO scans!")
                                     st.rerun()
                             with col_act4:
                                 comment_val = st.text_input("Auditor Notes", value=f.get("comment", ""), key=f"cmt_{idx}", label_visibility="collapsed", placeholder="Add auditor notes or comments...")
