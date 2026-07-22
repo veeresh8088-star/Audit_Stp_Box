@@ -7537,13 +7537,14 @@ with _main_wrap:
                                     save_current_findings_snapshot()
                                     st.rerun()
 
-                # ── ShaktiDB Save: warn only when controls are unreviewed ────
+                # ── ShaktiDB Save: warn when findings/controls are unreviewed ─────────
                 open_controls = [
                     f for f in findings
-                    if f.get("display_status", "Open") == "Open"
-                    and f.get("status") not in ("Dismissed", "Rejected", "Compliant", "Out of Scope", "Out Of Scope")
+                    if f.get("display_status", f.get("status", "Open")) in ("Open", "Non-Compliant", "Partially Compliant")
+                    and f.get("status") not in ("Accepted", "Modified", "Rejected", "Dismissed", "Compliant", "Out of Scope", "Out Of Scope")
+                    and f.get("display_status") not in ("Accepted", "Modified", "Rejected", "Dismissed")
                 ]
-                unreviewed_controls = [str(f.get("control_id") or f.get("control")) for f in open_controls]
+                unreviewed_controls = [str(f.get("title") or f.get("control_id") or f.get("control") or "Unreviewed Finding") for f in open_controls]
                 unreviewed_count = len(open_controls)
 
                 if "_shakti_confirm_pending" not in st.session_state:
@@ -7564,14 +7565,13 @@ with _main_wrap:
                             margin-bottom: 14px;
                         '>
                             <div style='font-size:1.15rem; font-weight:700; color:#fbbf24; margin-bottom:6px;'>
-                                ⚠️ Unreviewed Controls Detected
+                                ⚠️ Unreviewed / Unaccepted Findings Detected
                             </div>
                             <div style='color:#e2e8f0; font-size:0.92rem; line-height:1.65;'>
                                 <span style='color:#f87171;'>
-                                    <strong>{unreviewed_count} control(s) have not been reviewed yet.</strong>
+                                    <strong>{unreviewed_count} finding(s) / control(s) have not been reviewed, accepted, or rejected yet.</strong>
                                 </span><br>
-                                Saving now will force-save these as unreviewed and the action will be
-                                logged in the audit trail.<br><br>
+                                Saving now will force-save these as unreviewed and log a <strong>FORCE_SAVE_INCOMPLETE_REVIEW</strong> warning event in the Admin Security Logs.<br><br>
                                 Are you sure you want to continue?
                             </div>
                         </div>
