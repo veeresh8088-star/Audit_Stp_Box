@@ -7123,7 +7123,7 @@ with _main_wrap:
 
                 st.markdown(f"<br><small style='color:#64748b'>Generated · {datetime.now().strftime('%d %b %Y %H:%M:%S')} · {selected_standard} ({len(selected_ucs)} Controls)</small>", unsafe_allow_html=True)
                 st.divider()
-
+            else:
                 SEVERITY_LABEL = {
                     "P1 Critical": "P1 · CRITICAL",
                     "P2 High":     "P2 · HIGH",
