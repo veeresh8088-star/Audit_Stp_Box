@@ -6343,7 +6343,86 @@ with _main_wrap:
                     scopes = st.session_state.get("selected_scopes", [])
                     report_md = generate_copyable_markdown_report(findings, file_names, scopes)
                     st.code(report_md, language="markdown")
-            
+
+                # ── TOP ACTION BAR: INSTANT EXPORT & SAVE TO SHAKTIDB ─────────
+                st.markdown("""
+                <div style='background: linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9)); border: 1px solid #334155; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px;'>
+                    <div style='font-size: 1.05rem; font-weight: 700; color: #f8fafc; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;'>
+                        🚀 <span>Audit Actions & Export Options</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                _top_export_rows = [{
+                    "Control ID":        f.get("control_id", ""),
+                    "Control Name":      f.get("control", ""),
+                    "Relevance Score":   f.get("relevance_score", ""),
+                    "Evidence Found":    f.get("evidence_found", ""),
+                    "Evidence Snippet":  f.get("evidence_snippet", ""),
+                    "Compliance Status": f.get("status", ""),
+                    "Severity":          f.get("severity", ""),
+                    "Finding":           f.get("finding", ""),
+                    "Recommendation":    f.get("recommendation", ""),
+                    "Reasoning":         f.get("reasoning", ""),
+                    "Workflow Status":   f.get("display_status", "Open"),
+                    "Source Scope":      f.get("source_files", "All uploaded documents"),
+                    "Auditor Comment":   f.get("comment", "")
+                } for f in (findings or [])]
+                
+                from src.ui.report_exporter import export_docx_report, export_pdf_report
+                _docx_bytes = export_docx_report(
+                    session_title=selected_standard,
+                    findings=findings,
+                    resolved_list=resolved_list,
+                    status=st.session_state.get("audit_status", "Draft"),
+                    comments=st.session_state.get("auditor_comments", "")
+                )
+                _pdf_bytes = export_pdf_report(
+                    session_title=selected_standard,
+                    findings=findings,
+                    resolved_list=resolved_list,
+                    status=st.session_state.get("audit_status", "Draft"),
+                    comments=st.session_state.get("auditor_comments", "")
+                )
+                _csv_bytes = _dict_list_to_csv(_top_export_rows)
+
+                t_col1, t_col2, t_col3, t_col4 = st.columns(4)
+                with t_col1:
+                    if st.button("💾 Save to ShaktiDB", type="primary", use_container_width=True, key="top_shakti_save_btn"):
+                        to_save = [f for f in findings if f.get("status") not in ("Dismissed", "Out of Scope", "Out Of Scope")]
+                        save_findings({"sl": 0, "use_case": f"{selected_standard} Audit Run"}, to_save)
+                        st.success(f"✅ {len(to_save)} records saved to {db_label}")
+                        st.rerun()
+                with t_col2:
+                    st.download_button(
+                        label="⬇️ Download DOCX Report",
+                        data=_docx_bytes,
+                        file_name=f"{selected_standard.replace(' ', '_')}_Report.docx",
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                        key="top_docx_btn"
+                    )
+                with t_col3:
+                    st.download_button(
+                        label="📄 Download PDF Report",
+                        data=_pdf_bytes,
+                        file_name=f"{selected_standard.replace(' ', '_')}_Report.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key="top_pdf_btn"
+                    )
+                with t_col4:
+                    st.download_button(
+                        label="📊 Export Report CSV",
+                        data=_csv_bytes,
+                        file_name=f"{selected_standard.replace(' ', '_')}_Report.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="top_csv_btn"
+                    )
+
+                st.divider()
+
                 # --- Definition of Risk Classifications Expander ---
                 with st.expander("📊 Definition of Risk Classifications (NIST & Audit Framework)", expanded=False):
                     st.markdown("""
@@ -6360,6 +6439,7 @@ with _main_wrap:
                 st.markdown("<br>", unsafe_allow_html=True)
 
                 active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected", "Compliant", "Out Of Scope", "Out of Scope") or (f.get("requires_human_review") and f.get("status") not in ("Dismissed", "Rejected"))]
+
                 counts = {"P1 Critical": 0, "P2 High": 0, "P3 Medium": 0, "P4 Low": 0}
                 for f in active_findings:
                     s_raw = str(f.get("severity", "")).upper()
