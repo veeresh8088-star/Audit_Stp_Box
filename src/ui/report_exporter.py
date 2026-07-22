@@ -1823,8 +1823,8 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     try:
         st_std = st.session_state.get("selected_standard", "")
     except Exception:
-        st_std = str(session_title)
-    is_vapt = "VAPT" in str(st_std).upper() or "VULNERABILITY" in str(st_std).upper()
+        st_std_u = str(st_std).upper()
+    is_vapt = ("VAPT" in st_std_u or "VULNERABILITY" in st_std_u) and ("ISO" not in st_std_u) and ("ALL STANDARDS" not in st_std_u)
 
     if is_vapt:
         return _export_vapt_docx(session_title, findings, resolved_list, status, comments)
@@ -2259,8 +2259,8 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         st_std = st.session_state.get("selected_standard", "")
     except Exception:
         st_std = str(session_title)
-    # FIXED: Only check selected_standard — not finding contents
-    is_vapt = "VAPT" in str(st_std).upper() or "VULNERABILITY" in str(st_std).upper()
+    st_std_u = str(st_std).upper()
+    is_vapt = ("VAPT" in st_std_u or "VULNERABILITY" in st_std_u) and ("ISO" not in st_std_u) and ("ALL STANDARDS" not in st_std_u)
     if is_vapt:
         return _export_vapt_pdf(session_title, findings, resolved_list, status, comments)
     from fpdf.fonts import FontFace
