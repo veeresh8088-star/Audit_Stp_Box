@@ -6994,8 +6994,7 @@ with _main_wrap:
                                     <div style='display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;'>
                                         <b style='font-size:1.1rem; color:{sev_color}'>● {sev_label}</b>
                                         <div>
-                                            <span style='background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:3px 10px; border-radius:10px; font-weight:700; font-size:0.75rem; margin-right:6px;'>{audit_status.upper()}</span>
-                                            <span style='background:#3b82f622; border:1px solid #3b82f6; color:#93c5fd; padding:3px 10px; border-radius:10px; font-size:0.75rem;'>Relevance: —/100</span>
+                                            <span style='background:#ef444422; border:1px solid #ef4444; color:#ef4444; padding:3px 10px; border-radius:10px; font-weight:700; font-size:0.75rem;'>{audit_status.upper()}</span>
                                         </div>
                                     </div>
                                     <div style='color:#94a3b8; font-size:0.82rem; margin-bottom:10px;'>Control ID: <b>{c_id}</b></div>
@@ -7419,7 +7418,6 @@ with _main_wrap:
                             <b>{emj} {label}</b>
                             <div style='display:flex; gap:6px; align-items:center;'>
                               <span style='font-size:0.72rem; background:{compliance_badge_color}33; border:1px solid {compliance_badge_color}; color:{compliance_badge_color}; padding:2px 9px; border-radius:12px; font-weight:700;'>{audit_status.upper()}</span>
-                              <span style='font-size:0.72rem; background:#1e293b; border:1px solid #334155; color:#94a3b8; padding:2px 9px; border-radius:12px; font-weight:600;'>Relevance: {relevance}/100</span>
                             </div>
                           </div>
                           <div style='font-size:0.8rem; color:#64748b; margin-bottom:4px;'><b>Control ID:</b> {control_id}</div>
