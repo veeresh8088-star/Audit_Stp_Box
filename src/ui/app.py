@@ -6223,7 +6223,7 @@ with _main_wrap:
             is_tech_only = is_vapt_std and (st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only"))
             findings = st.session_state.get("findings", [])
             resolved_list = st.session_state.get("resolved_list", [])
-            active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected", "Compliant", "Out Of Scope", "Out of Scope") or (f.get("requires_human_review") and f.get("status") not in ("Dismissed", "Rejected"))]
+            active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected")]
             sf = st.session_state.get("severity_filter", set())
             if not isinstance(sf, set):
                 sf = set()
