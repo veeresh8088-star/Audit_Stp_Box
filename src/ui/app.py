@@ -4829,18 +4829,21 @@ with st.sidebar:
         if st.session_state.user_role != "auditee":
             if is_vapt_standard:
                 st.markdown("**⚙️ Assessment Mode (Chosen before upload)**")
-                if "assessment_mode" not in st.session_state:
+                if "assessment_mode" not in st.session_state or ("vapt_assessment_mode_radio" not in st.session_state and st.session_state.assessment_mode != "VAPT validation"):
                     st.session_state.assessment_mode = "VAPT validation"
                 
+                curr_mode = st.session_state.get("assessment_mode", "VAPT validation")
+                default_idx = 0 if curr_mode == "VAPT validation" else 1
+
                 mode_choice = st.radio(
                     "Assessment Mode Selection",
                     options=["⚙️ VAPT validation (Recommended)", "🛡️ Compliance audit assessment (VAPT-1..15)"],
-                    index=0 if ("VAPT" in st.session_state.get("assessment_mode", "VAPT") or "Technical" in st.session_state.get("assessment_mode", "VAPT")) else 1,
+                    index=default_idx,
                     label_visibility="collapsed",
                     key="vapt_assessment_mode_radio"
                 )
                 _prev_mode = st.session_state.get("_prev_assessment_mode", st.session_state.assessment_mode)
-                st.session_state.assessment_mode = "VAPT validation" if ("VAPT" in mode_choice or "Technical" in mode_choice) else "Compliance audit assessment"
+                st.session_state.assessment_mode = "VAPT validation" if "VAPT validation" in mode_choice else "Compliance audit assessment"
                 if _prev_mode != st.session_state.assessment_mode:
                     # Mode changed — clear severity filter & findings to avoid stale state
                     st.session_state.severity_filter = set()
@@ -6824,7 +6827,7 @@ with _main_wrap:
                 with search_col2:
                     status_flt = st.selectbox("🚦 Workflow Status Filter", options=["All Statuses", "Unreviewed / Open Only", "Accepted Only", "Modified Only", "Rejected Only"], key="vapt_status_flt")
                 with search_col3:
-                    vapt_view_mode = st.radio("Layout Mode", options=["📱 Compact Summary", "📊 Quick Review Table", "🛠️ Detailed Audit Cards (Modifiable)"], horizontal=True, key="vapt_layout_mode")
+                    vapt_view_mode = st.radio("Layout Mode", options=[" Compact Summary", " Quick Review Table", " Detailed Audit Cards (Modifiable)"], horizontal=True, key="vapt_layout_mode")
 
                 disp_findings = active_findings
                 if sf:
