@@ -4830,17 +4830,17 @@ with st.sidebar:
             if is_vapt_standard:
                 st.markdown("**⚙️ Assessment Mode (Chosen before upload)**")
                 if "assessment_mode" not in st.session_state:
-                    st.session_state.assessment_mode = "Technical findings only"
+                    st.session_state.assessment_mode = "VAPT validation"
                 
                 mode_choice = st.radio(
                     "Assessment Mode Selection",
-                    options=["⚙️ Technical findings only (Recommended)", "🛡️ Control-mapped audit (VAPT-1..15)"],
-                    index=0 if "Technical" in st.session_state.get("assessment_mode", "Technical") else 1,
+                    options=["⚙️ VAPT validation (Recommended)", "🛡️ Compliance audit assessment (VAPT-1..15)"],
+                    index=0 if ("VAPT" in st.session_state.get("assessment_mode", "VAPT") or "Technical" in st.session_state.get("assessment_mode", "VAPT")) else 1,
                     label_visibility="collapsed",
                     key="vapt_assessment_mode_radio"
                 )
                 _prev_mode = st.session_state.get("_prev_assessment_mode", st.session_state.assessment_mode)
-                st.session_state.assessment_mode = "Technical findings only" if "Technical" in mode_choice else "Control-mapped audit"
+                st.session_state.assessment_mode = "VAPT validation" if ("VAPT" in mode_choice or "Technical" in mode_choice) else "Compliance audit assessment"
                 if _prev_mode != st.session_state.assessment_mode:
                     # Mode changed — clear severity filter & findings to avoid stale state
                     st.session_state.severity_filter = set()
@@ -4848,18 +4848,19 @@ with st.sidebar:
                     st.session_state.resolved_list = []
                     st.session_state.stage = 0
                 st.session_state["_prev_assessment_mode"] = st.session_state.assessment_mode
-                if st.session_state.assessment_mode == "Technical findings only":
-                    st.caption("💡 **Technical findings only**: Flat vulnerability list with zero compliance verdicts. Shows CVSS, target IPs, CVEs, and remediation per finding.")
+                if st.session_state.assessment_mode in ("VAPT validation", "Technical findings only"):
+                    st.caption("💡 **VAPT validation**: Flat vulnerability list with zero compliance verdicts. Shows CVSS, target IPs, CVEs, and remediation per finding.")
                 else:
-                    st.caption("🛡️ **Control-mapped audit**: Maps findings into VAPT-1..15. Evaluates policy docs, technical evidence, and enforces human approval gate.")
+                    st.caption("🛡️ **Compliance audit assessment**: Maps findings into VAPT-1..15. Evaluates policy docs, technical evidence, and enforces human approval gate.")
                 st.divider()
             else:
-                # ISO 27001 is ALWAYS a Control-Mapped Audit
-                st.session_state.assessment_mode = "Control-mapped audit"
+                # ISO 27001 is ALWAYS a Compliance Audit Assessment
+                st.session_state.assessment_mode = "Compliance audit assessment"
 
-        # 🛡️ AUDIT MODE (Relevant when running Control-Mapped Audit or ISO 27001)
-        if st.session_state.user_role != "auditee" and (st.session_state.assessment_mode == "Control-mapped audit" or not is_vapt_standard):
+        # 🛡️ AUDIT MODE (Relevant when running Compliance Audit Assessment or ISO 27001)
+        if st.session_state.user_role != "auditee" and (st.session_state.assessment_mode in ("Compliance audit assessment", "Control-mapped audit") or not is_vapt_standard):
             st.markdown("**🛡️ Audit Mode**")
+
             if "audit_mode" not in st.session_state:
                 st.session_state.audit_mode = "Deep"
             
@@ -4881,14 +4882,16 @@ with st.sidebar:
         if st.session_state.user_role != "auditee":
             st.markdown("**🔍 Scope Detection**")
     
-            if "scoping_mode" not in st.session_state:
-                st.session_state.scoping_mode = "Manual Scoping"
+            if "scoping_mode" not in st.session_state or st.session_state.scoping_mode == "Automatic AI Scoping":
+                st.session_state.scoping_mode = "AI Audit Scoping"
+            elif st.session_state.scoping_mode == "Upload Excel Scope Document":
+                st.session_state.scoping_mode = "Audit Scope Checklist"
             
-            scoping_options = ["Automatic AI Scoping", "Manual Scoping", "Upload Excel Scope Document"]
+            scoping_options = ["AI Audit Scoping", "Manual Scoping", "Audit Scope Checklist"]
             try:
                 default_index = scoping_options.index(st.session_state.scoping_mode)
             except ValueError:
-                default_index = 1
+                default_index = 0
             
             st.session_state.scoping_mode = st.radio(
                 "Scoping Mode",
@@ -4899,7 +4902,8 @@ with st.sidebar:
             )
             
             # --- CUSTOM EXCEL SCOPING UPLOADER ---
-            if st.session_state.scoping_mode == "Upload Excel Scope Document":
+            if st.session_state.scoping_mode in ("Audit Scope Checklist", "Upload Excel Scope Document"):
+
                 st.write("")
                 scope_file = st.file_uploader(
                     "Upload Scope & Evidence Mapping (.xlsx, .xls)",
@@ -5056,13 +5060,8 @@ with st.sidebar:
                 st.session_state.prev_scopes = list(st.session_state.selected_scopes)
                 del st.session_state.pending_scopes_update
 
-            selected_scopes = st.multiselect(
-                "Active Scopes",
-                options=list(scoping_engine.DOC_TYPE_MAPPINGS.keys()),
-                key="selected_scopes",
-                label_visibility="collapsed",
-                disabled=(st.session_state.scoping_mode in ("Automatic AI Scoping", "Upload Excel Scope Document"))
-            )
+            selected_scopes = st.session_state.get("selected_scopes", [])
+
     
             if st.session_state.scoping_mode == "Manual Scoping" and st.session_state.selected_scopes != st.session_state.prev_scopes:
                 if st.session_state.selected_scopes:
@@ -5512,7 +5511,8 @@ if run or st.session_state.get("start_analysis_on_next_run"):
         st.sidebar.warning("⏳ Analysis is already running in the background...")
     else:
         # Run Auto Scoping first if selected and not triggered by the next-run rerun
-        if not is_triggered_by_next_run and st.session_state.scoping_mode == "Automatic AI Scoping":
+        if not is_triggered_by_next_run and st.session_state.scoping_mode in ("AI Audit Scoping", "Automatic AI Scoping"):
+
             # Show spinner inside sidebar only
             with st.sidebar:
                 scoping_placeholder = st.empty()
@@ -5660,7 +5660,8 @@ if run or st.session_state.get("start_analysis_on_next_run"):
                 json.dumps({"findings": [], "resolved_list": [], "stage": 5})
             )
             
-            is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
+            is_tech_only = st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only")
+
             
             if is_tech_only:
                 target_bg_func = _run_fast_technical_vapt_bg
@@ -6091,7 +6092,8 @@ def _render_document_viewer_fragment(doc_view_scope_select):
 @st.fragment(run_every=timedelta(seconds=3))
 def _render_running_progress(bg_key):
     with _bg_lock:
-        default_msg = "⚡ Extracting technical findings with Pure Python Engine (0ms LLM)..." if st.session_state.get("assessment_mode") == "Technical findings only" else "Deep AI Scanning In Progress..."
+        default_msg = "⚡ Extracting technical findings with Pure Python Engine (0ms LLM)..." if st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only") else "Deep AI Scanning In Progress..."
+
         prog_data = _bg_store["progress"].get(bg_key, default_msg)
     if isinstance(prog_data, dict):
         prog_msg = prog_data.get("text", "")
@@ -6205,7 +6207,7 @@ with _main_wrap:
 
     if tab_report is not None:
         with tab_report:
-            is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
+            is_tech_only = st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only")
             findings = st.session_state.get("findings", [])
             resolved_list = st.session_state.get("resolved_list", [])
             active_findings = [f for f in findings if f.get("status", "Open") not in ("Dismissed", "Rejected", "Compliant", "Out Of Scope", "Out of Scope") or (f.get("requires_human_review") and f.get("status") not in ("Dismissed", "Rejected"))]
@@ -6254,7 +6256,8 @@ with _main_wrap:
                 st.info("Select compliance framework and individual controls in the sidebar, upload your evidence document(s), and click **Run Analysis** to automatically detect security gaps.")
 
             elif st.session_state.stage == 5:
-                is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
+                is_tech_only = st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only")
+
                 if not st.session_state.get("findings") and st.session_state.get("file_registry"):
                     from src.core.parsers import parse_tool_file
                     auto_findings = []
@@ -6404,7 +6407,8 @@ with _main_wrap:
                         st.session_state.severity_filter = new_sf
                         st.rerun()
 
-                is_tech_only = st.session_state.get("assessment_mode") == "Technical findings only"
+                is_tech_only = st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only")
+
                 
                 if is_tech_only:
                     c1, c2, c3, c4 = st.columns(4)
@@ -6811,9 +6815,17 @@ with _main_wrap:
                             st.info("No controls resolved yet. Upload evidence and run the analysis.")
 
             if is_tech_only:
-                st.markdown("### 2. After analysis — technical findings report", unsafe_allow_html=True)
-                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("### 2. Technical Findings Report", unsafe_allow_html=True)
                 
+                # ── OPTION 1 & OPTION 2: SEARCH, STATUS FILTER & QUICK REVIEW TABLE TOGGLE ──
+                search_col1, search_col2, search_col3 = st.columns([5, 3, 4])
+                with search_col1:
+                    search_q = st.text_input("🔍 Search Findings", key="vapt_search_q", placeholder="Search title, CVE, target IP, host, or keyword...")
+                with search_col2:
+                    status_flt = st.selectbox("🚦 Workflow Status Filter", options=["All Statuses", "Unreviewed / Open Only", "Accepted Only", "Modified Only", "Rejected Only"], key="vapt_status_flt")
+                with search_col3:
+                    vapt_view_mode = st.radio("Layout Mode", options=["📱 Detailed Cards", "📊 Quick Review Table"], horizontal=True, key="vapt_layout_mode")
+
                 disp_findings = active_findings
                 if sf:
                     def _matches_filter(f_obj, filter_set):
@@ -6830,42 +6842,146 @@ with _main_wrap:
                                 return True
                         return False
                     disp_findings = [f for f in active_findings if _matches_filter(f, sf)]
-                
-                if not disp_findings:
-                    st.info("No technical vulnerability findings match the selected severity filters.")
-                else:
-                    for f in disp_findings:
-                        t = f.get("title") or f.get("finding") or "Vulnerability Finding"
-                        sev_raw = str(f.get("severity", "P4 Low")).upper()
-                        if "CRITICAL" in sev_raw or "P1" in sev_raw:
-                            sev_label, sev_color = "Critical", "#ef4444"
-                        elif "HIGH" in sev_raw or "P2" in sev_raw:
-                            sev_label, sev_color = "High", "#f97316"
-                        elif "MEDIUM" in sev_raw or "P3" in sev_raw:
-                            sev_label, sev_color = "Medium", "#eab308"
-                        else:
-                            sev_label, sev_color = "Low", "#22c55e"
-                        
-                        cve_val = f.get("cve_list") or f.get("cve") or []
-                        cves = ", ".join(cve_val) if isinstance(cve_val, list) else str(cve_val)
-                        score = float(f.get("severity_score") or f.get("score") or 2.3)
-                        target_host = f.get("target") or f.get("host") or "Scoped Target Systems"
-                        remed = f.get("recommendation") or f.get("remediation") or "Upgrade or apply vendor security updates."
 
-                        st.markdown(f"""
-                        <div style='background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; border-radius: 12px; padding: 18px; margin-bottom: 14px;'>
-                            <div style='display: flex; justify-content: space-between; align-items: center;'>
-                                <b style='font-size: 1.05rem; color: #f8fafc;'>{t}</b>
-                                <span style='background: {sev_color}22; border: 1px solid {sev_color}; color: {sev_color}; padding: 3px 12px; border-radius: 12px; font-weight: 700; font-size: 0.8rem;'>{sev_label}</span>
+                # Apply Quick Search Filter (Option 1)
+                if search_q.strip():
+                    sq_lower = search_q.strip().lower()
+                    def _matches_q(f):
+                        title_m = sq_lower in str(f.get("title") or f.get("finding") or "").lower()
+                        host_m = sq_lower in str(f.get("target") or f.get("host") or "").lower()
+                        cve_m = sq_lower in str(f.get("cve_list") or f.get("cve") or "").lower()
+                        ctrl_m = sq_lower in str(f.get("control_id") or f.get("control") or "").lower()
+                        remed_m = sq_lower in str(f.get("recommendation") or f.get("remediation") or "").lower()
+                        return title_m or host_m or cve_m or ctrl_m or remed_m
+                    disp_findings = [f for f in disp_findings if _matches_q(f)]
+
+                # Apply Workflow Status Filter (Option 1)
+                if status_flt == "Unreviewed / Open Only":
+                    disp_findings = [f for f in disp_findings if f.get("display_status", f.get("status", "Open")) in ("Open", "Non-Compliant", "Partially Compliant")]
+                elif status_flt == "Accepted Only":
+                    disp_findings = [f for f in disp_findings if f.get("display_status") == "Accepted"]
+                elif status_flt == "Modified Only":
+                    disp_findings = [f for f in disp_findings if f.get("display_status") == "Modified"]
+                elif status_flt == "Rejected Only":
+                    disp_findings = [f for f in disp_findings if f.get("display_status") in ("Rejected", "Dismissed")]
+
+                st.caption(f"Showing **{len(disp_findings)}** of {len(active_findings)} findings")
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                if not disp_findings:
+                    st.info("No technical vulnerability findings match the search query and selected filters.")
+                else:
+                    if vapt_view_mode == "📊 Quick Review Table":
+                        # ── OPTION 2: COMPACT QUICK REVIEW TABLE VIEW ─────────────────
+                        if "vapt_table_editing_idx" not in st.session_state:
+                            st.session_state.vapt_table_editing_idx = None
+
+                        for t_idx, f in enumerate(disp_findings):
+                            t = f.get("title") or f.get("finding") or "Vulnerability Finding"
+                            sev_raw = str(f.get("severity", "P4 Low")).upper()
+                            if "CRITICAL" in sev_raw or "P1" in sev_raw:
+                                sev_label, sev_color = "Critical", "#ef4444"
+                            elif "HIGH" in sev_raw or "P2" in sev_raw:
+                                sev_label, sev_color = "High", "#f97316"
+                            elif "MEDIUM" in sev_raw or "P3" in sev_raw:
+                                sev_label, sev_color = "Medium", "#eab308"
+                            else:
+                                sev_label, sev_color = "Low", "#22c55e"
+
+                            score = float(f.get("severity_score") or f.get("score") or 2.3)
+                            target_host = f.get("target") or f.get("host") or "Scoped Target Systems"
+                            remed = f.get("recommendation") or f.get("remediation") or "Upgrade security updates."
+                            wf_status = f.get("display_status", f.get("status", "Open"))
+                            is_row_editing = (st.session_state.get("vapt_table_editing_idx") == t_idx)
+
+                            row_bg = "rgba(30, 41, 59, 0.9)" if is_row_editing else "rgba(15, 23, 42, 0.6)"
+                            row_border = "1px solid #3b82f6" if is_row_editing else "1px solid #334155"
+
+                            st.markdown(f"""
+                            <div style='background: {row_bg}; border: {row_border}; border-radius: 8px; padding: 10px 14px; margin-bottom: 6px;'>
+                                <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                    <div style='display: flex; align-items: center; gap: 10px;'>
+                                        <span style='background: {sev_color}22; border: 1px solid {sev_color}; color: {sev_color}; padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 0.75rem;'>{sev_label} ({score:.1f})</span>
+                                        <b style='font-size: 0.95rem; color: #f8fafc;'>{t}</b>
+                                        <span style='font-size: 0.8rem; color: #94a3b8;'>· {target_host}</span>
+                                    </div>
+                                    <span style='font-size: 0.75rem; color: {"#22c55e" if wf_status=="Accepted" else ("#f59e0b" if wf_status=="Modified" else ("#ef4444" if wf_status=="Rejected" else "#60a5fa"))}; font-weight: 700;'>● {wf_status.upper()}</span>
+                                </div>
                             </div>
-                            <div style='color: #94a3b8; font-size: 0.88rem; margin-top: 8px;'>
-                                {'<b>' + cves + '</b> · ' if cves else ''}<b>CVSS {score:.1f}</b> · <b>hosts:</b> {target_host}
+                            """, unsafe_allow_html=True)
+
+                            # Quick Inline Actions for Table Row
+                            r_col1, r_col2, r_col3, r_col4 = st.columns([2.5, 2.5, 2.5, 3])
+                            with r_col1:
+                                if st.button("✅ Accept", key=f"tbl_acc_{t_idx}", type="primary" if wf_status == "Accepted" else "secondary", use_container_width=True):
+                                    f["display_status"] = "Accepted"
+                                    f["status"] = "Accepted"
+                                    st.rerun()
+                            with r_col2:
+                                if st.button("✏️ Edit / Notes", key=f"tbl_edit_{t_idx}", type="primary" if is_row_editing else "secondary", use_container_width=True):
+                                    st.session_state.vapt_table_editing_idx = None if is_row_editing else t_idx
+                                    st.rerun()
+                            with r_col3:
+                                if st.button("❌ Reject", key=f"tbl_rej_{t_idx}", type="primary" if wf_status == "Rejected" else "secondary", use_container_width=True):
+                                    f["display_status"] = "Rejected"
+                                    f["status"] = "Rejected"
+                                    st.rerun()
+                            with r_col4:
+                                quick_note = st.text_input("Quick Note", value=f.get("comment", ""), key=f"tbl_qnote_{t_idx}", label_visibility="collapsed", placeholder="Add quick note...")
+                                if quick_note != f.get("comment", ""):
+                                    f["comment"] = quick_note
+
+                            # If inline editing expanded for this table row
+                            if is_row_editing:
+                                with st.container(border=True):
+                                    st.markdown(f"**Edit Fix Instructions for {t}:**")
+                                    custom_r = st.text_area("Remediation Instruction", value=f.get("recommendation", remed), key=f"tbl_remed_txt_{t_idx}", height=70)
+                                    if custom_r != f.get("recommendation", remed):
+                                        f["recommendation"] = custom_r
+                                        f["remediation"] = custom_r
+                                    if st.button("✔️ Done Editing", key=f"tbl_done_{t_idx}", use_container_width=True):
+                                        st.session_state.vapt_table_editing_idx = None
+                                        st.rerun()
+
+                            st.markdown("<div style='margin-bottom: 4px;'></div>", unsafe_allow_html=True)
+
+                    else:
+                        # ── DETAILED CARDS VIEW ───────────────────────────────────────
+                        for f in disp_findings:
+                            t = f.get("title") or f.get("finding") or "Vulnerability Finding"
+                            sev_raw = str(f.get("severity", "P4 Low")).upper()
+                            if "CRITICAL" in sev_raw or "P1" in sev_raw:
+                                sev_label, sev_color = "Critical", "#ef4444"
+                            elif "HIGH" in sev_raw or "P2" in sev_raw:
+                                sev_label, sev_color = "High", "#f97316"
+                            elif "MEDIUM" in sev_raw or "P3" in sev_raw:
+                                sev_label, sev_color = "Medium", "#eab308"
+                            else:
+                                sev_label, sev_color = "Low", "#22c55e"
+                            
+                            cve_val = f.get("cve_list") or f.get("cve") or []
+                            cves = ", ".join(cve_val) if isinstance(cve_val, list) else str(cve_val)
+                            score = float(f.get("severity_score") or f.get("score") or 2.3)
+                            target_host = f.get("target") or f.get("host") or "Scoped Target Systems"
+                            remed = f.get("recommendation") or f.get("remediation") or "Upgrade or apply vendor security updates."
+
+                            st.markdown(f"""
+                            <div style='background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; border-radius: 12px; padding: 18px; margin-bottom: 14px;'>
+                                <div style='display: flex; justify-content: space-between; align-items: center;'>
+                                    <b style='font-size: 1.05rem; color: #f8fafc;'>{t}</b>
+                                    <span style='background: {sev_color}22; border: 1px solid {sev_color}; color: {sev_color}; padding: 3px 12px; border-radius: 12px; font-weight: 700; font-size: 0.8rem;'>{sev_label}</span>
+                                </div>
+                                <div style='color: #94a3b8; font-size: 0.88rem; margin-top: 8px;'>
+                                    {'<b>' + cves + '</b> · ' if cves else ''}<b>CVSS {score:.1f}</b> · <b>hosts:</b> {target_host}
+                                </div>
+                                <div style='color: #cbd5e1; font-size: 0.88rem; margin-top: 8px; border-top: 1px dashed #334155; padding-top: 8px;'>
+                                    <b style='color: #86efac;'>Remediation:</b> {remed}
+                                </div>
                             </div>
-                            <div style='color: #cbd5e1; font-size: 0.88rem; margin-top: 8px; border-top: 1px dashed #334155; padding-top: 8px;'>
-                                <b style='color: #86efac;'>Remediation:</b> {remed}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                            """, unsafe_allow_html=True)
+
+
+
 
                     # Also render any Out of Scope selected controls so all selected controls are visible
                     oos_findings = [f for f in findings if f.get("status") in ("Out of Scope", "Out Of Scope")]
