@@ -7315,10 +7315,19 @@ with _main_wrap:
                                     st.rerun()
 
                 # ── ShaktiDB Save: warn only when controls are unreviewed ────
+                open_controls = [
+                    f for f in findings
+                    if f.get("display_status", "Open") == "Open"
+                    and f.get("status") not in ("Dismissed", "Rejected", "Compliant", "Out of Scope", "Out Of Scope")
+                ]
+                unreviewed_controls = [str(f.get("control_id") or f.get("control")) for f in open_controls]
+                unreviewed_count = len(open_controls)
+
                 if "_shakti_confirm_pending" not in st.session_state:
                     st.session_state["_shakti_confirm_pending"] = False
 
                 st.divider()
+
                 b1, b2 = st.columns(2)
                 with b1:
                     # ── Show the confirmation card if triggered ───────────────
