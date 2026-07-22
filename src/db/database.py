@@ -94,6 +94,23 @@ class Finding(Base):
     evidence_result       = Column(String(100), nullable=True)
     severity_score        = Column(Float, default=0.0, server_default="0.0")
 
+class AuditorLearningRule(Base):
+    """
+    Stores auditor modifications, false-positive feedback, and remediation edits.
+    The LLM reads active learning rules to prevent repeat false positives and adhere
+    to auditor domain knowledge across scans.
+    """
+    __tablename__ = "auditor_learning_rules"
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    control_id  = Column(String(100), index=True)
+    pattern_key = Column(String(250), index=True) # Normalized finding title or CVE pattern
+    action      = Column(String(50)) # "FALSE_POSITIVE", "MODIFIED", "ACCEPTED", "REJECTED"
+    original_text = Column(Text, nullable=True)
+    auditor_feedback = Column(Text, nullable=True)
+    adjusted_remediation = Column(Text, nullable=True)
+    created_by  = Column(String(100), default="Auditor")
+    created_at  = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
 class AuditRecord(Base):
     """Auditor review log containing review outcomes and comments."""
     __tablename__ = "audit_records"

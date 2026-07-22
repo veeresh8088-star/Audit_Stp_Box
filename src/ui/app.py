@@ -4840,30 +4840,8 @@ with st.sidebar:
 
         if st.session_state.user_role != "auditee":
             if is_vapt_standard:
-                st.markdown("**⚙️ Assessment Mode (Chosen before upload)**")
-                curr_mode = st.session_state.get("assessment_mode", "VAPT validation")
-                default_idx = 0 if curr_mode == "VAPT validation" else 1
-
-                mode_choice = st.radio(
-                    "Assessment Mode Selection",
-                    options=["⚙️ VAPT validation (Recommended)", "🛡️ Compliance audit assessment (VAPT-1..15)"],
-                    index=default_idx,
-                    label_visibility="collapsed",
-                    key=f"vapt_assessment_mode_radio_{selected_standard}"
-                )
-                _prev_mode = st.session_state.get("_prev_assessment_mode", st.session_state.assessment_mode)
-                st.session_state.assessment_mode = "VAPT validation" if "VAPT validation" in mode_choice else "Compliance audit assessment"
-                if _prev_mode != st.session_state.assessment_mode:
-                    # Mode changed — clear severity filter & findings to avoid stale state
-                    st.session_state.severity_filter = set()
-                    st.session_state.findings = []
-                    st.session_state.resolved_list = []
-                    st.session_state.stage = 0
-                st.session_state["_prev_assessment_mode"] = st.session_state.assessment_mode
-                if st.session_state.assessment_mode in ("VAPT validation", "Technical findings only"):
-                    st.caption("💡 **VAPT validation**: Flat vulnerability list with zero compliance verdicts. Shows CVSS, target IPs, CVEs, and remediation per finding.")
-                else:
-                    st.caption("🛡️ **Compliance audit assessment**: Maps findings into VAPT-1..15. Evaluates policy docs, technical evidence, and enforces human approval gate.")
+                st.session_state.assessment_mode = "VAPT validation"
+                st.caption("💡 **VAPT Validation Mode (Recommended)**: Flat vulnerability list with CVSS ratings, target IPs, CVEs, and vendor remediations.")
                 st.divider()
             else:
                 # ISO 27001 is ALWAYS a Compliance Audit Assessment
@@ -7005,6 +6983,23 @@ with _main_wrap:
                                             f["recommendation"] = new_remed
                                             f["remediation"] = new_remed
                                             f["editing"] = False
+                                            try:
+                                                with force_master():
+                                                    _db_learn = SessionLocal()
+                                                    _db_learn.add(AuditorLearningRule(
+                                                        control_id=str(c_id),
+                                                        pattern_key=str(new_title)[:250],
+                                                        action="MODIFIED",
+                                                        original_text=str(t),
+                                                        auditor_feedback=f"Auditor edited title to '{new_title}' and remediation to '{new_remed}'",
+                                                        adjusted_remediation=str(new_remed),
+                                                        created_by=st.session_state.get("username", "Auditor")
+                                                    ))
+                                                    _db_learn.commit()
+                                                    _db_learn.close()
+                                            except Exception:
+                                                pass
+                                            st.toast("🧠 Auditor Learning Rule saved to LLM Memory!")
                                             st.rerun()
                                     with col_s2:
                                         if st.button("❌ Cancel", key=f"det_cancel_{idx}", use_container_width=True):
@@ -7058,6 +7053,22 @@ with _main_wrap:
                                     if st.button("Reject", key=f"det_rej_{idx}", use_container_width=True):
                                         f["display_status"] = "Rejected"
                                         f["status"] = "Rejected"
+                                        try:
+                                            with force_master():
+                                                _db_learn = SessionLocal()
+                                                _db_learn.add(AuditorLearningRule(
+                                                    control_id=str(c_id),
+                                                    pattern_key=str(t)[:250],
+                                                    action="FALSE_POSITIVE",
+                                                    original_text=str(t),
+                                                    auditor_feedback=f"Auditor marked finding '{t}' as Rejected / False Positive.",
+                                                    created_by=st.session_state.get("username", "Auditor")
+                                                ))
+                                                _db_learn.commit()
+                                                _db_learn.close()
+                                        except Exception:
+                                            pass
+                                        st.toast("🧠 LLM learned to suppress this False Positive in future scans!")
                                         st.rerun()
                                 with c_a4:
                                     comment_val = st.text_input("Auditor Notes", value=f.get("comment", ""), key=f"det_cmt_{idx}", label_visibility="collapsed", placeholder="Add auditor notes or comments...")
