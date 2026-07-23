@@ -8544,70 +8544,7 @@ with _main_wrap:
 
     if tab_records is not None:
         with tab_records:
-            # ── DEDICATED REPORT EXPORT CENTER ────────────────────────────────
-            current_findings = st.session_state.get("findings", [])
-            current_resolved = st.session_state.get("resolved_list", [])
-            
-            st.markdown("### 📄 Audit Report Export Center")
-            st.caption("Generate & Download formal audit report packages using your master template (`Sample report.docx`).")
-            
-            ex_col1, ex_col2, ex_col3 = st.columns(3)
-            from src.ui.report_exporter import export_docx_report, export_pdf_report
-            
-            _report_docx = export_docx_report(
-                session_title=selected_standard,
-                findings=current_findings,
-                resolved_list=current_resolved,
-                status=st.session_state.get("audit_status", "Draft"),
-                comments=st.session_state.get("auditor_comments", "")
-            )
-            _report_pdf = export_pdf_report(
-                session_title=selected_standard,
-                findings=current_findings,
-                resolved_list=current_resolved,
-                status=st.session_state.get("audit_status", "Draft"),
-                comments=st.session_state.get("auditor_comments", "")
-            )
-            _report_csv_data = _dict_list_to_csv([{
-                "Control ID": f.get("control_id", ""),
-                "Control Name": f.get("control", ""),
-                "Status": f.get("status", ""),
-                "Severity": f.get("severity", ""),
-                "Finding": f.get("finding", ""),
-                "Recommendation": f.get("recommendation", "")
-            } for f in current_findings])
-
-            with ex_col1:
-                st.download_button(
-                    label="⬇️ Download DOCX Report",
-                    data=_report_docx,
-                    file_name=f"{selected_standard.replace(' ', '_')}_Report.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                    key="tab_rec_docx_btn"
-                )
-            with ex_col2:
-                st.download_button(
-                    label="📄 Download PDF Report",
-                    data=_report_pdf,
-                    file_name=f"{selected_standard.replace(' ', '_')}_Report.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                    key="tab_rec_pdf_btn"
-                )
-            with ex_col3:
-                st.download_button(
-                    label="📊 Export CSV Summary",
-                    data=_report_csv_data,
-                    file_name=f"{selected_standard.replace(' ', '_')}_Report.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                    key="tab_rec_csv_btn"
-                )
-
-            st.divider()
-
-            st.markdown(f"#### Audit Records Dashboard  ·  <small style='color:#64748b'>{db_label}</small>", unsafe_allow_html=True)
+            st.markdown(f"### Audit Records Dashboard  ·  <small style='color:#64748b'>{db_label}</small>", unsafe_allow_html=True)
 
     
             rows = get_all_findings(role=st.session_state.user_role, session_id=st.session_state.active_chat_id)

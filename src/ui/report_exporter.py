@@ -32,10 +32,7 @@ def _get_all_parsed_findings_from_registry():
 
         # 2. Disk fallback search for raw scan files if registry contains stripped text
         if not all_findings:
-            search_paths = [
-                r"c:\Users\HP\Desktop\llama,cpp\au\NOCPL_vu0k9r.html",
-                os.path.abspath("NOCPL_vu0k9r.html")
-            ]
+            search_paths = []
             ev_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "evidence"))
             if os.path.exists(ev_dir):
                 for root, _, files in os.walk(ev_dir):
@@ -634,13 +631,10 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 5.5, "2.3 Summary of Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
-    parsed_reg = _get_all_parsed_findings_from_registry()
-    if parsed_reg:
-        active_findings = parsed_reg
-    elif findings:
+    if findings:
         active_findings = [f.to_dict() if hasattr(f, "to_dict") else dict(f) for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
     else:
-        active_findings = []
+        active_findings = _get_all_parsed_findings_from_registry()
 
     critical_cnt = 0
     high_cnt = 0
