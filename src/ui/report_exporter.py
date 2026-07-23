@@ -1811,15 +1811,22 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
 
 def export_docx_report(session_title, findings, resolved_list, status, comments=""):
-    import streamlit as st
-    # ── FIXED: Only check selected_standard — not finding contents ───────────
-    # This prevents ISO audits with VAPT-related findings from using VAPT format.
     try:
+        import streamlit as st
         st_std = st.session_state.get("selected_standard", "")
     except Exception:
         st_std = ""
-    st_std_u = str(st_std or "").upper()
-    is_vapt = ("VAPT" in st_std_u or "VULNERABILITY" in st_std_u) and ("ISO" not in st_std_u) and ("ALL STANDARDS" not in st_std_u)
+
+    title_u = str(session_title or "").upper()
+    state_u = str(st_std or "").upper()
+    combined_u = f"{title_u} {state_u}"
+
+    is_vapt = ("VAPT" in combined_u or "VULNERABILITY ASSESSMENT" in combined_u or "PENETRATION" in combined_u) and ("ISO 27001" not in combined_u)
+    if not is_vapt and findings:
+        for f in findings:
+            if "VAPT" in str(f.get("control_id") or f.get("control") or "").upper():
+                is_vapt = True
+                break
 
     if is_vapt:
         return _export_vapt_docx(session_title, findings, resolved_list, status, comments)
@@ -2253,9 +2260,19 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         import streamlit as st
         st_std = st.session_state.get("selected_standard", "")
     except Exception:
-        st_std = str(session_title)
-    st_std_u = str(st_std).upper()
-    is_vapt = ("VAPT" in st_std_u or "VULNERABILITY" in st_std_u) and ("ISO" not in st_std_u) and ("ALL STANDARDS" not in st_std_u)
+        st_std = ""
+
+    title_u = str(session_title or "").upper()
+    state_u = str(st_std or "").upper()
+    combined_u = f"{title_u} {state_u}"
+
+    is_vapt = ("VAPT" in combined_u or "VULNERABILITY ASSESSMENT" in combined_u or "PENETRATION" in combined_u) and ("ISO 27001" not in combined_u)
+    if not is_vapt and findings:
+        for f in findings:
+            if "VAPT" in str(f.get("control_id") or f.get("control") or "").upper():
+                is_vapt = True
+                break
+
     if is_vapt:
         return _export_vapt_pdf(session_title, findings, resolved_list, status, comments)
     from fpdf.fonts import FontFace
