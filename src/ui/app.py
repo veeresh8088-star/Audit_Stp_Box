@@ -4738,13 +4738,17 @@ with st.sidebar:
             key="selected_target_framework"
         )
         selected_standard = _std_key_map[_selected_label]
-        # Clear stale findings when framework changes
+        # Clear stale findings and scopes when framework changes
         if selected_standard != st.session_state.get("selected_standard", selected_standard):
             st.session_state.findings = []
             st.session_state.resolved_list = []
             st.session_state.severity_filter = set()
             st.session_state.stage = 0
-        st.session_state["selected_standard"] = selected_standard
+            st.session_state.selected_scopes = []
+            st.session_state.prev_scopes = []
+            if "pending_scopes_update" in st.session_state:
+                del st.session_state.pending_scopes_update
+            st.session_state["selected_standard"] = selected_standard
 
         # Info explainer: cross-walk architecture note
         if selected_standard == "All Standards":
@@ -4842,6 +4846,8 @@ with st.sidebar:
             st.session_state.severity_filter = set()
             st.session_state.findings = []
             st.session_state.resolved_list = []
+            st.session_state.selected_scopes = []
+            st.session_state.prev_scopes = []
 
         if st.session_state.user_role != "auditee":
             if is_vapt_standard:
