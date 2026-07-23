@@ -7676,205 +7676,205 @@ with _main_wrap:
                                     save_current_findings_snapshot()
                                     st.rerun()
 
-                # ── ShaktiDB Save: warn when findings/controls are unreviewed (VAPT & ISO) ───
-                open_controls = [
-                    f for f in findings
-                    if f.get("display_status", f.get("status", "Open")) in ("Open", "Non-Compliant", "Partially Compliant")
-                    and f.get("status") not in ("Accepted", "Modified", "Rejected", "Dismissed", "Compliant", "Out of Scope", "Out Of Scope")
-                    and f.get("display_status") not in ("Accepted", "Modified", "Rejected", "Dismissed")
-                ]
-                unreviewed_controls = [str(f.get("title") or f.get("control_id") or f.get("control") or "Unreviewed Finding") for f in open_controls]
-                unreviewed_count = len(open_controls)
+            # ── ShaktiDB Save: warn when findings/controls are unreviewed (VAPT & ISO) ───
+            open_controls = [
+                f for f in findings
+                if f.get("display_status", f.get("status", "Open")) in ("Open", "Non-Compliant", "Partially Compliant")
+                and f.get("status") not in ("Accepted", "Modified", "Rejected", "Dismissed", "Compliant", "Out of Scope", "Out Of Scope")
+                and f.get("display_status") not in ("Accepted", "Modified", "Rejected", "Dismissed")
+            ]
+            unreviewed_controls = [str(f.get("title") or f.get("control_id") or f.get("control") or "Unreviewed Finding") for f in open_controls]
+            unreviewed_count = len(open_controls)
 
-                if "_shakti_confirm_pending" not in st.session_state:
-                    st.session_state["_shakti_confirm_pending"] = False
+            if "_shakti_confirm_pending" not in st.session_state:
+                st.session_state["_shakti_confirm_pending"] = False
 
-                st.divider()
+            st.divider()
 
-                b1, b2 = st.columns(2)
-                with b1:
-                    # ── Show the confirmation card if triggered ───────────────
-                    if st.session_state["_shakti_confirm_pending"]:
-                        st.markdown(f"""
-                        <div style='
-                            background: linear-gradient(135deg, rgba(234,179,8,0.13), rgba(239,68,68,0.09));
-                            border: 2px solid rgba(234,179,8,0.65);
-                            border-radius: 12px;
-                            padding: 18px 20px;
-                            margin-bottom: 14px;
-                        '>
-                            <div style='font-size:1.15rem; font-weight:700; color:#fbbf24; margin-bottom:6px;'>
-                                ⚠️ Unreviewed / Unaccepted Findings Detected
-                            </div>
-                            <div style='color:#e2e8f0; font-size:0.92rem; line-height:1.65;'>
-                                <span style='color:#f87171;'>
-                                    <strong>{unreviewed_count} finding(s) / control(s) have not been reviewed, accepted, or rejected yet.</strong>
-                                </span><br>
-                                Saving now will force-save these as unreviewed and log a <strong>FORCE_SAVE_INCOMPLETE_REVIEW</strong> warning event in the Admin Security Logs.<br><br>
-                                Are you sure you want to continue?
-                            </div>
+            b1, b2 = st.columns(2)
+            with b1:
+                # ── Show the confirmation card if triggered ───────────────
+                if st.session_state["_shakti_confirm_pending"]:
+                    st.markdown(f"""
+                    <div style='
+                        background: linear-gradient(135deg, rgba(234,179,8,0.13), rgba(239,68,68,0.09));
+                        border: 2px solid rgba(234,179,8,0.65);
+                        border-radius: 12px;
+                        padding: 18px 20px;
+                        margin-bottom: 14px;
+                    '>
+                        <div style='font-size:1.15rem; font-weight:700; color:#fbbf24; margin-bottom:6px;'>
+                            ⚠️ Unreviewed / Unaccepted Findings Detected
                         </div>
-                        """, unsafe_allow_html=True)
+                        <div style='color:#e2e8f0; font-size:0.92rem; line-height:1.65;'>
+                            <span style='color:#f87171;'>
+                                <strong>{unreviewed_count} finding(s) / control(s) have not been reviewed, accepted, or rejected yet.</strong>
+                            </span><br>
+                            Saving now will force-save these as unreviewed and log a <strong>FORCE_SAVE_INCOMPLETE_REVIEW</strong> warning event in the Admin Security Logs.<br><br>
+                            Are you sure you want to continue?
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-                        cfg1, cfg2 = st.columns(2)
-                        with cfg1:
-                            if st.button("✅  Yes, Save Anyway", type="primary", use_container_width=True, key="shakti_confirm_yes"):
-                                st.session_state["_shakti_confirm_pending"] = False
-                                to_save = [f for f in findings if f.get("status") not in ("Dismissed", "Out of Scope", "Out Of Scope")]
-                                save_findings({"sl": 0, "use_case": f"{selected_standard} Audit Run"}, to_save)
+                    cfg1, cfg2 = st.columns(2)
+                    with cfg1:
+                        if st.button("✅  Yes, Save Anyway", type="primary", use_container_width=True, key="shakti_confirm_yes"):
+                            st.session_state["_shakti_confirm_pending"] = False
+                            to_save = [f for f in findings if f.get("status") not in ("Dismissed", "Out of Scope", "Out Of Scope")]
+                            save_findings({"sl": 0, "use_case": f"{selected_standard} Audit Run"}, to_save)
 
-                                with force_master():
-                                    db = SessionLocal()
-                                    report = db.query(AuditReport).filter(AuditReport.session_id == st.session_state.active_chat_id).first()
-                                    if report:
-                                        user_row = db.query(User).filter(User.username == st.session_state.username).first()
-                                        auditor_id = user_row.id if user_row else None
-                                        comment_str = f"FORCE SAVED TO SHAKTIDB: Auditor saved draft report despite {unreviewed_count} unreviewed controls. Unreviewed controls: {', '.join(sorted(unreviewed_controls))}."
-                                        db.add(AuditRecord(
-                                            report_id=report.id,
-                                            auditor_id=auditor_id,
-                                            status=report.status,
-                                            comments=comment_str
-                                        ))
-                                        db.commit()
-                                    db.close()
+                            with force_master():
+                                db = SessionLocal()
+                                report = db.query(AuditReport).filter(AuditReport.session_id == st.session_state.active_chat_id).first()
+                                if report:
+                                    user_row = db.query(User).filter(User.username == st.session_state.username).first()
+                                    auditor_id = user_row.id if user_row else None
+                                    comment_str = f"FORCE SAVED TO SHAKTIDB: Auditor saved draft report despite {unreviewed_count} unreviewed controls. Unreviewed controls: {', '.join(sorted(unreviewed_controls))}."
+                                    db.add(AuditRecord(
+                                        report_id=report.id,
+                                        auditor_id=auditor_id,
+                                        status=report.status,
+                                        comments=comment_str
+                                    ))
+                                    db.commit()
+                                db.close()
 
-                                # Auto-set loaded document statuses to Completed
-                                try:
-                                    _loaded_names = [
-                                        n.strip() for n in
-                                        st.session_state.get("last_uploaded_names", "").split(",")
-                                        if n.strip()
-                                    ]
-                                    if _loaded_names:
-                                        with force_master():
-                                            _db_comp = SessionLocal()
-                                            _ev_rows = _db_comp.query(EvidenceFile).filter(
-                                                EvidenceFile.filename.in_(_loaded_names)
-                                            ).all()
-                                            for _ev_r in _ev_rows:
-                                                if _ev_r.status in ('Pending', 'Reviewing', None, ''):
-                                                    _ev_r.status = 'Completed'
-                                            _db_comp.commit()
-                                            _db_comp.close()
-                                except Exception:
-                                    pass
-                                # ── Log the force-save event (no company/document data) ──
-                                log_system_event(
-                                    event_type="FORCE_SAVE_INCOMPLETE_REVIEW",
-                                    actor=st.session_state.username,
-                                    session_id=st.session_state.active_chat_id,
-                                    framework=selected_standard,
-                                    meta={
-                                        "unreviewed_count": unreviewed_count,
-                                        "total_saved": len(to_save),
-                                    },
-                                    severity="WARNING"
-                                )
-                                st.success(f"✅ {len(to_save)} records saved to {db_label}")
-                                st.rerun()
-                        with cfg2:
-                            if st.button("❌  Cancel", use_container_width=True, key="shakti_confirm_no"):
-                                st.session_state["_shakti_confirm_pending"] = False
-                                st.rerun()
+                            # Auto-set loaded document statuses to Completed
+                            try:
+                                _loaded_names = [
+                                    n.strip() for n in
+                                    st.session_state.get("last_uploaded_names", "").split(",")
+                                    if n.strip()
+                                ]
+                                if _loaded_names:
+                                    with force_master():
+                                        _db_comp = SessionLocal()
+                                        _ev_rows = _db_comp.query(EvidenceFile).filter(
+                                            EvidenceFile.filename.in_(_loaded_names)
+                                        ).all()
+                                        for _ev_r in _ev_rows:
+                                            if _ev_r.status in ('Pending', 'Reviewing', None, ''):
+                                                _ev_r.status = 'Completed'
+                                        _db_comp.commit()
+                                        _db_comp.close()
+                            except Exception:
+                                pass
+                            # ── Log the force-save event (no company/document data) ──
+                            log_system_event(
+                                event_type="FORCE_SAVE_INCOMPLETE_REVIEW",
+                                actor=st.session_state.username,
+                                session_id=st.session_state.active_chat_id,
+                                framework=selected_standard,
+                                meta={
+                                    "unreviewed_count": unreviewed_count,
+                                    "total_saved": len(to_save),
+                                },
+                                severity="WARNING"
+                            )
+                            st.success(f"✅ {len(to_save)} records saved to {db_label}")
+                            st.rerun()
+                    with cfg2:
+                        if st.button("❌  Cancel", use_container_width=True, key="shakti_confirm_no"):
+                            st.session_state["_shakti_confirm_pending"] = False
+                            st.rerun()
 
-                    else:
-                        # ── Normal save button ────────────────────────────────
-                        if st.button("💾  Save to ShaktiDB", type="primary", use_container_width=True, key="shakti_save_btn"):
-                            if unreviewed_count > 0:
-                                # Trigger the warning dialog instead of saving
-                                st.session_state["_shakti_confirm_pending"] = True
-                                st.rerun()
-                            else:
-                                # All controls reviewed — save immediately
-                                to_save = [f for f in findings if f.get("status") not in ("Dismissed", "Out of Scope", "Out Of Scope")]
-                                save_findings({"sl": 0, "use_case": f"{selected_standard} Audit Run"}, to_save)
-                                # Auto-set loaded document statuses to Completed
-                                try:
-                                    _loaded_names = [
-                                        n.strip() for n in
-                                        st.session_state.get("last_uploaded_names", "").split(",")
-                                        if n.strip()
-                                    ]
-                                    if _loaded_names:
-                                        with force_master():
-                                            _db_comp = SessionLocal()
-                                            _ev_rows = _db_comp.query(EvidenceFile).filter(
-                                                EvidenceFile.filename.in_(_loaded_names)
-                                            ).all()
-                                            for _ev_r in _ev_rows:
-                                                if _ev_r.status in ('Pending', 'Reviewing', None, ''):
-                                                    _ev_r.status = 'Completed'
-                                            _db_comp.commit()
-                                            _db_comp.close()
-                                except Exception:
-                                    pass
-                                log_system_event(
-                                    event_type="AUDIT_SAVED",
-                                    actor=st.session_state.username,
-                                    session_id=st.session_state.active_chat_id,
-                                    framework=selected_standard,
-                                    meta={"total_saved": len(to_save)},
-                                    severity="INFO"
-                                )
-                                st.success(f"✅ {len(to_save)} records saved to {db_label}")
-                                st.rerun()
-                with b2:
-                    _export_rows = [{
-                        "Control ID":        f.get("control_id", ""),
-                        "Control Name":      f.get("control", ""),
-                        "Relevance Score":   f.get("relevance_score", ""),
-                        "Evidence Found":    f.get("evidence_found", ""),
-                        "Evidence Snippet":  f.get("evidence_snippet", ""),
-                        "Compliance Status": f.get("status", ""),
-                        "Severity":          f.get("severity", ""),
-                        "Finding":           f.get("finding", ""),
-                        "Recommendation":    f.get("recommendation", ""),
-                        "Reasoning":         f.get("reasoning", ""),
-                        "Workflow Status":   f.get("display_status", "Open"),
-                        "Source Scope":      f.get("source_files", "All uploaded documents"),
-                        "Auditor Comment":   f.get("comment", "")
-                    } for f in active_findings]
-                    from src.ui.report_exporter import export_docx_report, export_pdf_report
+                else:
+                    # ── Normal save button ────────────────────────────────
+                    if st.button("💾  Save to ShaktiDB", type="primary", use_container_width=True, key="shakti_save_btn"):
+                        if unreviewed_count > 0:
+                            # Trigger the warning dialog instead of saving
+                            st.session_state["_shakti_confirm_pending"] = True
+                            st.rerun()
+                        else:
+                            # All controls reviewed — save immediately
+                            to_save = [f for f in findings if f.get("status") not in ("Dismissed", "Out of Scope", "Out Of Scope")]
+                            save_findings({"sl": 0, "use_case": f"{selected_standard} Audit Run"}, to_save)
+                            # Auto-set loaded document statuses to Completed
+                            try:
+                                _loaded_names = [
+                                    n.strip() for n in
+                                    st.session_state.get("last_uploaded_names", "").split(",")
+                                    if n.strip()
+                                ]
+                                if _loaded_names:
+                                    with force_master():
+                                        _db_comp = SessionLocal()
+                                        _ev_rows = _db_comp.query(EvidenceFile).filter(
+                                            EvidenceFile.filename.in_(_loaded_names)
+                                        ).all()
+                                        for _ev_r in _ev_rows:
+                                            if _ev_r.status in ('Pending', 'Reviewing', None, ''):
+                                                _ev_r.status = 'Completed'
+                                        _db_comp.commit()
+                                        _db_comp.close()
+                            except Exception:
+                                pass
+                            log_system_event(
+                                event_type="AUDIT_SAVED",
+                                actor=st.session_state.username,
+                                session_id=st.session_state.active_chat_id,
+                                framework=selected_standard,
+                                meta={"total_saved": len(to_save)},
+                                severity="INFO"
+                            )
+                            st.success(f"✅ {len(to_save)} records saved to {db_label}")
+                            st.rerun()
+            with b2:
+                _export_rows = [{
+                    "Control ID":        f.get("control_id", ""),
+                    "Control Name":      f.get("control", ""),
+                    "Relevance Score":   f.get("relevance_score", ""),
+                    "Evidence Found":    f.get("evidence_found", ""),
+                    "Evidence Snippet":  f.get("evidence_snippet", ""),
+                    "Compliance Status": f.get("status", ""),
+                    "Severity":          f.get("severity", ""),
+                    "Finding":           f.get("finding", ""),
+                    "Recommendation":    f.get("recommendation", ""),
+                    "Reasoning":         f.get("reasoning", ""),
+                    "Workflow Status":   f.get("display_status", "Open"),
+                    "Source Scope":      f.get("source_files", "All uploaded documents"),
+                    "Auditor Comment":   f.get("comment", "")
+                } for f in active_findings]
+                from src.ui.report_exporter import export_docx_report, export_pdf_report
 
-                    st.markdown("---")
-                    # Pre-Download review removed — downloads always available directly.
-                    auditor_approved = True
+                st.markdown("---")
+                # Pre-Download review removed — downloads always available directly.
+                auditor_approved = True
 
-                    csv_data = _dict_list_to_csv(_export_rows)
-                    st.download_button("📊 Export Report CSV", csv_data, "iso27001_audit_report.csv", use_container_width=True)
+                csv_data = _dict_list_to_csv(_export_rows)
+                st.download_button("📊 Export Report CSV", csv_data, "iso27001_audit_report.csv", use_container_width=True)
 
-                    docx_data = export_docx_report(
-                        session_title=selected_standard,
-                        findings=findings,
-                        resolved_list=resolved_list,
-                        status=st.session_state.get("audit_status", "Draft"),
-                        comments=st.session_state.get("auditor_comments", "")
-                    )
-                    st.download_button(
-                        label="⬇️ Download DOCX Report",
-                        data=docx_data,
-                        file_name=f"{selected_standard.replace(' ', '_')}_Report.docx",
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
-                        key="active_docx_export_btn"
-                    )
+                docx_data = export_docx_report(
+                    session_title=selected_standard,
+                    findings=findings,
+                    resolved_list=resolved_list,
+                    status=st.session_state.get("audit_status", "Draft"),
+                    comments=st.session_state.get("auditor_comments", "")
+                )
+                st.download_button(
+                    label="⬇️ Download DOCX Report",
+                    data=docx_data,
+                    file_name=f"{selected_standard.replace(' ', '_')}_Report.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    key="active_docx_export_btn"
+                )
 
-                    pdf_data = export_pdf_report(
-                        session_title=selected_standard,
-                        findings=findings,
-                        resolved_list=resolved_list,
-                        status=st.session_state.get("audit_status", "Draft"),
-                        comments=st.session_state.get("auditor_comments", "")
-                    )
-                    st.download_button(
-                        label="📄 Download PDF Report",
-                        data=pdf_data,
-                        file_name=f"{selected_standard.replace(' ', '_')}_Report.pdf",
-                        mime="application/pdf",
-                        use_container_width=True,
-                        key="active_pdf_export_btn"
-                    )
+                pdf_data = export_pdf_report(
+                    session_title=selected_standard,
+                    findings=findings,
+                    resolved_list=resolved_list,
+                    status=st.session_state.get("audit_status", "Draft"),
+                    comments=st.session_state.get("auditor_comments", "")
+                )
+                st.download_button(
+                    label="📄 Download PDF Report",
+                    data=pdf_data,
+                    file_name=f"{selected_standard.replace(' ', '_')}_Report.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key="active_pdf_export_btn"
+                )
 
     if tab_docs is not None:
         with tab_docs:
