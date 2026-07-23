@@ -5567,11 +5567,13 @@ if run or st.session_state.get("start_analysis_on_next_run"):
             st.session_state.scoping_note = " | ".join(scoping_notes)
             
             pending = {}
-            if active_controls:
-                for uc in USE_CASES:
-                    pending[f"ctrl_chk_{uc['sl']}"] = (uc["use_case"] in active_controls)
+            matching_in_filtered = [uc for uc in filtered_use_cases if uc["use_case"] in active_controls]
+            if matching_in_filtered:
+                matching_sls = {uc["sl"] for uc in matching_in_filtered}
+                for uc in _all_trackable:
+                    pending[f"ctrl_chk_{uc['sl']}"] = (uc["sl"] in matching_sls)
             else:
-                for uc in USE_CASES:
+                for uc in filtered_use_cases:
                     pending[f"ctrl_chk_{uc['sl']}"] = True
             st.session_state.pending_ctrl_checks = pending
                     
