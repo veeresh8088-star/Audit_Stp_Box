@@ -1823,7 +1823,8 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     try:
         st_std = st.session_state.get("selected_standard", "")
     except Exception:
-        st_std_u = str(st_std).upper()
+        st_std = ""
+    st_std_u = str(st_std or "").upper()
     is_vapt = ("VAPT" in st_std_u or "VULNERABILITY" in st_std_u) and ("ISO" not in st_std_u) and ("ALL STANDARDS" not in st_std_u)
 
     if is_vapt:
