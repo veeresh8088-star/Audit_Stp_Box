@@ -6827,7 +6827,7 @@ with _main_wrap:
                 with search_col2:
                     status_flt = st.selectbox("🚦 Workflow Status Filter", options=["All Statuses", "Unreviewed / Open Only", "Accepted Only", "Modified Only", "Rejected Only"], key="vapt_status_flt")
                 with search_col3:
-                    vapt_view_mode = st.radio("Layout Mode", options=[" Compact Summary", " Quick Review Table", " Detailed Audit Cards (Modifiable)"], horizontal=True, key="vapt_layout_mode")
+                    vapt_view_mode = st.radio("Layout Mode", options=["📋 Compact Summary", "📊 Quick Review Table", "🛠️ Detailed Audit Cards (Modifiable)"], horizontal=True, key="vapt_layout_mode")
 
                 # ── VAPT AUDITOR ADVANCED TOOLBAR (FEATURES A, D, E) ─────────────────
                 adv_c1, adv_c2, adv_c3 = st.columns([1, 1, 1])
@@ -6942,7 +6942,7 @@ with _main_wrap:
                 if not disp_findings:
                     st.info("No technical vulnerability findings match the search query and selected filters.")
                 else:
-                    if vapt_view_mode == "📊 Quick Review Table":
+                    if "Quick Review Table" in vapt_view_mode:
                         # ── MODE 2: COMPACT QUICK REVIEW TABLE VIEW ─────────────────
                         if "vapt_table_editing_idx" not in st.session_state:
                             st.session_state.vapt_table_editing_idx = None
@@ -7016,7 +7016,7 @@ with _main_wrap:
 
                             st.markdown("<div style='margin-bottom: 4px;'></div>", unsafe_allow_html=True)
 
-                    elif vapt_view_mode == "🛠️ Detailed Audit Cards (Modifiable)":
+                    elif "Detailed Audit Cards" in vapt_view_mode:
                         # ── MODE 3: FULL DETAILED AUDIT CARDS (MODIFIABLE - Picture 3) ──
                         for idx, f in enumerate(disp_findings):
                             t = f.get("title") or f.get("finding") or "Vulnerability Finding"
