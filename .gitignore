@@ -21,4 +21,6 @@ data/sqlite/
 data/audit_runs/
 data/*.txt
 data/*.docx
-data/*.pdf
+data/
+*.dll
+*.exe

@@ -196,3 +196,26 @@ def scan_document(filename: str, raw_bytes: bytes, extracted_text: str) -> tuple
             return False, reason
 
     return True, "Clean"
+
+
+import hashlib
+
+def scan_file_security(uploaded_file):
+    if hasattr(uploaded_file, "getvalue"):
+        bytes_data = uploaded_file.getvalue()
+    else:
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        bytes_data = uploaded_file.read()
+        if hasattr(uploaded_file, "seek"):
+            uploaded_file.seek(0)
+        
+    if bytes_data.startswith(b'MZ') or bytes_data.startswith(b'MZ\x90'):
+        return False, "Executable payload disguised as document (MZ signature detected)."
+    
+    file_hash = hashlib.sha256(bytes_data).hexdigest()
+    blacklist = ["5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"]
+    if file_hash in blacklist:
+        return False, f"Known malicious hash signature identified ({file_hash[:8]}...)."
+    
+    return True, "Clean"

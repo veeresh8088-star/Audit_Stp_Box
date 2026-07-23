@@ -1,0 +1,1724 @@
+// ── AICyberAuditBox Client Application ──
+
+const API_BASE = "http://127.0.0.1:8000/api";
+
+let currentUser = null;
+let selectedRole = "admin";
+let activeTab = "";
+let activeSessionId = "";
+let activeSessionTitle = "";
+let findingsList = [];
+let activeSeverityFilter = "";
+let activeStatusFilter = "All";
+let logsPage = 0;
+let logsTotalPages = 1;
+let customEvidenceMappings = null;
+let customControlDocuments = null;
+
+// --- EMOJIS & ICONS FOR FRAMEWORK CONTROLS ---
+const DEFAULT_FRAMEWORK_CONTROLS = [
+    { sl: 5, use_case: "5.1 Policies for information security", label: "5.1 Security Policies", category: "Organizational" },
+    { sl: 6, use_case: "5.2 Information security roles and responsibilities", label: "5.2 Security Roles", category: "Organizational" },
+    { sl: 8, use_case: "5.15 Access control", label: "5.15 Access Control", category: "Organizational" },
+    { sl: 12, use_case: "5.16 Identity management", label: "5.16 Identity Management", category: "Organizational" },
+    { sl: 15, use_case: "8.15.1 Access restriction", label: "8.15.1 Access Restriction", category: "Technical" },
+    { sl: 22, use_case: "8.24 Use of cryptography", label: "8.24 Cryptography", category: "Technical" }
+];
+
+// --- INITIAL EVENT LISTENERS ---
+document.addEventListener("DOMContentLoaded", () => {
+    // Clock setup
+    setInterval(updateHeaderClock, 30000);
+    updateHeaderClock();
+    
+    // Auth selectors
+    document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
+    document.getElementById("otp-form").addEventListener("submit", handleOTPSubmit);
+    
+    // Setup File Upload drop zone
+    setupFileDropZone();
+    
+    // Setup Custom Control form
+    const createControlForm = document.getElementById("create-control-form");
+    if (createControlForm) {
+        createControlForm.addEventListener("submit", handleCreateControlSubmit);
+    }
+    
+    // Setup Edit Finding Modal form
+    document.getElementById("edit-finding-form").addEventListener("submit", handleEditFindingSubmit);
+});
+
+function updateHeaderClock() {
+    const timeLabel = document.getElementById("current-time-label");
+    if (timeLabel) {
+        const now = new Date();
+        const options = { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' };
+        timeLabel.innerText = now.toLocaleDateString('en-GB', options).replace(/,/g, '');
+    }
+}
+
+// ── AUTHENTICATION CONTROLLERS ──
+
+function selectRole(role) {
+    selectedRole = role;
+    
+    // Update button visual styles
+    document.querySelectorAll(".role-btn").forEach(btn => btn.classList.remove("active"));
+    document.getElementById(`role-${role}-btn`).classList.add("active");
+    
+    // Update descriptions
+    const descEl = document.getElementById("role-desc");
+    if (role === "admin") {
+        descEl.innerText = "SYSTEM ADMINISTRATOR • Full access to settings, analyses, and records";
+    } else if (role === "auditor") {
+        descEl.innerText = "COMPLIANCE AUDITOR • Upload compliance documents and run guided audits";
+    } else {
+        descEl.innerText = "AUDITEE • Upload audit evidence documents for the auditor to review";
+    }
+    
+    // Hide register option for Admin (seeded default is login only)
+    const toggleRow = document.getElementById("toggle-auth-row");
+    if (role === "admin") {
+        toggleRow.style.display = "none";
+        resetAuthActionToLogin();
+    } else {
+        toggleRow.style.display = "flex";
+    }
+    showError("");
+}
+
+function resetAuthActionToLogin() {
+    const submitBtn = document.getElementById("auth-submit-btn");
+    const toggleActionBtn = document.getElementById("toggle-action-btn");
+    const toggleLabel = document.getElementById("toggle-label");
+    
+    submitBtn.innerText = "Secure Sign In";
+    toggleActionBtn.innerText = "Create Account";
+    toggleLabel.innerText = "NEW USER?";
+}
+
+function toggleAuthAction() {
+    const submitBtn = document.getElementById("auth-submit-btn");
+    const toggleActionBtn = document.getElementById("toggle-action-btn");
+    const toggleLabel = document.getElementById("toggle-label");
+    
+    if (submitBtn.innerText === "Secure Sign In") {
+        submitBtn.innerText = "Create Secure Account";
+        toggleActionBtn.innerText = "Back to Login";
+        toggleLabel.innerText = "ALREADY REGISTERED?";
+    } else {
+        resetAuthActionToLogin();
+    }
+    showError("");
+}
+
+async function handleLoginSubmit(e) {
+    e.preventDefault();
+    showError("");
+    
+    const username = document.getElementById("username-input").value.trim();
+    const password = document.getElementById("password-input").value;
+    const submitBtn = document.getElementById("auth-submit-btn");
+    
+    const isRegister = submitBtn.innerText.includes("Create");
+    
+    try {
+        if (isRegister) {
+            // Register Action
+            const response = await fetch(`${API_BASE}/auth/register`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password, role: selectedRole })
+            });
+            
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Registration failed.");
+            
+            // Show QR Setup
+            document.getElementById("login-form").style.display = "none";
+            document.getElementById("register-setup-form").style.display = "block";
+            document.getElementById("register-qr-img").src = data.qr_code_base64;
+            document.getElementById("register-qr-secret").innerText = data.totp_secret;
+        } else {
+            // Login Action
+            const response = await fetch(`${API_BASE}/auth/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, password })
+            });
+            
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Authentication failed.");
+            
+            // Switch to OTP verify
+            document.getElementById("login-form").style.display = "none";
+            document.getElementById("otp-form").style.display = "block";
+            document.getElementById("otp-input").value = "";
+            document.getElementById("otp-input").focus();
+            
+            // If admin, show the seeded OTP QR code
+            if (data.username === "admin" && data.qr_code_base64) {
+                document.getElementById("admin-qr-container").style.display = "block";
+                document.getElementById("admin-qr-img").src = data.qr_code_base64;
+                document.getElementById("admin-qr-secret").innerText = data.totp_secret_preview;
+            } else {
+                document.getElementById("admin-qr-container").style.display = "none";
+            }
+            
+            // Stash user detail temporarily
+            currentUser = { username: data.username, role: data.role };
+        }
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+async function handleOTPSubmit(e) {
+    e.preventDefault();
+    showError("");
+    
+    const otpCode = document.getElementById("otp-input").value.trim();
+    if (!currentUser) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/auth/verify-otp`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: currentUser.username, otp_code: otpCode })
+        });
+        
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Invalid code.");
+        
+        currentUser.token = data.token;
+        
+        // Login Successful
+        document.getElementById("auth-overlay").classList.remove("active");
+        document.getElementById("app-shell").style.display = "grid";
+        
+        initializeDashboard(currentUser);
+    } catch (err) {
+        showError(err.message);
+    }
+}
+
+function resetOTPForm() {
+    document.getElementById("otp-form").style.display = "none";
+    document.getElementById("login-form").style.display = "block";
+    showError("");
+}
+
+function proceedToSignInAfterRegister() {
+    document.getElementById("register-setup-form").style.display = "none";
+    document.getElementById("login-form").style.display = "block";
+    resetAuthActionToLogin();
+    showError("");
+}
+
+function showError(msg) {
+    const errorEl = document.getElementById("auth-error");
+    if (msg) {
+        errorEl.innerText = msg;
+        errorEl.style.display = "block";
+    } else {
+        errorEl.style.display = "none";
+    }
+}
+
+function logout() {
+    currentUser = null;
+    document.getElementById("app-shell").style.display = "none";
+    document.getElementById("auth-overlay").classList.add("active");
+    document.getElementById("login-form").style.display = "block";
+    document.getElementById("otp-form").style.display = "none";
+    document.getElementById("register-setup-form").style.display = "none";
+    document.getElementById("username-input").value = "";
+    document.getElementById("password-input").value = "";
+    showError("");
+}
+
+// ── DASHBOARD INITIALIZATION ──
+
+async function initializeDashboard(user) {
+    // Set Profile Info
+    document.getElementById("profile-name").innerText = user.username;
+    document.getElementById("profile-role").innerText = user.role.toUpperCase();
+    document.getElementById("profile-initials").innerText = user.username.slice(0,2).toUpperCase();
+    
+    // Role permissions toggle
+    const isAdmin = user.role === "admin";
+    const isAuditor = user.role === "auditor";
+    
+    // Hide/show sidebar panels
+    document.getElementById("sidebar-ai-setup").style.display = isAdmin ? "block" : "none";
+    document.getElementById("sidebar-framework-setup").style.display = (isAdmin || isAuditor) ? "block" : "none";
+    document.getElementById("sidebar-branding-setup").style.display = (isAdmin || isAuditor) ? "block" : "none";
+    document.getElementById("sidebar-mode-setup").style.display = (isAdmin || isAuditor) ? "block" : "none";
+    document.getElementById("sidebar-checklist-setup").style.display = (isAdmin || isAuditor) ? "block" : "none";
+    document.getElementById("sidebar-action-setup").style.display = (isAdmin || isAuditor) ? "block" : "none";
+    
+    // Setup Tabs Bar
+    setupTabs(user.role);
+    
+    // Initialize standard checklist
+    if (isAdmin || isAuditor) {
+        loadFrameworkControls();
+    }
+    
+    // Resolve Active Audit Session ID
+    await loadOrCreateSession(user);
+    
+    // Load Chat History list
+    if (user.role !== "auditee") {
+        loadChatSessions();
+    }
+}
+
+function setupTabs(role) {
+    const tabsBar = document.getElementById("tabs-bar");
+    tabsBar.innerHTML = "";
+    
+    let tabs = [];
+    if (role === "auditee") {
+        tabs = [
+            { id: "tab-upload-evidence", label: "Upload Evidence" },
+            { id: "tab-submitted-reports", label: "Submitted Reports" }
+        ];
+    } else if (role === "admin") {
+        tabs = [
+            { id: "tab-ai-chat", label: "AI Assistant" },
+            { id: "tab-audit-records", label: "Audit Records" },
+            { id: "tab-audit-report", label: "Audit Report" },
+            { id: "tab-manage-controls", label: "⚙️ Manage Controls" },
+            { id: "tab-admin-logs", label: "Admin Logs" }
+        ];
+    } else {
+        // Auditor
+        tabs = [
+            { id: "tab-ai-chat", label: "AI Assistant" },
+            { id: "tab-auditee-docs", label: "Auditee Documents" },
+            { id: "tab-audit-records", label: "Audit Records" },
+            { id: "tab-audit-report", label: "Audit Report" },
+            { id: "tab-submitted-reports", label: "Submitted Reports" },
+            { id: "tab-manage-controls", label: "⚙️ Manage Controls" }
+        ];
+    }
+    
+    tabs.forEach((tab, index) => {
+        const btn = document.createElement("button");
+        btn.className = `tab-link ${index === 0 ? 'active' : ''}`;
+        btn.innerText = tab.label;
+        btn.onclick = () => switchTab(tab.id, btn);
+        tabsBar.appendChild(btn);
+    });
+    
+    // Switch to first tab
+    switchTab(tabs[0].id, tabsBar.firstChild);
+}
+
+function switchTab(tabId, tabBtn) {
+    activeTab = tabId;
+    
+    // Active tabs navigation state
+    document.querySelectorAll(".tab-link").forEach(btn => btn.classList.remove("active"));
+    tabBtn.classList.add("active");
+    
+    // Show active tab panel
+    document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.remove("active"));
+    document.getElementById(tabId).classList.add("active");
+    
+    // Perform tab-specific loading
+    if (tabId === "tab-audit-records") {
+        loadFindings();
+    } else if (tabId === "tab-admin-logs") {
+        loadSystemEvents();
+        loadDeveloperLogs();
+    } else if (tabId === "tab-manage-controls") {
+        loadCustomControlsTable();
+    } else if (tabId === "tab-submitted-reports") {
+        loadSubmittedReports();
+    } else if (tabId === "tab-auditee-docs") {
+        loadAuditeeSessionsList();
+    } else if (tabId === "tab-ai-chat") {
+        loadChatSessions();
+    }
+}
+
+function toggleCollapsible(contentId) {
+    const parent = document.getElementById(contentId).parentElement;
+    parent.classList.toggle("open");
+}
+
+// ── SESSION MANAGEMENT ──
+
+async function loadOrCreateSession(user) {
+    try {
+        const response = await fetch(`${API_BASE}/audit/sessions?role=${user.role}&username=${user.username}`);
+        const data = await response.json();
+        
+        if (data.success && data.sessions.length > 0) {
+            // Re-use most recent draft session
+            activeSessionId = data.sessions[0].session_id;
+            activeSessionTitle = data.sessions[0].session_title;
+        } else {
+            // Create fresh session
+            const body = new FormData();
+            body.append("session_title", "ISO 27001 Local Compliance Audit");
+            body.append("framework", "ISO 27001");
+            body.append("username", user.username);
+            
+            const createRes = await fetch(`${API_BASE}/audit/sessions`, {
+                method: "POST",
+                body: body
+            });
+            const createData = await createRes.json();
+            if (createData.success) {
+                activeSessionId = createData.session_id;
+                activeSessionTitle = createData.session_title;
+            }
+        }
+        
+        document.getElementById("active-session-badge").innerText = `Session ID: ${activeSessionId}`;
+        document.getElementById("workspace-title").innerText = activeSessionTitle;
+        
+        // Refresh evidence files list
+        loadEvidenceFileList();
+        
+        // Populate Target Auditee selector
+        if (user.role !== "auditee") {
+            populateAuditeeSelector();
+        }
+    } catch (err) {
+        console.error("Session resolution error:", err);
+    }
+}
+
+async function populateAuditeeSelector() {
+    const select = document.getElementById("report-target-auditee");
+    if (!select) return;
+    select.innerHTML = "";
+    
+    try {
+        // Quick list sessions associated with auditee role to choose
+        const response = await fetch(`${API_BASE}/audit/sessions`);
+        const data = await response.json();
+        
+        if (data.success) {
+            data.sessions.forEach(s => {
+                const opt = document.createElement("option");
+                opt.value = s.id;
+                opt.innerText = `${s.session_title} (${s.session_id.slice(0,6)})`;
+                select.appendChild(opt);
+            });
+        }
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+// ── SIDEBAR FRAMEWORK CHECKLIST ──
+
+async function loadFrameworkControls() {
+    const select = document.getElementById("framework-select");
+    const container = document.getElementById("controls-checkbox-container");
+    if (!container) return;
+    container.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;'>Loading controls checklist...</div>";
+    
+    try {
+        const response = await fetch(`${API_BASE}/controls/framework`);
+        const data = await response.json();
+        
+        if (data.success) {
+            container.innerHTML = "";
+            const selectedStd = select.value;
+            
+            const filtered = data.controls.filter(c => {
+                if (selectedStd === "All Standards") return true;
+                const isVapt = (c.category || "").toUpperCase().includes("VAPT") || (c.use_case || "").toUpperCase().includes("VAPT");
+                if (selectedStd === "ISO 27001") return !isVapt;
+                return isVapt;
+            });
+            
+            filtered.forEach(c => {
+                const div = document.createElement("div");
+                div.className = "checkbox-row";
+                
+                const input = document.createElement("input");
+                input.type = "checkbox";
+                input.value = c.sl;
+                input.id = `ctrl_chk_${c.sl}`;
+                input.checked = true;
+                input.onchange = updateSelectedScopeCount;
+                
+                const label = document.createElement("label");
+                label.htmlFor = `ctrl_chk_${c.sl}`;
+                const displayName = c.label.length > 50 ? c.label.slice(0, 47) + "..." : c.label;
+                label.innerText = `${c.sl} - ${displayName}`;
+                label.title = c.use_case;
+                
+                div.appendChild(input);
+                div.appendChild(label);
+                container.appendChild(div);
+            });
+            
+            updateSelectedScopeCount();
+        } else {
+            container.innerHTML = "<div style='font-size:11px;color:var(--error);padding:8px;'>Failed to load controls checklist.</div>";
+        }
+    } catch (err) {
+        container.innerHTML = `<div style='font-size:11px;color:var(--error);padding:8px;'>Error: ${err.message}</div>`;
+    }
+}
+
+function updateSelectedScopeCount() {
+    const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
+    const selected = Array.from(checkboxes).filter(cb => cb.checked);
+    document.getElementById("active-scope-label").innerText = `⚙️ ACTIVE SCOPE (${selected.length} of ${checkboxes.length} selected)`;
+}
+
+function toggleScopingMode() {
+    const scopingMode = document.querySelector("input[name='scoping-mode']:checked").value;
+    const fileBox = document.getElementById("scoping-file-container");
+    fileBox.style.display = scopingMode === "Auto" ? "block" : "none";
+}
+
+function filterCheckboxList() {
+    const q = document.getElementById("controls-search-input").value.toLowerCase();
+    const rows = document.querySelectorAll("#controls-checkbox-container .checkbox-row");
+    rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        row.style.display = text.includes(q) ? "flex" : "none";
+    });
+}
+
+function selectAllCheckboxes(checked) {
+    const rows = document.querySelectorAll("#controls-checkbox-container .checkbox-row");
+    rows.forEach(row => {
+        if (row.style.display !== "none") {
+            const cb = row.querySelector("input[type='checkbox']");
+            if (cb) cb.checked = checked;
+        }
+    });
+    updateSelectedScopeCount();
+}
+
+// ── EVIDENCE FILE UPLOAD ──
+
+function setupFileDropZone() {
+    const dropZone = document.getElementById("drop-zone");
+    if (!dropZone) return;
+    
+    dropZone.addEventListener("dragover", e => {
+        e.preventDefault();
+        dropZone.style.borderColor = "var(--primary)";
+    });
+    
+    dropZone.addEventListener("dragleave", () => {
+        dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
+    });
+    
+    dropZone.addEventListener("drop", e => {
+        e.preventDefault();
+        dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
+        
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            uploadFiles(files);
+        }
+    });
+}
+
+function handleEvidenceUpload(e) {
+    const files = e.target.files;
+    if (files.length > 0) {
+        uploadFiles(files);
+    }
+}
+
+async function uploadFiles(files) {
+    const progressContainer = document.getElementById("upload-progress-container");
+    const progressBar = document.getElementById("upload-progress-bar");
+    const progressText = document.getElementById("upload-progress-text");
+    
+    progressContainer.style.display = "block";
+    progressBar.style.width = "0%";
+    
+    const isAuditor = currentUser ? currentUser.role !== "auditee" : true;
+    const body = new FormData();
+    body.append("session_id", activeSessionId);
+    body.append("is_auditor_uploaded", isAuditor ? "true" : "false");
+    
+    for (let i = 0; i < files.length; i++) {
+        body.append("files", files[i]);
+    }
+    
+    try {
+        progressText.innerText = "Processing RAG security check & text extraction...";
+        progressBar.style.width = "50%";
+        
+        const response = await fetch(`${API_BASE}/audit/upload`, {
+            method: "POST",
+            body: body
+        });
+        
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Upload failed.");
+        
+        progressBar.style.width = "100%";
+        progressText.innerText = `Successfully processed ${files.length} evidence file(s)!`;
+        
+        setTimeout(() => {
+            progressContainer.style.display = "none";
+        }, 3000);
+        
+        loadEvidenceFileList();
+    } catch (err) {
+        progressBar.style.backgroundColor = "var(--error)";
+        progressText.innerText = `Error: ${err.message}`;
+    }
+}
+
+async function loadEvidenceFileList() {
+    const registry = document.getElementById("uploaded-files-registry");
+    if (!registry) return;
+    registry.innerHTML = "";
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/sessions`);
+        const data = await response.json();
+        
+        if (data.success && data.sessions.length > 0) {
+            // Find active session in files list
+            // Note: in clean local SPA, files are loaded from activeSessionId
+            const filesRes = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}`);
+            const filesData = await filesRes.json();
+            
+            // Renders mock evidence registry list (normally queried via EvidenceFile table)
+            if (filesData.success && filesData.findings.length > 0) {
+                // Parse source files from findings
+                const filesList = new Set();
+                filesData.findings.forEach(f => {
+                    if (f.source_files) {
+                        f.source_files.split(",").forEach(fn => filesList.add(fn.trim()));
+                    }
+                });
+                
+                if (filesList.size === 0) {
+                    registry.innerHTML = `<div class="empty-state">No files recorded. Drag files to start.</div>`;
+                    return;
+                }
+                
+                filesList.forEach(fn => {
+                    if (!fn) return;
+                    const card = document.createElement("div");
+                    card.className = "file-card";
+                    card.innerHTML = `
+                        <div class="file-info">
+                            <span class="file-icon">📄</span>
+                            <div>
+                                <span class="file-name" title="${fn}">${fn}</span>
+                            </div>
+                        </div>
+                        <span class="badge-pill" style="color:var(--success); border-color:rgba(34,197,94,0.3);">READY</span>
+                    `;
+                    registry.appendChild(card);
+                });
+            } else {
+                registry.innerHTML = `<div class="empty-state">No files uploaded yet. Drag files to begin audit.</div>`;
+            }
+        }
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+// ── RUN LOCAL AUDIT ANALYSIS ──
+
+let progressInterval = null;
+
+async function triggerAuditAnalysis() {
+    const btn = document.getElementById("run-analysis-btn");
+    btn.disabled = true;
+    btn.innerText = "⏳ Running Scan...";
+    
+    const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
+    const selectedSls = Array.from(checkboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
+    
+    if (selectedSls.length === 0) {
+        alert("⚠️ Please select at least one control to analyze.");
+        btn.disabled = false;
+        btn.innerText = "▶ Run RAG Scan";
+        return;
+    }
+    
+    const model = document.getElementById("llm-model-select").value;
+    const mode = document.querySelector("input[name='audit-mode']:checked").value;
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: activeSessionId,
+                selected_sls: selectedSls,
+                model_choice: model,
+                audit_mode: mode,
+                custom_evidence: customEvidenceMappings,
+                custom_documents: customControlDocuments
+            })
+        });
+        
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Failed to trigger scan.");
+        
+        // Start progress polling
+        progressInterval = setInterval(pollAuditProgress, 2000);
+    } catch (err) {
+        btn.disabled = false;
+        btn.innerText = "▶ Run RAG Scan";
+        alert(`Failed to start scan: ${err.message}`);
+    }
+}
+
+async function pollAuditProgress() {
+    const btn = document.getElementById("run-analysis-btn");
+    try {
+        const response = await fetch(`${API_BASE}/audit/status/${activeSessionId}`);
+        const data = await response.json();
+        
+        if (data.status === "running") {
+            const p = data.progress;
+            btn.innerText = `⏳ ${p.text || 'Scanning...'} (${p.percent || 0}%)`;
+        } else if (data.status === "completed") {
+            clearInterval(progressInterval);
+            btn.disabled = false;
+            btn.innerText = "▶ Run RAG Scan";
+            alert("✅ Local audit RAG analysis completed successfully!");
+            
+            // Reload findings list if active tab is audit records
+            if (activeTab === "tab-audit-records") {
+                loadFindings();
+            }
+        } else if (data.status === "idle" && data.checkpoint && data.checkpoint.status === "failed") {
+            clearInterval(progressInterval);
+            btn.disabled = false;
+            btn.innerText = "▶ Run RAG Scan";
+            alert("❌ Analysis failed. Verify Ollama or local llama-server is running.");
+        }
+    } catch (err) {
+        console.error("Progress polling error:", err);
+    }
+}
+
+// ── AUDIT FINDINGS FEED & CRUD ──
+
+async function loadFindings() {
+    const container = document.getElementById("findings-container");
+    container.innerHTML = `<div class="empty-state">Loading findings from ShaktiDB...</div>`;
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser.role}`);
+        const data = await response.json();
+        
+        if (data.success && data.findings.length > 0) {
+            findingsList = data.findings;
+            renderFindingsList();
+            calculateSeverityStats();
+        } else {
+            container.innerHTML = `<div class="empty-state">No compliance gaps recorded. Configure scope and click "Run RAG Scan" above!</div>`;
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="error-msg">Failed to query findings: ${err.message}</div>`;
+    }
+}
+
+function calculateSeverityStats() {
+    let p1 = 0, p2 = 0, p3 = 0, p4 = 0;
+    findingsList.forEach(f => {
+        const sev = (f.severity || "").toLowerCase();
+        if (sev.includes("p1") || sev.includes("critical")) p1++;
+        else if (sev.includes("p2") || sev.includes("high")) p2++;
+        else if (sev.includes("p3") || sev.includes("medium")) p3++;
+        else if (sev.includes("p4") || sev.includes("low")) p4++;
+    });
+    
+    document.getElementById("count-p1").innerText = p1;
+    document.getElementById("count-p2").innerText = p2;
+    document.getElementById("count-p3").innerText = p3;
+    document.getElementById("count-p4").innerText = p4;
+}
+
+function toggleSeverityFilter(sev) {
+    if (activeSeverityFilter === sev) {
+        activeSeverityFilter = ""; // Clear filter
+        document.querySelectorAll(".sev-card").forEach(c => c.classList.remove("active"));
+    } else {
+        activeSeverityFilter = sev;
+        document.querySelectorAll(".sev-card").forEach(c => c.classList.remove("active"));
+        if (sev === "P1 Critical") document.querySelector(".sev-card.p1").classList.add("active");
+        else if (sev === "P2 High") document.querySelector(".sev-card.p2").classList.add("active");
+        else if (sev === "P3 Medium") document.querySelector(".sev-card.p3").classList.add("active");
+        else if (sev === "P4 Low") document.querySelector(".sev-card.p4").classList.add("active");
+    }
+    renderFindingsList();
+}
+
+function renderFindingsList() {
+    const container = document.getElementById("findings-container");
+    container.innerHTML = "";
+    
+    const filterStatus = document.getElementById("status-filter").value;
+    
+    const filtered = findingsList.filter(f => {
+        // Workflow status filter
+        if (filterStatus === "Open" && f.status === "Compliant") return false;
+        if (filterStatus === "Accepted" && f.status !== "Compliant") return false; // mappings from app.py
+        
+        // Severity level filter
+        if (activeSeverityFilter) {
+            const f_sev = f.severity.toLowerCase();
+            const filter_sev = activeSeverityFilter.toLowerCase();
+            if (!f_sev.includes(filter_sev.slice(0,2))) return false;
+        }
+        return true;
+    });
+    
+    if (filtered.length === 0) {
+        container.innerHTML = `<div class="empty-state">No matching findings found in this filter range.</div>`;
+        return;
+    }
+    
+    filtered.forEach(f => {
+        const card = document.createElement("div");
+        // Determine severity class for border highlight
+        let sevClass = "p3";
+        const f_sev = (f.severity || "").toLowerCase();
+        if (f_sev.includes("p1") || f_sev.includes("critical")) sevClass = "p1";
+        else if (f_sev.includes("p2") || f_sev.includes("high")) sevClass = "p2";
+        else if (f_sev.includes("p4") || f_sev.includes("low")) sevClass = "p4";
+        
+        card.className = `finding-card ${sevClass}`;
+        
+        // Status Badge Style
+        let statusBadgeClass = "non-compliant";
+        if (f.status === "Compliant") statusBadgeClass = "compliant";
+        else if (f.status === "Partially Compliant") statusBadgeClass = "partial";
+        
+        card.innerHTML = `
+            <div class="finding-card-header">
+                <div class="finding-card-title">
+                    <h3>${f.control_id} - ${f.control_name}</h3>
+                </div>
+                <div class="finding-badges">
+                    <span class="badge-status ${statusBadgeClass}">${f.status}</span>
+                    <span class="badge-pill">${f.severity || 'P3 Medium'}</span>
+                </div>
+            </div>
+            
+            <div class="finding-detail-row">
+                <label>Finding Description</label>
+                <p>${f.description}</p>
+            </div>
+            
+            ${f.evidence_snippet ? `
+            <div class="finding-detail-row">
+                <label>Evidence Snippet</label>
+                <pre class="finding-snippet">"${f.evidence_snippet}"</pre>
+            </div>` : ''}
+
+            <div class="finding-detail-row">
+                <label>Lead Auditor Recommendations</label>
+                <p style="color: #60a5fa;">${f.recommendation || 'No recommendation logged.'}</p>
+            </div>
+
+            <div class="finding-actions">
+                <div class="auditor-notes">
+                    <span>Reasoning: <i>${f.reasoning || 'Semantic similarity evaluation.'}</i></span>
+                </div>
+                <div class="btn-card-group">
+                    <button class="btn-secondary" style="color:var(--success);" onclick="updateFindingWorkflowStatus(${f.id}, 'Compliant')">Accept</button>
+                    <button class="btn-secondary" style="color:var(--primary);" onclick="openEditFindingModal(${JSON.stringify(f).replace(/"/g, '&quot;')})">Modify</button>
+                    <button class="btn-danger" onclick="updateFindingWorkflowStatus(${f.id}, 'Rejected')">Reject</button>
+                </div>
+            </div>
+        `;
+        container.appendChild(card);
+    });
+}
+
+async function updateFindingWorkflowStatus(id, status) {
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status })
+        });
+        const data = await response.json();
+        if (data.success) {
+            // Hot reload local list
+            const idx = findingsList.findIndex(f => f.id === id);
+            if (idx !== -1) findingsList[idx].status = status;
+            renderFindingsList();
+            calculateSeverityStats();
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+// ── MODAL EDIT FINDING FORM ──
+
+function openEditFindingModal(finding) {
+    document.getElementById("edit-finding-id").value = finding.id;
+    document.getElementById("edit-finding-status").value = finding.status;
+    document.getElementById("edit-finding-policy").value = finding.policy_present || "No";
+    document.getElementById("edit-finding-evidence").value = finding.evidence_present || "No";
+    document.getElementById("edit-finding-severity").value = finding.severity || "P3 Medium";
+    document.getElementById("edit-finding-desc").value = finding.description;
+    document.getElementById("edit-finding-snippet").value = finding.evidence_snippet || "";
+    document.getElementById("edit-finding-recommendation").value = finding.recommendation || "";
+    document.getElementById("edit-finding-reasoning").value = finding.reasoning || "";
+    
+    document.getElementById("edit-finding-modal").classList.add("active");
+}
+
+function closeEditFindingModal() {
+    document.getElementById("edit-finding-modal").classList.remove("active");
+}
+
+async function handleEditFindingSubmit(e) {
+    e.preventDefault();
+    const id = document.getElementById("edit-finding-id").value;
+    
+    const body = {
+        status: document.getElementById("edit-finding-status").value,
+        policy_present: document.getElementById("edit-finding-policy").value,
+        evidence_present: document.getElementById("edit-finding-evidence").value,
+        severity: document.getElementById("edit-finding-severity").value,
+        description: document.getElementById("edit-finding-desc").value,
+        evidence_snippet: document.getElementById("edit-finding-snippet").value,
+        recommendation: document.getElementById("edit-finding-recommendation").value,
+        reasoning: document.getElementById("edit-finding-reasoning").value
+    };
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            closeEditFindingModal();
+            loadFindings(); // Reload list
+        }
+    } catch (err) {
+        alert(`Update failed: ${err.message}`);
+    }
+}
+
+// ── AI ASSISTANT CHAT ENGINE ──
+
+async function sendChatMessage() {
+    const input = document.getElementById("chat-input");
+    const msg = input.value.trim();
+    if (!msg) return;
+    
+    input.value = "";
+    
+    const feed = document.getElementById("chat-feed-box");
+    
+    // Append User Message
+    const userDiv = document.createElement("div");
+    userDiv.className = "chat-bubble user";
+    userDiv.innerHTML = `<p>${msg}</p>`;
+    feed.appendChild(userDiv);
+    feed.scrollTop = feed.scrollHeight;
+    
+    // Show Thinking indicator
+    const indicator = document.getElementById("chat-generating-indicator");
+    indicator.style.display = "block";
+    
+    const model = document.getElementById("llm-model-select").value;
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/chats/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: activeSessionId,
+                message: msg,
+                model_choice: model
+            })
+        });
+        
+        const data = await response.json();
+        indicator.style.display = "none";
+        
+        if (data.success) {
+            const aiDiv = document.createElement("div");
+            aiDiv.className = "chat-bubble assistant";
+            aiDiv.innerHTML = `<p>${data.response}</p>`;
+            feed.appendChild(aiDiv);
+            feed.scrollTop = feed.scrollHeight;
+        } else {
+            throw new Error(data.detail);
+        }
+    } catch (err) {
+        indicator.style.display = "none";
+        const errDiv = document.createElement("div");
+        errDiv.className = "chat-bubble assistant error-msg";
+        errDiv.innerHTML = `<p>Error: ${err.message}. Ollama server might be offline.</p>`;
+        feed.appendChild(errDiv);
+    }
+}
+
+// ── MANAGE CUSTOM CONTROLS Framework ──
+
+async function loadCustomControlsTable() {
+    const tbody = document.getElementById("custom-controls-table-body");
+    if (!tbody) return;
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Loading custom controls from ShaktiDB...</td></tr>`;
+    
+    try {
+        const response = await fetch(`${API_BASE}/controls?active_only=false`);
+        const data = await response.json();
+        
+        if (data.success && data.controls.length > 0) {
+            tbody.innerHTML = "";
+            data.controls.forEach(c => {
+                const tr = document.createElement("tr");
+                const kws = c.keywords.join(", ");
+                tr.innerHTML = `
+                    <td><b>${c.control_id}</b></td>
+                    <td>${c.control_name}</td>
+                    <td><span class="badge-pill">${c.category}</span></td>
+                    <td><code style="color:#60a5fa;">${kws || 'None'}</code></td>
+                    <td>
+                        <button class="btn-danger" style="padding: 4px 8px; font-size:11px;" onclick="deleteCustomControl(${c.id})">Delete</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        } else {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No custom controls registered. Create one on the left!</td></tr>`;
+        }
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--error);">Failed to load controls: ${err.message}</td></tr>`;
+    }
+}
+
+async function handleCreateControlSubmit(e) {
+    e.preventDefault();
+    
+    const body = {
+        control_id: document.getElementById("new-ctrl-id").value.trim(),
+        control_name: document.getElementById("new-ctrl-name").value.trim(),
+        category: document.getElementById("new-ctrl-cat").value,
+        keywords: document.getElementById("new-ctrl-kws").value.split(",").map(k => k.trim()).filter(k => k),
+        description: document.getElementById("new-ctrl-desc").value.trim()
+    };
+    
+    try {
+        const response = await fetch(`${API_BASE}/controls`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body)
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            // Reset form
+            document.getElementById("create-control-form").reset();
+            loadCustomControlsTable();
+            loadFrameworkControls(); // Reload sidebar checklist
+            alert("✅ Custom control saved successfully!");
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function autogenerateKeywords() {
+    const name = document.getElementById("new-ctrl-name").value.trim();
+    const desc = document.getElementById("new-ctrl-desc").value.trim();
+    
+    if (!name) {
+        alert("⚠️ Please enter a Control Name first.");
+        return;
+    }
+    
+    const kwField = document.getElementById("new-ctrl-kws");
+    kwField.placeholder = "🧠 AI is generating regex keywords...";
+    
+    try {
+        const response = await fetch(`${API_BASE}/controls/autogen-keywords`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, description: desc })
+        });
+        const data = await response.json();
+        if (data.success) {
+            kwField.value = data.keywords.join(", ");
+        }
+    } catch (err) {
+        kwField.placeholder = "Failed to auto-generate keywords.";
+        alert(err.message);
+    }
+}
+
+async function deleteCustomControl(id) {
+    if (!confirm("Are you sure you want to deactivate and remove this custom control?")) return;
+    try {
+        const response = await fetch(`${API_BASE}/controls/${id}?soft=false`, {
+            method: "DELETE"
+        });
+        const data = await response.json();
+        if (data.success) {
+            loadCustomControlsTable();
+            loadFrameworkControls();
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+// ── ADMIN SYSTEM LOGS & CONSOLE ──
+
+async function loadSystemEvents() {
+    const tbody = document.getElementById("system-events-table-body");
+    const indicator = document.getElementById("logs-page-indicator");
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Loading logs...</td></tr>`;
+    
+    const severity = document.getElementById("log-severity-filter").value;
+    
+    try {
+        const response = await fetch(`${API_BASE}/logs/system?severity=${severity}&page=${logsPage}&page_size=15`);
+        const data = await response.json();
+        
+        if (data.success && data.events.length > 0) {
+            tbody.innerHTML = "";
+            logsTotalPages = data.total_pages;
+            indicator.innerText = `Page ${logsPage + 1} of ${logsTotalPages}`;
+            
+            data.events.forEach(e => {
+                const tr = document.createElement("tr");
+                let color = "#aaa";
+                if (e.severity === "ERROR") color = "var(--error)";
+                else if (e.severity === "WARNING") color = "var(--warning)";
+                else if (e.severity === "CRITICAL") color = "#f43f5e";
+                
+                tr.innerHTML = `
+                    <td style="color:#64748b; font-family:var(--font-mono);">${e.created_at.slice(0,19)}</td>
+                    <td><b>${e.event_type}</b></td>
+                    <td>${e.actor}</td>
+                    <td><span style="color:${color}; font-weight:700;">${e.severity}</span></td>
+                    <td style="color:#94a3b8; font-size:0.75rem;">${e.meta || '—'}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+            
+            // Toggle paginator buttons
+            document.getElementById("logs-prev-btn").disabled = logsPage === 0;
+            document.getElementById("logs-next-btn").disabled = logsPage >= logsTotalPages - 1;
+        } else {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No matching log events recorded.</td></tr>`;
+        }
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--error);">Failed: ${err.message}</td></tr>`;
+    }
+}
+
+function prevLogsPage() {
+    if (logsPage > 0) {
+        logsPage--;
+        loadSystemEvents();
+    }
+}
+
+function nextLogsPage() {
+    if (logsPage < logsTotalPages - 1) {
+        logsPage++;
+        loadSystemEvents();
+    }
+}
+
+async function purgeLogs() {
+    if (!confirm("Are you sure you want to delete all log entries older than 90 days?")) return;
+    try {
+        const response = await fetch(`${API_BASE}/logs/purge?days=90`, { method: "POST" });
+        const data = await response.json();
+        if (data.success) {
+            alert(data.message);
+            logsPage = 0;
+            loadSystemEvents();
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function loadDeveloperLogs() {
+    const terminal = document.getElementById("developer-terminal");
+    try {
+        const response = await fetch(`${API_BASE}/logs/developer`);
+        const data = await response.json();
+        if (data.success) {
+            terminal.value = data.logs || "No server latency logs recorded yet.";
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    } catch (err) {
+        terminal.value = `Failed to stream logs: ${err.message}`;
+    }
+}
+
+async function clearDeveloperLogs() {
+    if (!confirm("Clear developer latency log file?")) return;
+    try {
+        const response = await fetch(`${API_BASE}/logs/developer`, { method: "DELETE" });
+        const data = await response.json();
+        if (data.success) {
+            loadDeveloperLogs();
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+// ── AUDIT REPORT & DELIVERY ──
+
+async function exportFindingsCSV() {
+    // Queries findings and generates CSV download on client side
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser.role}`);
+        const data = await response.json();
+        if (data.success && data.findings.length > 0) {
+            let csv = "Control ID,Name,Severity,Status,Description,Recommendation,Reasoning,Files\n";
+            data.findings.forEach(f => {
+                // escape commas and quotes in CSV
+                const desc = `"${(f.description || '').replace(/"/g, '""')}"`;
+                const rec = `"${(f.recommendation || '').replace(/"/g, '""')}"`;
+                const reason = `"${(f.reasoning || '').replace(/"/g, '""')}"`;
+                csv += `${f.control_id},"${f.control_name}",${f.severity},${f.status},${desc},${rec},${reason},"${f.source_files}"\n`;
+            });
+            
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            alert("No findings records to export. Try running a scan first.");
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function triggerDeleteAllRecords() {
+    if (!currentUser || currentUser.role !== "admin") {
+        alert("⚠️ Access Denied: Only system administrators can clear database records.");
+        return;
+    }
+    
+    if (!confirm("🚨 WARNING: Wiping all database records is irreversible and clears everything. Continue?")) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/clear-records`, {
+            method: "DELETE"
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert("✅ Entire database records successfully cleared!");
+            location.reload();
+        } else {
+            alert(`Error: ${data.detail || "Wipe failed"}`);
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function loadAuditeeSessionsList() {
+    const select = document.getElementById("auditee-session-selector");
+    if (!select) return;
+    select.innerHTML = `<option value="">Choose session...</option>`;
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/sessions`);
+        const data = await response.json();
+        
+        if (data.success) {
+            data.sessions.forEach(s => {
+                const opt = document.createElement("option");
+                opt.value = s.session_id;
+                opt.innerText = `${s.session_title} (${s.session_id.slice(0,6)})`;
+                select.appendChild(opt);
+            });
+        }
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+async function loadAuditeeEvidenceDocs() {
+    const selector = document.getElementById("auditee-session-selector");
+    const container = document.getElementById("auditee-evidence-files-box");
+    if (!selector || !container) return;
+    
+    const sessId = selector.value;
+    if (!sessId) {
+        container.innerHTML = `<div class="empty-state">Select an auditee session to view evidence files.</div>`;
+        return;
+    }
+    
+    container.innerHTML = `<div class="empty-state">Loading evidence documents...</div>`;
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings?session_id=${sessId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const filesList = new Set();
+            data.findings.forEach(f => {
+                if (f.source_files) {
+                    f.source_files.split(",").forEach(fn => filesList.add(fn.trim()));
+                }
+            });
+            
+            if (filesList.size === 0) {
+                container.innerHTML = `<div class="empty-state">No uploaded evidence documents found for this session.</div>`;
+                return;
+            }
+            
+            container.innerHTML = "";
+            filesList.forEach(fn => {
+                if (!fn) return;
+                const card = document.createElement("div");
+                card.className = "file-card";
+                card.innerHTML = `
+                    <div class="file-info">
+                        <span class="file-icon">📄</span>
+                        <div>
+                            <span class="file-name" title="${fn}">${fn}</span>
+                        </div>
+                    </div>
+                    <span class="badge-pill" style="color:var(--success); border-color:rgba(34,197,94,0.3);">SUBMITTED</span>
+                `;
+                container.appendChild(card);
+            });
+        } else {
+            container.innerHTML = `<div class="empty-state">Failed to load evidence files.</div>`;
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="error-msg">Error: ${err.message}</div>`;
+    }
+}
+
+async function handleScopingUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    const fileBadge = document.getElementById("scoping-file-name");
+    fileBadge.innerText = "Parsing excel checklist...";
+    fileBadge.style.display = "block";
+    
+    const body = new FormData();
+    body.append("file", file);
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/upload-scope-excel`, {
+            method: "POST",
+            body: body
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Failed to parse checklist.");
+        
+        fileBadge.innerText = `Checked: ${file.name}`;
+        
+        // Save mappings globally
+        customEvidenceMappings = data.custom_evidence;
+        customControlDocuments = data.custom_documents;
+        
+        // Auto select matched checkboxes in UI checklist
+        const matchedSet = new Set(data.matched_sls);
+        const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
+        checkboxes.forEach(cb => {
+            cb.checked = matchedSet.has(parseInt(cb.value));
+        });
+        
+        updateSelectedScopeCount();
+        alert(`✅ Loaded checklist items across ${data.matched_sls.length} unique standard controls!`);
+    } catch (err) {
+        fileBadge.innerText = "Error parsing file";
+        alert(`Scoping Error: ${err.message}`);
+    }
+}
+
+async function handleSidebarUpload(event) {
+    const files = event.target.files;
+    if (files.length === 0) return;
+    
+    const statusDiv = document.getElementById("sidebar-upload-status");
+    statusDiv.innerText = "⏳ Uploading files...";
+    
+    const body = new FormData();
+    body.append("session_id", activeSessionId);
+    body.append("is_auditor_uploaded", "true");
+    
+    for (let i = 0; i < files.length; i++) {
+        body.append("files", files[i]);
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/upload`, {
+            method: "POST",
+            body: body
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Upload failed.");
+        
+        statusDiv.innerText = `Successfully uploaded ${files.length} file(s)!`;
+        loadEvidenceFileList();
+        setTimeout(() => { statusDiv.innerText = ""; }, 4000);
+    } catch (err) {
+        statusDiv.innerText = `❌ Error: ${err.message}`;
+    }
+}
+
+async function deliverReportToAuditee() {
+    const select = document.getElementById("report-target-auditee");
+    if (!select) return;
+    const auditeeId = select.value;
+    if (!auditeeId) {
+        alert("⚠️ Please select a target auditee first.");
+        return;
+    }
+    
+    if (!confirm("Are you sure you want to finalize and send these audit findings to the auditee?")) return;
+    
+    const body = new FormData();
+    body.append("session_id", activeSessionId);
+    body.append("auditee_id", auditeeId);
+    body.append("username", currentUser.username);
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/deliver`, {
+            method: "POST",
+            body: body
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert("✅ Report successfully published and delivered to the auditee!");
+        } else {
+            alert(`Error: ${data.detail || "Delivery failed"}`);
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function loadSubmittedReports() {
+    const container = document.getElementById("submitted-reports-container");
+    if (!container) return;
+    container.innerHTML = `<div class="empty-state">Loading submitted reports...</div>`;
+    
+    try {
+        let url = `${API_BASE}/audit/sessions`;
+        if (currentUser && currentUser.role === "auditee") {
+            url += `?role=auditee&username=${currentUser.username}`;
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && data.sessions.length > 0) {
+            container.innerHTML = "";
+            const reports = data.sessions.filter(s => s.status !== "Draft" || (currentUser && currentUser.role !== "auditee"));
+            
+            if (reports.length === 0) {
+                container.innerHTML = `<div class="empty-state">No submitted audit reports available for inspection.</div>`;
+                return;
+            }
+            
+            reports.forEach(r => {
+                const card = document.createElement("div");
+                card.className = "report-card";
+                card.style = "background: rgba(30, 41, 59, 0.4); border: 1px solid rgba(148, 163, 184, 0.1); border-radius: 8px; padding: 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;";
+                
+                let badgeColor = "var(--text-muted)";
+                let badgeBorder = "rgba(148, 163, 184, 0.2)";
+                if (r.status === "Sent to Auditee" || r.status === "Completed") {
+                    badgeColor = "var(--success)";
+                    badgeBorder = "rgba(34, 197, 94, 0.3)";
+                } else if (r.status === "Pending Review") {
+                    badgeColor = "var(--warning)";
+                    badgeBorder = "rgba(234, 179, 8, 0.3)";
+                }
+                
+                card.innerHTML = `
+                    <div>
+                        <h4 style="margin:0 0 6px 0; color:var(--text-primary); font-size:1.05rem;">${r.session_title}</h4>
+                        <div style="font-size:0.8rem; color:var(--text-muted); display:flex; gap:16px;">
+                            <span>Standard: <b>${r.framework}</b></span>
+                            <span>Date: <b>${r.created_at.slice(0, 10)}</b></span>
+                            <span>Compliance Score: <b style="color:var(--primary)">${r.score_percent}%</b></span>
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:12px;">
+                        <span class="badge-pill" style="color:${badgeColor}; border-color:${badgeBorder};">${r.status.toUpperCase()}</span>
+                        <button class="btn-secondary" style="padding:6px 12px; font-size:0.75rem;" onclick="exportReportCSV('${r.session_id}')">📥 Export</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        } else {
+            container.innerHTML = `<div class="empty-state">No submitted audit reports found.</div>`;
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="error-msg">Failed to load reports: ${err.message}</div>`;
+    }
+}
+
+async function exportReportCSV(sessId) {
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings?session_id=${sessId}`);
+        const data = await response.json();
+        if (data.success && data.findings.length > 0) {
+            let csv = "Control ID,Name,Severity,Status,Description,Recommendation,Reasoning,Files\n";
+            data.findings.forEach(f => {
+                const desc = `"${(f.description || '').replace(/"/g, '""')}"`;
+                const rec = `"${(f.recommendation || '').replace(/"/g, '""')}"`;
+                const reason = `"${(f.reasoning || '').replace(/"/g, '""')}"`;
+                csv += `${f.control_id},"${f.control_name}",${f.severity},${f.status},${desc},${rec},${reason},"${f.source_files}"\n`;
+            });
+            
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute("download", `audit_report_${sessId.slice(0,6)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            alert("No findings records to export. Try running a scan first.");
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function exportFeedbackBackup() {
+    try {
+        const response = await fetch(`${API_BASE}/audit/feedback/export`);
+        const data = await response.json();
+        
+        if (response.ok) {
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.setAttribute("download", `auditor_feedback_memory_backup.json`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } else {
+            alert("Failed to export feedback data.");
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function importFeedbackBackup(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    if (!confirm(`Are you sure you want to import feedback records from ${file.name}?`)) return;
+    
+    const body = new FormData();
+    body.append("file", file);
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/feedback/import`, {
+            method: "POST",
+            body: body
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert(`✅ ${data.message}`);
+        } else {
+            alert(`Import failed: ${data.detail || "Unknown error"}`);
+        }
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+    }
+}
+
+async function loadChatSessions() {
+    const sidebar = document.getElementById("chat-history-sidebar");
+    if (!sidebar) return;
+    sidebar.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;'>Loading history...</div>";
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/chats/sessions?role=${currentUser.role}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            sidebar.innerHTML = "";
+            if (data.sessions.length === 0) {
+                sidebar.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;text-align:center;'>No conversations yet.</div>";
+                return;
+            }
+            
+            data.sessions.forEach(s => {
+                const item = document.createElement("div");
+                item.className = `chat-session-item ${s.session_id === activeSessionId ? 'active' : ''}`;
+                item.onclick = () => selectChatSession(s.session_id);
+                
+                item.innerHTML = `
+                    <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
+                        <span>💬</span>
+                        <span title="${s.session_title}">${s.session_title.slice(0, 18)}${s.session_title.length > 18 ? '...' : ''}</span>
+                    </div>
+                    <button style="background:none; border:none; color:var(--text-muted); font-size:0.75rem; cursor:pointer;" onclick="clearChatSession('${s.session_id}', event)">🗑️</button>
+                `;
+                sidebar.appendChild(item);
+            });
+        } else {
+            sidebar.innerHTML = "<div style='font-size:11px;color:var(--error);padding:8px;'>Failed to load history.</div>";
+        }
+    } catch (err) {
+        sidebar.innerHTML = `<div style='font-size:11px;color:var(--error);padding:8px;'>Error: ${err.message}</div>`;
+    }
+}
+
+async function selectChatSession(sessionId) {
+    activeSessionId = sessionId;
+    
+    // Refresh active session badge and workspace details
+    document.getElementById("active-session-badge").innerText = `Session ID: ${activeSessionId}`;
+    
+    // Highlight active chat session card
+    document.querySelectorAll(".chat-session-item").forEach(item => item.classList.remove("active"));
+    loadChatSessions(); // will refresh active class list
+    
+    // Reload relevant evidence files & findings for the selected conversation context
+    loadEvidenceFileList();
+    loadFindings();
+    
+    const feed = document.getElementById("chat-feed-box");
+    feed.innerHTML = "<div class='empty-state'>Loading conversation...</div>";
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/chats/history?session_id=${sessionId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            feed.innerHTML = "";
+            if (data.messages.length === 0) {
+                feed.innerHTML = `
+                    <div class="chat-bubble assistant">
+                        <p>Hello! I am your lead auditor AI assistant. Ask me anything about the uploaded evidence policies against standard compliance controls.</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            data.messages.forEach(m => {
+                if (m.role === "findings_snapshot") return; // skip internal snapshots
+                const bubble = document.createElement("div");
+                bubble.className = `chat-bubble ${m.role === 'user' ? 'user' : 'assistant'}`;
+                bubble.innerHTML = `<p>${m.content}</p>`;
+                feed.appendChild(bubble);
+            });
+            feed.scrollTop = feed.scrollHeight;
+        }
+    } catch (err) {
+        feed.innerHTML = `<div class="error-msg">Error loading messages: ${err.message}</div>`;
+    }
+}
+
+async function startNewChatSession() {
+    // Generate a fresh session ID
+    const newSessionId = 'chat_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    
+    // Post to register audit report session on backend
+    const body = new FormData();
+    body.append("session_title", "Custom AI Chat Conversation");
+    body.append("framework", "ISO 27001");
+    body.append("username", currentUser.username);
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/sessions`, {
+            method: "POST",
+            body: body
+        });
+        const data = await response.json();
+        if (data.success) {
+            // Override report session ID
+            activeSessionId = data.session_id;
+            
+            // Reload sidebar list and select the new blank session
+            await selectChatSession(activeSessionId);
+            alert("✅ Switched to a fresh new AI conversation session!");
+        }
+    } catch (err) {
+        alert(`Failed to initialize new session: ${err.message}`);
+    }
+}
+
+async function clearChatSession(sessionId, event) {
+    if (event) event.stopPropagation(); // prevent clicking session activation
+    
+    if (!confirm("Are you sure you want to clear conversation messages and checkpoints for this session?")) return;
+    
+    const body = new FormData();
+    body.append("session_id", sessionId);
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/chats/clear`, {
+            method: "POST",
+            body: body
+        });
+        const data = await response.json();
+        if (data.success) {
+            if (sessionId === activeSessionId) {
+                // If currently active chat deleted, start a new one
+                startNewChatSession();
+            } else {
+                loadChatSessions();
+            }
+        }
+    } catch (err) {
+        alert(err.message);
+    }
+}
+
+async function exportFindingsDOCX() {
+    try {
+        const link = document.createElement("a");
+        link.href = `${API_BASE}/audit/export/docx?session_id=${activeSessionId}`;
+        link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.docx`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (err) {
+        alert("Error exporting Word report: " + err.message);
+    }
+}
+
+async function exportFindingsPDF() {
+    try {
+        const link = document.createElement("a");
+        link.href = `${API_BASE}/audit/export/pdf?session_id=${activeSessionId}`;
+        link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.pdf`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (err) {
+        alert("Error exporting PDF report: " + err.message);
+    }
+}
