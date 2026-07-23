@@ -13,8 +13,8 @@ class BurpParser(BaseParser):
         fn_lower = filename.lower()
         if "burp" in fn_lower or "zap" in fn_lower:
             return True
-        sample = content[:10000].lower()
-        if "burp scanner" in sample or "burp suite" in sample or "owasp zap" in sample or "<issues" in sample or "bodh0" in sample:
+        sample = content[:100000].lower()
+        if "burp scanner" in sample or "burp suite" in sample or "owasp zap" in sample or "<issues" in sample or "bodh0" in sample or "issue background" in sample or "issue detail" in sample:
             return True
         return False
 
@@ -26,8 +26,13 @@ class BurpParser(BaseParser):
         if content.strip().startswith("<?xml") or "<issues" in content[:2000]:
             return self._parse_xml(content)
         
-        # Default to HTML format parsing
-        return self._parse_html(content)
+        # HTML format parsing
+        res_act, res_inf = self._parse_html(content)
+        if res_act or res_inf:
+            return res_act, res_inf
+            
+        # Fallback to plain-text / PDF text parsing
+        return self._parse_plaintext(content)
 
     def _calculate_score(self, severity: str, confidence: str) -> float:
         sev_upper = (severity or "").strip().upper()
@@ -256,3 +261,95 @@ class BurpParser(BaseParser):
         map_findings_list(info_findings)
 
         return actionable_findings, info_findings
+
+    def _parse_plaintext(self, content: str) -> Tuple[List[Finding], List[Finding]]:
+        """
+        Parses text extracted from PDF reports or plain text Burp exports.
+        """
+        actionable_findings: List[Finding] = []
+        info_findings: List[Finding] = []
+
+        # Split into blocks by numbered headings (e.g., "\n1. SQL injection", "\n1.1. https://...")
+        blocks = re.split(r'(?:\r?\n)+(?=\d+\.(?:\d+)?\s+[A-Za-z0-9_])', content)
+
+        cur_cat_title = "Burp Suite Finding"
+        for block in blocks:
+            lines = [l.strip() for l in block.strip().split('\n') if l.strip()]
+            if not lines:
+                continue
+
+            first_line = lines[0]
+            m_cat = re.match(r'^\d+\.\s+([A-Za-z0-9_\-\s\(\)]+)', first_line)
+            m_inst = re.match(r'^\d+\.\d+\.\s+(https?://[^\s]+|\/[^\s]+)', first_line)
+
+            if m_cat and not m_inst:
+                cur_cat_title = m_cat.group(1).strip()
+
+            # Parse finding details
+            sev_match = re.search(r'Severity:\s*(Critical|High|Medium|Low|Information|Info)', block, re.IGNORECASE)
+            conf_match = re.search(r'Confidence:\s*(Certain|Firm|Tentative)', block, re.IGNORECASE)
+            host_match = re.search(r'Host:\s*(https?://[^\s\n]+)', block, re.IGNORECASE)
+            path_match = re.search(r'Path:\s*([^\s\n]+)', block, re.IGNORECASE)
+
+            if not (sev_match or host_match or m_inst or "Issue detail" in block):
+                continue
+
+            raw_sev = sev_match.group(1).upper() if sev_match else "INFO"
+            raw_conf = conf_match.group(1) if conf_match else "Firm"
+            host = host_match.group(1) if host_match else ""
+            path = path_match.group(1) if path_match else ""
+            target_str = f"{host}{path}".strip() if host else (path or "Web Application Endpoint")
+
+            if "HIGH" in raw_sev:
+                severity = "HIGH"
+            elif "MED" in raw_sev:
+                severity = "MEDIUM"
+            elif "LOW" in raw_sev:
+                severity = "LOW"
+            else:
+                severity = "INFO"
+
+            score = self._calculate_score(severity, raw_conf)
+
+            title = cur_cat_title
+            if m_inst:
+                inst_target = m_inst.group(1)
+                title = f"{cur_cat_title} ({inst_target})"
+
+            # Extract Issue Detail
+            desc = ""
+            m_desc = re.search(r'Issue detail\s*\n\s*(.*?)(?=\n\s*(?:Issue background|Issue remediation|Request|Response|References|$))', block, re.DOTALL)
+            if m_desc:
+                desc = m_desc.group(1).strip()
+            else:
+                desc = block[:400]
+
+            # Extract Remediation
+            remed = ""
+            m_remed = re.search(r'Issue remediation\s*\n\s*(.*?)(?=\n\s*(?:References|Vulnerability classifications|Request|Response|$))', block, re.DOTALL)
+            if m_remed:
+                remed = m_remed.group(1).strip()
+
+            cves = sorted(list(set(re.findall(r'CVE-\d{4}-\d{4,7}', block, re.IGNORECASE))))
+
+            f = Finding(
+                title=title,
+                severity=severity,
+                severity_score=score,
+                cve_list=cves,
+                target=target_str,
+                description=desc,
+                remediation=remed,
+                source_tool="Burp Suite"
+            )
+
+            if severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+                actionable_findings.append(f)
+            else:
+                info_findings.append(f)
+
+        map_findings_list(actionable_findings)
+        map_findings_list(info_findings)
+
+        return actionable_findings, info_findings
+

@@ -4401,6 +4401,11 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls):
                 except Exception:
                     ftext = ""
             
+            # If extracted text is available from PyPDF/docx in session registry, use it for PDF scans
+            reg_text = st.session_state.get("file_registry", {}).get(fname, "")
+            if reg_text and len(reg_text) > len(ftext or ""):
+                ftext = reg_text
+
             actionable, info = parse_tool_file(fname, ftext or "")
 
             for f in actionable:
