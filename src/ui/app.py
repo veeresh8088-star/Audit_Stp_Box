@@ -5319,14 +5319,16 @@ with st.sidebar:
 
         categories = {}
         for uc in filtered_for_selector:
-            cat = uc["category"]
+            cat = str(uc.get("category", "")).strip()
+            if not cat:
+                cat = "General Framework Controls"
             if cat not in categories:
                 categories[cat] = []
             categories[cat].append(uc)
 
         for cat, cat_ucs in categories.items():
-            total_in_cat = len([u for u in filtered_use_cases if u["category"] == cat])
-            selected_in_cat = len([u for u in filtered_use_cases if u["category"] == cat and st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
+            total_in_cat = len([u for u in filtered_use_cases if str(u.get("category", "")).strip() == cat])
+            selected_in_cat = len([u for u in filtered_use_cases if str(u.get("category", "")).strip() == cat and st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
         
             if search_query:
                 total_visible = len(cat_ucs)
@@ -5340,7 +5342,8 @@ with st.sidebar:
                 else:
                     status_suffix = f"[{selected_in_cat}/{total_in_cat}]"
             
-            with st.expander(f"{cat} {status_suffix}", expanded=False, key=f"expander_{cat}"):
+            clean_key_cat = re.sub(r'[^a-zA-Z0-9_]', '_', cat)
+            with st.expander(f"{cat} {status_suffix}", expanded=False, key=f"expander_{clean_key_cat}"):
                 for uc in cat_ucs:
                     st.checkbox(uc["label"], key=f"ctrl_chk_{uc['sl']}", disabled=False)
 
