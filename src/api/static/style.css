@@ -657,11 +657,13 @@ button {
     display: flex;
     flex-direction: column;
     height: 100%;
+    overflow: hidden;
 }
 
 .chat-feed {
     flex: 1;
     overflow-y: auto;
+    min-height: 0;
     padding: 24px;
     display: flex;
     flex-direction: column;

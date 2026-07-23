@@ -1722,3 +1722,19 @@ async function exportFindingsPDF() {
         alert("Error exporting PDF report: " + err.message);
     }
 }
+
+function toggleChatSidebar() {
+    const sidebar = document.querySelector(".chat-sidebar");
+    const toggleText = document.getElementById("toggle-sidebar-text");
+    const container = document.querySelector(".chat-container");
+    
+    if (sidebar.style.display === "none") {
+        sidebar.style.display = "flex";
+        container.style.gridTemplateColumns = "240px 1fr";
+        toggleText.innerText = "Hide Recents";
+    } else {
+        sidebar.style.display = "none";
+        container.style.gridTemplateColumns = "1fr";
+        toggleText.innerText = "Show Recents";
+    }
+}

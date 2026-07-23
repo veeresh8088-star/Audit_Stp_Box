@@ -45,6 +45,7 @@ class AuditState(TypedDict):
     control_idx: int
     total_controls: int
     audit_mode: Optional[str]
+    file_registry: Optional[Dict[str, str]]
 
 
 # Synonyms dictionary used in retrieval
@@ -85,7 +86,7 @@ def _update_progress(state: AuditState, phase_text: str, phase_ratio: float):
         
         with _bg_lock:
             _bg_store["progress"][bg_key] = {
-                "text": f"⚡ Auditing control {idx + 1}/{total}: {state['control_id']} — {phase_text}...",
+                "text": f"⚡ Auditing control {idx + 1}/{total}: {state.get('control_id','')} — {phase_text}...",
                 "percent": current_pct
             }
     except Exception as e:

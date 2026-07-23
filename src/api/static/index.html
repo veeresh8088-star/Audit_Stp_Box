@@ -269,6 +269,12 @@
                             </div>
                         </div>
                         <div class="chat-main">
+                            <div class="chat-header" style="display: flex; align-items: center; padding: 12px 24px; border-bottom: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.4); justify-content: space-between;">
+                                <button class="btn-secondary" style="padding: 6px 12px; font-size: 0.8rem; display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.1); color: var(--text-muted); width: auto; height: auto; line-height: 1;" onclick="toggleChatSidebar()">
+                                    <span>📂</span> <span id="toggle-sidebar-text">Hide Recents</span>
+                                </button>
+                                <span style="font-size: 0.9rem; font-weight: 600; color: var(--text-muted);" id="active-chat-title">AI Compliance Copilot</span>
+                            </div>
                             <div class="chat-feed" id="chat-feed-box">
                                 <div class="chat-bubble assistant">
                                     <p>Hello! I am your lead auditor AI assistant. Ask me anything about the uploaded evidence policies against standard compliance controls.</p>
