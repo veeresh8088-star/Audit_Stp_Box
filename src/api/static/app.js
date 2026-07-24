@@ -296,7 +296,8 @@ function setupTabs(role) {
         ];
     } else if (role === "admin") {
         tabs = [
-            { id: "tab-audit-records", label: "Scan workspace" },
+            { id: "tab-scan-workspace", label: "Scan workspace" },
+            { id: "tab-audit-records", label: "Audit Records" },
             { id: "tab-audit-report", label: "Report" },
             { id: "tab-manage-controls", label: "Controls" },
             { id: "tab-admin-logs", label: "Admin Logs" }
@@ -304,7 +305,8 @@ function setupTabs(role) {
     } else {
         // Auditor Role
         tabs = [
-            { id: "tab-audit-records", label: "Scan workspace" },
+            { id: "tab-scan-workspace", label: "Scan workspace" },
+            { id: "tab-audit-records", label: "Audit Records" },
             { id: "tab-auditee-docs", label: "Auditee docs" },
             { id: "tab-audit-report", label: "Report" },
             { id: "tab-submitted-reports", label: "Submitted" },
@@ -337,8 +339,22 @@ function switchTab(tabId, tabBtn) {
     const targetPanel = document.getElementById(tabId);
     if (targetPanel) targetPanel.classList.add("active");
     
+    // Update workspace title header based on active tab
+    const wsTitle = document.getElementById("workspace-title");
+    if (wsTitle) {
+        if (tabId === "tab-scan-workspace") wsTitle.innerText = "Audit Scan Workspace";
+        else if (tabId === "tab-audit-records") wsTitle.innerText = "Audit Records & Compliance Gaps Workspace";
+        else if (tabId === "tab-auditee-docs") wsTitle.innerText = "Auditee Evidence Documents";
+        else if (tabId === "tab-audit-report") wsTitle.innerText = "Audit Report & Delivery Center";
+        else if (tabId === "tab-submitted-reports") wsTitle.innerText = "Submitted Audit Reports";
+        else if (tabId === "tab-manage-controls") wsTitle.innerText = "Manage ISO 27001 / VAPT Framework Controls";
+        else if (tabId === "tab-admin-logs") wsTitle.innerText = "System Event & Developer Logs";
+    }
+
     // Perform tab-specific loading
-    if (tabId === "tab-audit-records") {
+    if (tabId === "tab-scan-workspace") {
+        loadEvidenceFileList();
+    } else if (tabId === "tab-audit-records") {
         loadFindings();
     } else if (tabId === "tab-admin-logs") {
         loadSystemEvents();
