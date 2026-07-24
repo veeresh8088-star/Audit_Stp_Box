@@ -1503,51 +1503,84 @@ async function loadAuditeeEvidenceDocs() {
     
     const sessId = selector.value;
     if (!sessId) {
-        container.innerHTML = `<div class="empty-state">Select an auditee session to view evidence files.</div>`;
+        container.innerHTML = `<div class="empty-state">Select an auditee session above to inspect evidence documents.</div>`;
         return;
     }
     
     container.innerHTML = `<div class="empty-state">Loading evidence documents...</div>`;
     
     try {
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${sessId}`);
+        const response = await fetch(`${API_BASE}/audit/evidence?session_id=${sessId}`);
         const data = await response.json();
         
-        if (data.success) {
-            const filesList = new Set();
-            data.findings.forEach(f => {
-                if (f.source_files) {
-                    f.source_files.split(",").forEach(fn => filesList.add(fn.trim()));
-                }
-            });
-            
-            if (filesList.size === 0) {
-                container.innerHTML = `<div class="empty-state">No uploaded evidence documents found for this session.</div>`;
-                return;
-            }
-            
-            container.innerHTML = "";
-            filesList.forEach(fn => {
-                if (!fn) return;
-                const card = document.createElement("div");
-                card.className = "file-card";
-                card.innerHTML = `
-                    <div class="file-info">
-                        <span class="file-icon">📄</span>
-                        <div>
-                            <span class="file-name" title="${fn}">${fn}</span>
-                        </div>
-                    </div>
-                    <span class="badge-pill" style="color:var(--success); border-color:rgba(34,197,94,0.3);">SUBMITTED</span>
-                `;
-                container.appendChild(card);
-            });
-        } else {
-            container.innerHTML = `<div class="empty-state">Failed to load evidence files.</div>`;
+        const files = (data.success && data.files) ? data.files : [];
+        if (files.length === 0) {
+            container.innerHTML = `<div class="empty-state">No uploaded evidence documents found for session ${sessId.slice(0, 8)}.</div>`;
+            return;
         }
+        
+        container.innerHTML = "";
+        files.forEach((f, idx) => {
+            const fn = f.filename;
+            const ext = fn.split('.').pop().toLowerCase();
+            let fileClass = "file-type-xml";
+            let fileIconText = "XML";
+            
+            if (ext === "pdf") { fileClass = "file-type-pdf"; fileIconText = "PDF"; }
+            else if (["doc", "docx"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "DOC"; }
+            else if (["xls", "xlsx", "csv"].includes(ext)) { fileClass = "file-type-xls"; fileIconText = "XLS"; }
+            
+            const card = document.createElement("div");
+            card.className = "modern-file-card";
+            card.style.cssText = "display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px;";
+            card.innerHTML = `
+                <input type="checkbox" class="auditee-doc-checkbox" value="${fn}" id="auditee_doc_${idx}" checked style="width: 18px; height: 18px; cursor: pointer;">
+                <div class="file-icon-badge ${fileClass}">${fileIconText}</div>
+                <div class="file-details" style="flex: 1; min-width: 0;">
+                    <label for="auditee_doc_${idx}" class="file-title" style="cursor: pointer; display: block; font-weight: 600; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${fn}">${fn}</label>
+                    <span class="file-meta" style="font-size: 0.72rem; color: var(--text-muted);">${f.size_str || 'Submitted Evidence'}</span>
+                </div>
+                <span class="badge-pill" style="color:var(--success); border-color:rgba(34,197,94,0.3); font-size: 0.7rem;">SUBMITTED</span>
+            `;
+            container.appendChild(card);
+        });
     } catch (err) {
         container.innerHTML = `<div class="error-msg">Error: ${err.message}</div>`;
     }
+}
+
+function selectAllAuditeeDocs(checked) {
+    const checkboxes = document.querySelectorAll(".auditee-doc-checkbox");
+    checkboxes.forEach(cb => cb.checked = checked);
+}
+
+async function runAnalysisOnSelectedAuditeeDocs() {
+    const selector = document.getElementById("auditee-session-selector");
+    if (!selector || !selector.value) {
+        alert("⚠️ Please select an auditee session first.");
+        return;
+    }
+    
+    const checkedDocs = Array.from(document.querySelectorAll(".auditee-doc-checkbox:checked")).map(cb => cb.value);
+    if (checkedDocs.length === 0) {
+        alert("⚠️ Please select at least one document to analyze.");
+        return;
+    }
+    
+    // Set active session to target auditee session
+    activeSessionId = selector.value;
+    document.getElementById("active-session-badge").innerText = `Session ID: ${activeSessionId}`;
+    
+    // Refresh evidence files list in main workspace
+    await loadEvidenceFileList();
+    
+    // Switch to Scan workspace tab
+    const scanTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Scan workspace"));
+    if (scanTabBtn) switchTab("tab-scan-workspace", scanTabBtn);
+    
+    // Trigger RAG Audit Scan
+    alert(`🚀 Starting RAG analysis on ${checkedDocs.length} selected document(s) for session ${activeSessionId.slice(0, 8)}...`);
+    triggerAuditAnalysis();
 }
 
 async function handleScopingUpload(event) {
@@ -1649,7 +1682,7 @@ async function deliverReportToAuditee() {
     if (!select) return;
     const auditeeId = select.value;
     if (!auditeeId) {
-        alert("⚠️ Please select a target auditee first.");
+        alert("⚠️ Please select a target auditee account first.");
         return;
     }
     
@@ -1658,7 +1691,7 @@ async function deliverReportToAuditee() {
     const body = new FormData();
     body.append("session_id", activeSessionId);
     body.append("auditee_id", auditeeId);
-    body.append("username", currentUser.username);
+    body.append("username", currentUser ? currentUser.username : "auditor@24");
     
     try {
         const response = await fetch(`${API_BASE}/audit/deliver`, {
@@ -1667,7 +1700,12 @@ async function deliverReportToAuditee() {
         });
         const data = await response.json();
         if (data.success) {
-            alert("✅ Report successfully published and delivered to the auditee!");
+            alert("✅ Report successfully published and recorded in the Submitted tab!");
+            
+            // Switch to Submitted Reports tab and refresh list
+            const submittedTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Submitted"));
+            if (submittedTabBtn) switchTab("tab-submitted-reports", submittedTabBtn);
+            else loadSubmittedReports();
         } else {
             alert(`Error: ${data.detail || "Delivery failed"}`);
         }
