@@ -71,16 +71,17 @@ body {
 }
 
 .auth-card {
-    background: rgba(15, 23, 42, 0.7);
-    border: 1px solid var(--border-color);
+    background: rgba(15, 23, 42, 0.85);
+    border: 1px solid rgba(148, 163, 184, 0.2);
     border-radius: 24px;
     padding: 34px 40px;
     width: 100%;
     max-width: 440px;
-    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
+    box-shadow: 0 25px 50px -12px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.1);
     backdrop-filter: blur(20px);
     transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
     transform: scale(0.95);
+    color: #f8fafc !important;
 }
 
 .overlay.active .auth-card {
@@ -108,13 +109,14 @@ body {
 .auth-header h2 {
     font-size: 1.7rem;
     font-weight: 800;
-    color: var(--text-main);
+    color: #ffffff !important;
     letter-spacing: -0.5px;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .auth-header p {
     font-size: 0.8rem;
-    color: var(--text-muted);
+    color: #94a3b8 !important;
     margin-top: 4px;
 }
 
@@ -127,9 +129,9 @@ body {
 }
 
 .role-btn {
-    background: rgba(30, 41, 59, 0.4);
-    border: 1px solid var(--border-color);
-    color: var(--text-muted);
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    color: #94a3b8 !important;
     padding: 10px 0;
     border-radius: 12px;
     font-weight: 600;
@@ -139,23 +141,39 @@ body {
 }
 
 .role-btn:hover {
-    background: rgba(30, 41, 59, 0.8);
-    color: var(--text-main);
+    background: rgba(30, 41, 59, 0.9);
+    color: #ffffff !important;
 }
 
 .role-btn.active {
-    background: rgba(37, 99, 235, 0.15);
-    border: 2px solid var(--primary);
-    color: var(--text-main);
-    box-shadow: 0 0 15px rgba(37, 99, 235, 0.2);
+    background: rgba(37, 99, 235, 0.3);
+    border: 2px solid #3b82f6 !important;
+    color: #ffffff !important;
+    box-shadow: 0 0 15px rgba(37, 99, 235, 0.4);
 }
 
 .role-desc {
     font-size: 0.76rem;
     text-align: center;
-    color: var(--text-muted);
+    color: #cbd5e1 !important;
     margin-bottom: 24px;
     height: 24px;
+}
+
+.auth-card label {
+    color: #94a3b8 !important;
+}
+
+.auth-card input[type="text"],
+.auth-card input[type="password"] {
+    background: rgba(15, 23, 42, 0.7) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(148, 163, 184, 0.3) !important;
+}
+
+.auth-card input[type="text"]::placeholder,
+.auth-card input[type="password"]::placeholder {
+    color: #64748b !important;
 }
 
 /* Input Fields and Forms */
@@ -1263,3 +1281,213 @@ button {
     gap: 12px;
     margin-top: 24px;
 }
+
+/* ── GUIDED USER FRIENDLY UX ANIMATIONS ── */
+@keyframes pulseGlow {
+    0% {
+        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6);
+    }
+    70% {
+        box-shadow: 0 0 0 12px rgba(37, 99, 235, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(37, 99, 235, 0);
+    }
+}
+
+.pulse-glowing-btn {
+    animation: pulseGlow 2.2s infinite;
+    font-weight: 700 !important;
+    letter-spacing: 0.5px;
+    border: 1px solid rgba(59, 130, 246, 0.6) !important;
+}
+
+.sev-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
+}
+
+.sev-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.4);
+}
+
+/* ── HIGH-CONTRAST MODERN LIGHT THEME (VERCEL/STRIPE AESTHETICS) ── */
+[data-theme="light"] {
+    --bg-dark: #f8fafc;
+    --bg-card: #ffffff;
+    --border-color: #cbd5e1;
+    --text-main: #0f172a;
+    --text-muted: #475569;
+}
+
+[data-theme="light"] body,
+[data-theme="light"] .workspace,
+[data-theme="light"] .main-content {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .sidebar {
+    background: #ffffff !important;
+    border-right: 1px solid #e2e8f0 !important;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.03) !important;
+}
+
+[data-theme="light"] .app-header,
+[data-theme="light"] .workspace-header {
+    background: #ffffff !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    color: #0f172a !important;
+}
+
+[data-theme="light"] #workspace-title {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] #active-session-badge,
+[data-theme="light"] #current-time-label {
+    color: #475569 !important;
+}
+
+[data-theme="light"] .tabs-header {
+    background: #f1f5f9 !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .tab-btn {
+    color: #475569 !important;
+    font-weight: 600 !important;
+}
+
+[data-theme="light"] .tab-btn.active {
+    background: #ffffff !important;
+    color: #2563eb !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06) !important;
+    border-bottom: 2px solid #2563eb !important;
+}
+
+/* Quick Start Guide Banner in Light Mode */
+[data-theme="light"] #quick-start-guide-banner {
+    background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%) !important;
+    border: 1px solid #bfdbfe !important;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.06) !important;
+}
+
+[data-theme="light"] #quick-start-guide-banner div,
+[data-theme="light"] #quick-start-guide-banner span {
+    color: #1e3a8a !important; /* Deep Navy high contrast */
+    font-weight: 500 !important;
+}
+
+[data-theme="light"] #quick-start-guide-banner strong {
+    color: #1d4ed8 !important;
+}
+
+/* Chat UI in Light Mode */
+[data-theme="light"] .chat-container {
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04) !important;
+}
+
+[data-theme="light"] .chat-sidebar {
+    background: #f8fafc !important;
+    border-right: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .chat-main {
+    background: #ffffff !important;
+}
+
+[data-theme="light"] .chat-header {
+    background: #f8fafc !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    color: #1e293b !important;
+}
+
+[data-theme="light"] #active-chat-title {
+    color: #1e293b !important;
+    font-weight: 700 !important;
+}
+
+[data-theme="light"] .chat-feed {
+    background: #f1f5f9 !important;
+}
+
+[data-theme="light"] .chat-bubble.assistant {
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04) !important;
+}
+
+[data-theme="light"] .chat-bubble.user {
+    background: #2563eb !important;
+    color: #ffffff !important;
+}
+
+[data-theme="light"] .chat-input-wrapper {
+    background: #ffffff !important;
+    border-top: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] #chat-input {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+/* Sidebar & Cards in Light Mode */
+[data-theme="light"] .finding-card, 
+[data-theme="light"] .profile-card,
+[data-theme="light"] .sidebar-section,
+[data-theme="light"] .report-delivery-card,
+[data-theme="light"] .delivery-panel,
+[data-theme="light"] .submitted-files-card,
+[data-theme="light"] .drop-zone {
+    background: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #0f172a !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04) !important;
+}
+
+[data-theme="light"] input, 
+[data-theme="light"] select, 
+[data-theme="light"] textarea {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .section-title {
+    color: #334155 !important;
+}
+
+[data-theme="light"] .radio-label,
+[data-theme="light"] .checkbox-item span,
+[data-theme="light"] label {
+    color: #1e293b !important;
+}
+
+[data-theme="light"] .checkbox-list {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .file-card {
+    background: #f8fafc !important;
+    border-color: #cbd5e1 !important;
+    color: #0f172a !important;
+}
+
+/* Theme Toggle Button in Light Mode */
+[data-theme="light"] #theme-toggle-btn {
+    background: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+}
+
+
+

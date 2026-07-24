@@ -1860,3 +1860,42 @@ function toggleChatSidebar() {
         toggleText.innerText = "Show Recents";
     }
 }
+
+/* ── INSTANT THEME SWITCHER (DARK / LIGHT) ── */
+function toggleAppTheme() {
+    const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
+    const newTheme = currentTheme === "dark" ? "light" : "dark";
+    
+    document.documentElement.setAttribute("data-theme", newTheme);
+    localStorage.setItem("aicyber_theme", newTheme);
+    
+    updateThemeToggleUI(newTheme);
+}
+
+function updateThemeToggleUI(theme) {
+    const icon = document.getElementById("theme-toggle-icon");
+    const text = document.getElementById("theme-toggle-text");
+    const btn = document.getElementById("theme-toggle-btn");
+    
+    if (icon && text) {
+        if (theme === "light") {
+            icon.innerText = "☀️";
+            text.innerText = "Light Mode";
+            if (btn) btn.style.background = "rgba(0,0,0,0.06)";
+        } else {
+            icon.innerText = "🌙";
+            text.innerText = "Dark Mode";
+            if (btn) btn.style.background = "rgba(255,255,255,0.08)";
+        }
+    }
+}
+
+// Restore user theme preference instantly on page load
+(function initAppTheme() {
+    const savedTheme = localStorage.getItem("aicyber_theme") || "dark";
+    document.documentElement.setAttribute("data-theme", savedTheme);
+    document.addEventListener("DOMContentLoaded", () => {
+        updateThemeToggleUI(savedTheme);
+    });
+})();
+

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AICyberAuditBox - Local Compliance Intelligence</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=20260724_v4">
     <!-- Load custom fonts from web-safe fallback, no internet required -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
@@ -120,24 +120,32 @@
 
             <!-- AI Engine Setup (Auditor/Admin Only) -->
             <div class="sidebar-section" id="sidebar-ai-setup">
-                <div class="section-title">AI ENGINE SETUP</div>
+                <div class="section-title" title="Choose the offline GGUF LLM model runner for inference">🤖 AI INFERENCE MODEL</div>
                 <div class="form-group">
-                    <label>Select Offline LLM</label>
+                    <label>Offline Model</label>
                     <select id="llm-model-select">
-                        <option value="Gemma 4 (e4b)">Gemma 4 (e4b)</option>
-                        <option value="Gemma 4 (2b)">Gemma 4 (2b)</option>
+                        <option value="Gemma 4 (e4b)">Gemma 4 (e4b) - Recommended</option>
+                        <option value="Gemma 4 (2b)">Gemma 4 (2b) - Fast</option>
                     </select>
                 </div>
             </div>
 
-            <!-- Compliance Standard (Auditor/Admin Only) -->
-            <div class="sidebar-section" id="sidebar-framework-setup">
-                <div class="section-title">COMPLIANCE FRAMEWORK</div>
+            <!-- STEP 1: Upload Evidence Files -->
+            <div class="sidebar-section" id="sidebar-file-upload-setup" style="border-left: 3px solid var(--primary);">
+                <div class="section-title" style="color: #60a5fa; font-weight: 700;">📤 STEP 1: UPLOAD EVIDENCE</div>
+                <input type="file" id="sidebar-evidence-file" multiple style="display: none;" onchange="handleSidebarUpload(event)">
+                <button class="btn-secondary" style="width: 100%; margin-bottom: 4px; font-size: 0.8rem; background: rgba(37, 99, 235, 0.15); border-color: rgba(37, 99, 235, 0.4);" onclick="document.getElementById('sidebar-evidence-file').click()">📁 Select PDF/DOCX Evidence Files</button>
+                <div id="sidebar-upload-status" style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 4px;">Upload policies, logs, or Nessus scans</div>
+            </div>
+
+            <!-- STEP 2: Compliance Standard -->
+            <div class="sidebar-section" id="sidebar-framework-setup" style="border-left: 3px solid #38bdf8;">
+                <div class="section-title" style="color: #38bdf8; font-weight: 700;">🌐 STEP 2: FRAMEWORK</div>
                 <div class="form-group">
-                    <label>Standard</label>
-                    <select id="framework-select" onchange="loadFrameworkControls()">
-                        <option value="All Standards">All Standards</option>
-                        <option value="ISO 27001">ISO 27001:2022</option>
+                    <label>Standard Target</label>
+                    <select id="framework-select" onchange="loadFrameworkControls()" title="Switch between ISO 27001 Information Security Controls and VAPT Technical Vulnerabilities">
+                        <option value="All Standards">All Standards (ISO + VAPT)</option>
+                        <option value="ISO 27001">ISO 27001:2022 Controls</option>
                         <option value="VAPT">VAPT Framework Controls</option>
                     </select>
                 </div>
@@ -145,7 +153,7 @@
 
             <!-- Custom Branding Expandable (Auditor/Admin Only) -->
             <div class="sidebar-section collapsible" id="sidebar-branding-setup">
-                <button class="collapse-header" onclick="toggleCollapsible('branding-fields')">
+                <button class="collapse-header" onclick="toggleCollapsible('branding-fields')" title="Customize report metadata for PDF/Word exports">
                     <span>👤 CUSTOM REPORT BRANDING</span>
                     <span class="arrow">▼</span>
                 </button>
@@ -185,10 +193,10 @@
             <div class="sidebar-section" id="sidebar-mode-setup">
                 <div class="section-title">🛡️ AUDIT MODE</div>
                 <div class="radio-group" id="audit-mode-radios">
-                    <label class="radio-label">
+                    <label class="radio-label" title="Full 4-Gate LangGraph Deep Analysis with BGE Cross-Encoder Reranking">
                         <input type="radio" name="audit-mode" value="Deep" checked> Deep Analysis
                     </label>
-                    <label class="radio-label">
+                    <label class="radio-label" title="Fast keyword RAG check (< 2s per control)">
                         <input type="radio" name="audit-mode" value="Quick"> Quick Scan
                     </label>
                 </div>
@@ -213,10 +221,10 @@
                 </div>
             </div>
 
-            <!-- Scope Checklist (Auditor/Admin Only) -->
-            <div class="sidebar-section" id="sidebar-checklist-setup">
-                <div class="section-title" id="active-scope-label">⚙️ ACTIVE SCOPE (0 selected)</div>
-                <input type="text" id="controls-search-input" placeholder="Search controls..." oninput="filterCheckboxList()" style="margin-bottom: 8px; padding: 6px 12px; font-size: 0.8rem; height: 32px;">
+            <!-- STEP 3: Scope Checklist -->
+            <div class="sidebar-section" id="sidebar-checklist-setup" style="border-left: 3px solid #a855f7;">
+                <div class="section-title" id="active-scope-label" style="color: #c084fc; font-weight: 700;">⚙️ STEP 3: SCOPE CHECKLIST</div>
+                <input type="text" id="controls-search-input" placeholder="🔍 Search controls checklist..." oninput="filterCheckboxList()" style="margin-bottom: 8px; padding: 6px 12px; font-size: 0.8rem; height: 32px;">
                 <div style="display: flex; gap: 8px; margin-bottom: 10px;">
                     <button class="btn-secondary" style="padding: 4px 8px; font-size: 0.72rem; flex: 1;" onclick="selectAllCheckboxes(true)">Select All</button>
                     <button class="btn-secondary" style="padding: 4px 8px; font-size: 0.72rem; flex: 1;" onclick="selectAllCheckboxes(false)">Deselect All</button>
@@ -226,17 +234,10 @@
                 </div>
             </div>
 
-            <!-- Sidebar Policy & Evidence Uploader (Auditor/Admin Only) -->
-            <div class="sidebar-section" id="sidebar-file-upload-setup">
-                <div class="section-title">📤 UPLOAD EVIDENCE FILES</div>
-                <input type="file" id="sidebar-evidence-file" multiple style="display: none;" onchange="handleSidebarUpload(event)">
-                <button class="btn-secondary" style="width: 100%; margin-bottom: 4px; font-size: 0.8rem;" onclick="document.getElementById('sidebar-evidence-file').click()">Upload Policies/Evidence</button>
-                <div id="sidebar-upload-status" style="font-size: 11px; color: var(--text-muted); text-align: center; margin-top: 4px;"></div>
-            </div>
-
-            <!-- Run Scan Trigger (Auditor/Admin Only) -->
-            <div class="sidebar-section" id="sidebar-action-setup">
-                <button id="run-analysis-btn" class="btn-primary" onclick="triggerAuditAnalysis()">▶ Run RAG Scan</button>
+            <!-- STEP 4: Run Scan Trigger -->
+            <div class="sidebar-section" id="sidebar-action-setup" style="border-left: 3px solid #10b981;">
+                <div class="section-title" style="color: #34d399; font-weight: 700;">▶ STEP 4: EXECUTE</div>
+                <button id="run-analysis-btn" class="btn-primary pulse-glowing-btn" onclick="triggerAuditAnalysis()" title="Start automated RAG security scan on selected evidence files">▶ Run RAG Scan</button>
                 <button id="stop-analysis-btn" class="btn-danger" onclick="stopAuditAnalysis()" style="display:none; width:100%; margin-top:6px;">⛔ Stop Analysis</button>
             </div>
             
@@ -250,10 +251,25 @@
                     <h2 id="workspace-title">Audit Records Workspace</h2>
                     <span id="active-session-badge">Session: No active session</span>
                 </div>
-                <div class="header-right">
-                    <span id="current-time-label">23 Jul 2026 19:43</span>
+                <div class="header-right" style="display: flex; align-items: center; gap: 12px;">
+                    <button id="theme-toggle-btn" onclick="toggleAppTheme()" class="btn-secondary" style="padding: 5px 12px; font-size: 0.78rem; display: flex; align-items: center; gap: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.2); cursor: pointer; border-radius: 8px;" title="Switch between Dark and Light mode">
+                        <span id="theme-toggle-icon">🌙</span> <span id="theme-toggle-text">Dark Mode</span>
+                    </button>
+                    <span id="current-time-label">24 Jul 2026</span>
                 </div>
             </header>
+
+            <!-- First-Time User Quick-Start Guide Banner -->
+            <div id="quick-start-guide-banner" style="display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(168, 85, 247, 0.15)); border: 1px solid rgba(59, 130, 246, 0.3); padding: 12px 18px; border-radius: 12px; margin: 16px 24px 0 24px;">
+                <div style="display: flex; align-items: center; gap: 12px; font-size: 0.85rem; color: #e2e8f0;">
+                    <span style="font-size: 1.2rem;">🚀</span>
+                    <div>
+                        <strong style="color: #60a5fa;">Quick Start Guide:</strong>
+                        <span>1. Upload Evidence Files in Left Sidebar ➔ 2. Select ISO 27001 or VAPT Standard ➔ 3. Click <b style="color: #34d399;">"▶ Run RAG Scan"</b>.</span>
+                    </div>
+                </div>
+                <button onclick="document.getElementById('quick-start-guide-banner').style.display='none'" style="background: transparent; border: none; color: #94a3b8; font-size: 1.1rem; cursor: pointer; padding: 0 4px;" title="Dismiss Guide">✕</button>
+            </div>
 
             <!-- Dynamic Tabs Header -->
             <nav class="tabs-header" id="tabs-bar">
@@ -623,6 +639,6 @@
     </div>
 
     <!-- Script loading -->
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260724_v4"></script>
 </body>
 </html>
