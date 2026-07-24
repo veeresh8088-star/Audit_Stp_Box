@@ -594,7 +594,7 @@ async function loadFrameworkControls() {
             const body = document.createElement("div");
             body.id = contentId;
             body.className = "clause-body";
-            body.style.cssText = "display: none; padding: 10px 12px 12px 12px; border-top: 1px solid rgba(148, 163, 184, 0.15); background: rgba(15, 23, 42, 0.6);";
+            body.style.cssText = "display: none; padding: 10px 12px 12px 12px; border-top: 1px solid rgba(148, 163, 184, 0.15); background: rgba(15, 23, 42, 0.6); max-height: 280px; overflow-y: auto; scrollbar-width: thin;";
 
             controls.forEach(c => {
                 const itemDiv = document.createElement("div");

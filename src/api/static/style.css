@@ -1867,7 +1867,19 @@ button {
 
 .clause-body {
     display: none;
-    padding: 10px 14px 14px 14px;
+    padding: 10px 12px 12px 12px;
+    border-top: 1px solid rgba(148, 163, 184, 0.15);
+    background: rgba(15, 23, 42, 0.6);
+    max-height: 280px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+
+#controls-checkbox-container {
+    max-height: 500px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
     border-top: 1px solid rgba(148, 163, 184, 0.1);
     background: rgba(15, 23, 42, 0.4);
 }
