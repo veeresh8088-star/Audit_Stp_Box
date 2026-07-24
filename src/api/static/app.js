@@ -3,7 +3,7 @@
 const API_BASE = "http://127.0.0.1:8000/api";
 
 let currentUser = null;
-let selectedRole = "admin";
+let selectedRole = "auditor";
 let activeTab = "";
 let activeSessionId = "";
 let activeSessionTitle = "";
@@ -31,9 +31,16 @@ document.addEventListener("DOMContentLoaded", () => {
     setInterval(updateHeaderClock, 30000);
     updateHeaderClock();
     
+    // Default render tabs & framework controls on page load so they are never blank
+    setupTabs(selectedRole || "auditor");
+    loadFrameworkControls();
+    
     // Auth selectors
-    document.getElementById("login-form").addEventListener("submit", handleLoginSubmit);
-    document.getElementById("otp-form").addEventListener("submit", handleOTPSubmit);
+    const loginForm = document.getElementById("login-form");
+    if (loginForm) loginForm.addEventListener("submit", handleLoginSubmit);
+    
+    const otpForm = document.getElementById("otp-form");
+    if (otpForm) otpForm.addEventListener("submit", handleOTPSubmit);
     
     // Setup File Upload drop zone
     setupFileDropZone();
@@ -45,7 +52,8 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     
     // Setup Edit Finding Modal form
-    document.getElementById("edit-finding-form").addEventListener("submit", handleEditFindingSubmit);
+    const editForm = document.getElementById("edit-finding-form");
+    if (editForm) editForm.addEventListener("submit", handleEditFindingSubmit);
 });
 
 function updateHeaderClock() {
@@ -276,30 +284,29 @@ async function initializeDashboard(user) {
 
 function setupTabs(role) {
     const tabsBar = document.getElementById("tabs-bar");
+    if (!tabsBar) return;
     tabsBar.innerHTML = "";
     
     let tabs = [];
     if (role === "auditee") {
         tabs = [
-            { id: "tab-upload-evidence", label: "Upload Evidence" },
-            { id: "tab-submitted-reports", label: "Submitted Reports" }
+            { id: "tab-upload-evidence", label: "📁 Upload Evidence" },
+            { id: "tab-submitted-reports", label: "📋 Submitted Reports" }
         ];
     } else if (role === "admin") {
         tabs = [
-            { id: "tab-ai-chat", label: "AI Assistant" },
-            { id: "tab-audit-records", label: "Audit Records" },
-            { id: "tab-audit-report", label: "Audit Report" },
+            { id: "tab-audit-records", label: "🛡️ Audit Records" },
+            { id: "tab-audit-report", label: "📋 Audit Report" },
             { id: "tab-manage-controls", label: "⚙️ Manage Controls" },
-            { id: "tab-admin-logs", label: "Admin Logs" }
+            { id: "tab-admin-logs", label: "📜 Admin Logs" }
         ];
     } else {
-        // Auditor
+        // Auditor Role
         tabs = [
-            { id: "tab-ai-chat", label: "AI Assistant" },
-            { id: "tab-auditee-docs", label: "Auditee Documents" },
-            { id: "tab-audit-records", label: "Audit Records" },
-            { id: "tab-audit-report", label: "Audit Report" },
-            { id: "tab-submitted-reports", label: "Submitted Reports" },
+            { id: "tab-audit-records", label: "🛡️ Audit Records" },
+            { id: "tab-auditee-docs", label: "📂 Auditee Documents" },
+            { id: "tab-audit-report", label: "📋 Audit Report" },
+            { id: "tab-submitted-reports", label: "📑 Submitted Reports" },
             { id: "tab-manage-controls", label: "⚙️ Manage Controls" }
         ];
     }
@@ -312,8 +319,10 @@ function setupTabs(role) {
         tabsBar.appendChild(btn);
     });
     
-    // Switch to first tab
-    switchTab(tabs[0].id, tabsBar.firstChild);
+    // Switch to first tab (Audit Records)
+    if (tabsBar.firstChild) {
+        switchTab(tabs[0].id, tabsBar.firstChild);
+    }
 }
 
 function switchTab(tabId, tabBtn) {
@@ -321,11 +330,12 @@ function switchTab(tabId, tabBtn) {
     
     // Active tabs navigation state
     document.querySelectorAll(".tab-link").forEach(btn => btn.classList.remove("active"));
-    tabBtn.classList.add("active");
+    if (tabBtn) tabBtn.classList.add("active");
     
     // Show active tab panel
     document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.remove("active"));
-    document.getElementById(tabId).classList.add("active");
+    const targetPanel = document.getElementById(tabId);
+    if (targetPanel) targetPanel.classList.add("active");
     
     // Perform tab-specific loading
     if (tabId === "tab-audit-records") {
@@ -345,8 +355,16 @@ function switchTab(tabId, tabBtn) {
 }
 
 function toggleCollapsible(contentId) {
-    const parent = document.getElementById(contentId).parentElement;
-    parent.classList.toggle("open");
+    const el = document.getElementById(contentId);
+    if (!el) return;
+    const parent = el.parentElement;
+    if (parent) parent.classList.toggle("open");
+    
+    if (el.style.display === "none" || !el.style.display) {
+        el.style.display = "block";
+    } else {
+        el.style.display = "none";
+    }
 }
 
 // ── SESSION MANAGEMENT ──
@@ -428,75 +446,81 @@ async function loadFrameworkControls() {
         const response = await fetch(`${API_BASE}/controls/framework`);
         const data = await response.json();
         
-        if (data.success) {
-            container.innerHTML = "";
-            const selectedStd = select.value;
-            const isVaptFramework = selectedStd.toUpperCase().includes("VAPT");
-            
-            // Toggle Audit Mode UI options to match Streamlit exact workflow
-            const radios = document.getElementById("audit-mode-radios");
-            const notice = document.getElementById("vapt-mode-notice");
-            if (isVaptFramework) {
-                if (radios) radios.style.display = "none";
-                if (notice) notice.style.display = "block";
-            } else {
-                if (radios) radios.style.display = "flex";
-                if (notice) notice.style.display = "none";
-            }
-
-            const filtered = data.controls.filter(c => {
-                if (selectedStd === "All Standards") return true;
-                const isVapt = (c.category || "").toUpperCase().includes("VAPT") || (c.use_case || "").toUpperCase().includes("VAPT");
-                if (selectedStd === "ISO 27001") return !isVapt;
-                return isVapt;
-            });
-            
-            filtered.forEach(c => {
-                const div = document.createElement("div");
-                div.className = "checkbox-row";
-                
-                const input = document.createElement("input");
-                input.type = "checkbox";
-                input.value = c.sl;
-                input.id = `ctrl_chk_${c.sl}`;
-                input.checked = true;
-                input.onchange = updateSelectedScopeCount;
-                
-                const label = document.createElement("label");
-                label.htmlFor = `ctrl_chk_${c.sl}`;
-                const displayName = c.label.length > 50 ? c.label.slice(0, 47) + "..." : c.label;
-                label.innerText = `${c.sl} - ${displayName}`;
-                label.title = c.use_case;
-                
-                div.appendChild(input);
-                div.appendChild(label);
-                container.appendChild(div);
-            });
-            
-            updateSelectedScopeCount();
-        } else {
-            container.innerHTML = "<div style='font-size:11px;color:var(--error);padding:8px;'>Failed to load controls checklist.</div>";
+        let controlsToRender = DEFAULT_FRAMEWORK_CONTROLS;
+        if (data.success && data.controls && data.controls.length > 0) {
+            controlsToRender = data.controls;
         }
+        
+        container.innerHTML = "";
+        const selectedStd = select ? select.value : "All Standards";
+        const isVaptFramework = selectedStd.toUpperCase().includes("VAPT");
+        
+        // Toggle Audit Mode UI options
+        const radios = document.getElementById("audit-mode-radios");
+        const notice = document.getElementById("vapt-mode-notice");
+        if (isVaptFramework) {
+            if (radios) radios.style.display = "none";
+            if (notice) notice.style.display = "block";
+        } else {
+            if (radios) radios.style.display = "flex";
+            if (notice) notice.style.display = "none";
+        }
+
+        const filtered = controlsToRender.filter(c => {
+            if (selectedStd === "All Standards") return true;
+            const isVapt = (c.category || "").toUpperCase().includes("VAPT") || (c.use_case || "").toUpperCase().includes("VAPT");
+            if (selectedStd === "ISO 27001") return !isVapt;
+            return isVapt;
+        });
+        
+        filtered.forEach(c => {
+            const div = document.createElement("div");
+            div.className = "checkbox-item";
+            div.style.cssText = "display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin-bottom: 2px;";
+            
+            const input = document.createElement("input");
+            input.type = "checkbox";
+            input.value = c.sl;
+            input.id = `ctrl_chk_${c.sl}`;
+            input.checked = true;
+            input.onchange = updateSelectedScopeCount;
+            
+            const label = document.createElement("label");
+            label.htmlFor = `ctrl_chk_${c.sl}`;
+            label.style.cssText = "cursor: pointer; font-size: 0.78rem; color: var(--text-main); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+            const displayName = c.label.length > 48 ? c.label.slice(0, 45) + "..." : c.label;
+            label.innerText = `${c.sl} - ${displayName}`;
+            label.title = c.use_case || c.label;
+            
+            div.appendChild(input);
+            div.appendChild(label);
+            container.appendChild(div);
+        });
+        
+        updateSelectedScopeCount();
     } catch (err) {
-        container.innerHTML = `<div style='font-size:11px;color:var(--error);padding:8px;'>Error: ${err.message}</div>`;
+        container.innerHTML = `<div style='font-size:11px;color:var(--error);padding:8px;'>Loaded fallback controls.</div>`;
     }
 }
 
 function updateSelectedScopeCount() {
     const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
     const selected = Array.from(checkboxes).filter(cb => cb.checked);
-    document.getElementById("active-scope-label").innerText = `⚙️ ACTIVE SCOPE (${selected.length} of ${checkboxes.length} selected)`;
+    const label = document.getElementById("active-scope-label");
+    if (label) {
+        label.innerText = `⚙️ SCOPE CHECKLIST (${selected.length} of ${checkboxes.length} selected)`;
+    }
 }
 
 function toggleScopingMode() {
     const scopingMode = document.querySelector("input[name='scoping-mode']:checked").value;
     const fileBox = document.getElementById("scoping-file-container");
-    fileBox.style.display = scopingMode === "Auto" ? "block" : "none";
+    if (fileBox) fileBox.style.display = scopingMode === "Auto" ? "block" : "none";
 }
 
 function filterCheckboxList() {
     const q = document.getElementById("controls-search-input").value.toLowerCase();
-    const rows = document.querySelectorAll("#controls-checkbox-container .checkbox-row");
+    const rows = document.querySelectorAll("#controls-checkbox-container .checkbox-item");
     rows.forEach(row => {
         const text = row.innerText.toLowerCase();
         row.style.display = text.includes(q) ? "flex" : "none";
@@ -504,7 +528,7 @@ function filterCheckboxList() {
 }
 
 function selectAllCheckboxes(checked) {
-    const rows = document.querySelectorAll("#controls-checkbox-container .checkbox-row");
+    const rows = document.querySelectorAll("#controls-checkbox-container .checkbox-item");
     rows.forEach(row => {
         if (row.style.display !== "none") {
             const cb = row.querySelector("input[type='checkbox']");
@@ -765,16 +789,19 @@ async function stopAuditAnalysis() {
 
 async function loadFindings() {
     const container = document.getElementById("findings-container");
+    if (!container) return;
     container.innerHTML = `<div class="empty-state">Loading findings from ShaktiDB...</div>`;
     
+    const userRole = currentUser ? currentUser.role : (selectedRole || "auditor");
+    
     try {
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser.role}`);
+        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${userRole}`);
         const data = await response.json();
         
         const banner = document.getElementById("shakti-commit-banner");
         const bannerText = document.getElementById("shakti-banner-text");
 
-        if (data.success && data.findings.length > 0) {
+        if (data.success && data.findings && data.findings.length > 0) {
             findingsList = data.findings;
             renderFindingsList();
             calculateSeverityStats();
@@ -784,16 +811,16 @@ async function loadFindings() {
                 if (data.session_title && data.session_title.includes("Finalized")) {
                     banner.style.background = "rgba(16, 185, 129, 0.12)";
                     banner.style.borderColor = "rgba(52, 211, 153, 0.35)";
-                    bannerText.innerHTML = `✅ <b>Committed to Shakthi DB:</b> ${data.findings.length} audit record(s) finalized and locked.`;
+                    if (bannerText) bannerText.innerHTML = `✅ <b>Committed to Shakthi DB:</b> ${data.findings.length} audit record(s) finalized and locked.`;
                 } else {
                     banner.style.background = "rgba(245, 158, 11, 0.12)";
                     banner.style.borderColor = "rgba(245, 158, 11, 0.35)";
-                    bannerText.innerHTML = `⚠️ <b>Notice:</b> ${data.findings.length} finding(s) loaded. Review records below and click "Save to Shakthi DB" to commit.`;
+                    if (bannerText) bannerText.innerHTML = `⚠️ <b>Notice:</b> ${data.findings.length} finding(s) loaded. Review records below and click "Save to Shakthi DB" to commit.`;
                 }
             }
         } else {
             if (banner) banner.style.display = "none";
-            container.innerHTML = `<div class="empty-state">No compliance gaps recorded. Configure scope and click "Run RAG Scan" above!</div>`;
+            container.innerHTML = `<div class="empty-state">No compliance gaps recorded for session ${activeSessionId.slice(0, 8) || 'draft'}. Configure scope and click "Step 3: Run RAG Scan" above!</div>`;
         }
     } catch (err) {
         container.innerHTML = `<div class="error-msg">Failed to query findings: ${err.message}</div>`;
@@ -1819,10 +1846,22 @@ async function clearChatSession(sessionId, event) {
     }
 }
 
+function getBrandingQueryParams() {
+    const firm = encodeURIComponent(document.getElementById("brand-firm")?.value || "");
+    const auditor = encodeURIComponent(document.getElementById("brand-auditor")?.value || "");
+    const reviewer = encodeURIComponent(document.getElementById("brand-reviewer")?.value || "");
+    const approver = encodeURIComponent(document.getElementById("brand-approver")?.value || "");
+    const docid = encodeURIComponent(document.getElementById("brand-docid")?.value || "");
+    const client = encodeURIComponent(document.getElementById("brand-client")?.value || "");
+    const email = encodeURIComponent(document.getElementById("brand-email")?.value || "");
+    return `&auditor_firm=${firm}&auditor_lead=${auditor}&auditor_reviewer=${reviewer}&auditor_approver=${approver}&document_id=${docid}&client_contact=${client}&client_email=${email}`;
+}
+
 async function exportFindingsDOCX() {
     try {
+        const brandingParams = getBrandingQueryParams();
         const link = document.createElement("a");
-        link.href = `${API_BASE}/audit/export/docx?session_id=${activeSessionId}`;
+        link.href = `${API_BASE}/audit/export/docx?session_id=${activeSessionId}${brandingParams}`;
         link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.docx`);
         document.body.appendChild(link);
         link.click();
@@ -1834,14 +1873,42 @@ async function exportFindingsDOCX() {
 
 async function exportFindingsPDF() {
     try {
+        const brandingParams = getBrandingQueryParams();
         const link = document.createElement("a");
-        link.href = `${API_BASE}/audit/export/pdf?session_id=${activeSessionId}`;
+        link.href = `${API_BASE}/audit/export/pdf?session_id=${activeSessionId}${brandingParams}`;
         link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.pdf`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
     } catch (err) {
         alert("Error exporting PDF report: " + err.message);
+    }
+}
+
+async function commitSessionToShaktiDB() {
+    if (!activeSessionId) {
+        alert("⚠️ No active audit session selected.");
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}`, {
+            method: "PUT"
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Failed to commit session to ShaktiDB.");
+        
+        // Hide unreviewed warning banner
+        const banner = document.getElementById("shakti-commit-banner");
+        if (banner) banner.style.display = "none";
+        
+        // Real-time update recent sessions list in sidebar
+        loadRecentSessionsList();
+        loadFindings();
+        
+        alert(`💾 Session ${activeSessionId.slice(0, 8)}... successfully committed to Shakthi DB!`);
+    } catch (err) {
+        alert(`Failed to commit session: ${err.message}`);
     }
 }
 
@@ -1898,4 +1965,191 @@ function updateThemeToggleUI(theme) {
         updateThemeToggleUI(savedTheme);
     });
 })();
+
+/* ── FLOATING AI COPILOT WIDGET (GEMINI STYLE) ── */
+function toggleCopilotDrawer() {
+    const drawer = document.getElementById("ai-copilot-drawer");
+    if (!drawer) return;
+    
+    if (drawer.style.display === "none" || !drawer.style.display) {
+        drawer.style.display = "flex";
+        updateCopilotContextBadge();
+    } else {
+        drawer.style.display = "none";
+    }
+}
+
+function updateCopilotContextBadge() {
+    const badge = document.getElementById("copilot-page-context");
+    if (!badge) return;
+    
+    let tabName = "Audit Workspace";
+    if (activeTab === "tab-audit-records") tabName = "Audit Records Findings";
+    else if (activeTab === "tab-upload-evidence") tabName = "Auditee Document Uploads";
+    else if (activeTab === "tab-audit-report") tabName = "Audit Delivery Report";
+    else if (activeTab === "tab-manage-controls") tabName = "Controls Management";
+    else if (activeTab === "tab-ai-chat") tabName = "Full AI Chat Assistant";
+    
+    badge.innerText = `📍 Active Context: ${tabName}`;
+}
+
+function handleCopilotKeyPress(event) {
+    if (event.key === "Enter") {
+        sendCopilotMessage();
+    }
+}
+
+function sendQuickCopilotPrompt(text) {
+    const input = document.getElementById("copilot-input");
+    if (input) {
+        input.value = text;
+        sendCopilotMessage();
+    }
+}
+
+async function sendCopilotMessage() {
+    const input = document.getElementById("copilot-input");
+    const feed = document.getElementById("copilot-chat-feed");
+    const indicator = document.getElementById("copilot-thinking-indicator");
+    
+    if (!input || !feed) return;
+    const msgText = input.value.trim();
+    if (!msgText) return;
+    
+    input.value = "";
+    
+    // Render user message bubble
+    const userBubble = document.createElement("div");
+    userBubble.className = "chat-bubble user";
+    userBubble.innerHTML = `<p>${escapeHtml(msgText)}</p>`;
+    feed.appendChild(userBubble);
+    feed.scrollTop = feed.scrollHeight;
+    
+    if (indicator) indicator.style.display = "block";
+    
+    const selectedModel = document.getElementById("llm-model-select")?.value || "Gemma 4 (e4b)";
+    const uName = currentUser ? currentUser.username : "auditor";
+    
+    try {
+        let activeContext = `[Context: Active Tab = ${activeTab}, Session = ${activeSessionId}]`;
+        const response = await fetch(`${API_BASE}/audit/chats/send`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: activeSessionId,
+                message: `${activeContext}\n${msgText}`,
+                username: uName,
+                model_choice: selectedModel
+            })
+        });
+        
+        const data = await response.json();
+        if (indicator) indicator.style.display = "none";
+        
+        if (!response.ok) throw new Error(data.detail || "Copilot failed to respond.");
+        
+        const replyText = data.response || data.reply || "No response received from local AI model.";
+        
+        const aiBubble = document.createElement("div");
+        aiBubble.className = "chat-bubble assistant";
+        aiBubble.innerHTML = `<p>${escapeHtml(replyText).replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</p>`;
+        feed.appendChild(aiBubble);
+        feed.scrollTop = feed.scrollHeight;
+    } catch (err) {
+        if (indicator) indicator.style.display = "none";
+        const errBubble = document.createElement("div");
+        errBubble.className = "chat-bubble assistant";
+        errBubble.innerHTML = `<p style="color: var(--error);">⚠️ Error: ${err.message}</p>`;
+        feed.appendChild(errBubble);
+        feed.scrollTop = feed.scrollHeight;
+    }
+}
+
+/* ── SIDEBAR COLLAPSE TOGGLE (◀ / ▶) ── */
+function toggleSidebarCollapse() {
+    const sidebar = document.getElementById("main-sidebar");
+    const toggleBtn = document.getElementById("sidebar-toggle-btn");
+    if (!sidebar || !toggleBtn) return;
+    
+    if (sidebar.classList.contains("collapsed")) {
+        sidebar.classList.remove("collapsed");
+        sidebar.style.width = "300px";
+        sidebar.style.minWidth = "300px";
+        toggleBtn.innerText = "◀";
+        toggleBtn.title = "Collapse Sidebar";
+    } else {
+        sidebar.classList.add("collapsed");
+        sidebar.style.width = "64px";
+        sidebar.style.minWidth = "64px";
+        toggleBtn.innerText = "▶";
+        toggleBtn.title = "Expand Sidebar";
+    }
+}
+
+/* ── AUDIT SESSION MANAGER (+ New Session & Recent Sessions) ── */
+function startNewAuditSession() {
+    activeSessionId = generateUUID();
+    document.getElementById("active-session-badge").innerText = `Session: ${activeSessionId.slice(0, 8)}...`;
+    
+    // Clear findings and upload status
+    const findingsContainer = document.getElementById("findings-container");
+    if (findingsContainer) {
+        findingsContainer.innerHTML = `<div class="empty-state">New Audit Session Started (${activeSessionId.slice(0, 8)}). Upload evidence files above and click "▶ Step 3: Run RAG Scan".</div>`;
+    }
+    
+    const uploadStatus = document.getElementById("sidebar-upload-status");
+    if (uploadStatus) uploadStatus.innerText = "No files selected";
+    
+    loadRecentSessionsList();
+    alert(`✨ New Audit Session initialized!\nSession ID: ${activeSessionId}`);
+}
+
+async function loadRecentSessionsList() {
+    const container = document.getElementById("recent-sessions-list");
+    if (!container) return;
+    
+    try {
+        const response = await fetch(`${API_BASE}/audit/sessions`);
+        const data = await response.json();
+        
+        if (data.success && data.sessions.length > 0) {
+            container.innerHTML = "";
+            data.sessions.slice(0, 8).forEach(sess => {
+                const item = document.createElement("div");
+                item.className = "recent-session-item";
+                item.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: rgba(255,255,255,0.05); border-radius: 6px; cursor: pointer; font-size: 0.73rem; transition: background 0.2s;";
+                item.onclick = () => switchActiveAuditSession(sess.session_id);
+                
+                const isCurrent = sess.session_id === activeSessionId;
+                item.innerHTML = `
+                    <div style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 140px;">
+                        <span style="font-weight: 600; color: ${isCurrent ? '#60a5fa' : 'var(--text-main)'};">${sess.session_id.slice(0, 8)}...</span>
+                        <div style="font-size: 0.65rem; color: var(--text-muted);">${sess.findings_count || 0} findings</div>
+                    </div>
+                    <span class="badge-pill" style="font-size: 0.62rem; padding: 2px 4px; border-color: ${sess.status === 'Reviewed & Finalized' ? 'rgba(52,211,153,0.4)' : 'rgba(245,158,11,0.4)'}; color: ${sess.status === 'Reviewed & Finalized' ? '#34d399' : '#fbbf24'};">${sess.status === 'Reviewed & Finalized' ? 'FINAL' : 'OPEN'}</span>
+                `;
+                container.appendChild(item);
+            });
+        } else {
+            container.innerHTML = `<div style="font-size: 0.72rem; color: var(--text-muted); text-align: center; padding: 6px;">No recent sessions found</div>`;
+        }
+    } catch (err) {
+        container.innerHTML = `<div style="font-size: 0.72rem; color: var(--text-muted); text-align: center; padding: 6px;">Ready</div>`;
+    }
+}
+
+function switchActiveAuditSession(sessionId) {
+    activeSessionId = sessionId;
+    document.getElementById("active-session-badge").innerText = `Session: ${activeSessionId.slice(0, 8)}...`;
+    loadFindings();
+    loadRecentSessionsList();
+    alert(`📂 Switched to Audit Session: ${sessionId.slice(0, 8)}...`);
+}
+
+// Load recent sessions on page load
+window.addEventListener("DOMContentLoaded", () => {
+    setTimeout(loadRecentSessionsList, 1500);
+});
+
+
 
