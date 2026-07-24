@@ -259,45 +259,6 @@
                 <!-- Tabs are injected here based on user role -->
             </nav>
 
-            <!-- MAIN WORKSPACE TOP ACTION BAR (STEPS 1, 2, 3) -->
-            <div id="main-action-bar" style="display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--bg-card); border: 1px solid var(--border-color); padding: 14px 20px; margin: 16px 24px 0 24px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);">
-                
-                <!-- CONTROL #1: Upload Evidence Files -->
-                <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
-                    <input type="file" id="sidebar-evidence-file" multiple style="display: none;" onchange="handleSidebarUpload(event)">
-                    <button class="btn-secondary" style="padding: 8px 14px; font-size: 0.82rem; background: rgba(37, 99, 235, 0.15); border-color: rgba(37, 99, 235, 0.4); color: #60a5fa; font-weight: 600; white-space: nowrap;" onclick="document.getElementById('sidebar-evidence-file').click()" title="Upload PDF, DOCX, CSV evidence files">📁 Step 1: Upload Evidence</button>
-                    <div id="sidebar-upload-status" style="font-size: 0.78rem; color: var(--text-muted); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;">No files selected</div>
-                </div>
-
-                <!-- CONTROL #2: Framework Target Selector -->
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin: 0; white-space: nowrap;">Step 2: Target Framework</label>
-                    <select id="framework-select" onchange="loadFrameworkControls()" style="padding: 6px 12px; font-size: 0.82rem; min-width: 180px;" title="Select compliance standard target">
-                        <option value="All Standards">All Standards (ISO + VAPT)</option>
-                        <option value="ISO 27001">ISO 27001:2022 Controls</option>
-                        <option value="VAPT">VAPT Framework Controls</option>
-                    </select>
-                </div>
-
-                <!-- CONTROL #3: Execute Scan CTA Button -->
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <button id="run-analysis-btn" class="btn-primary pulse-glowing-btn" onclick="triggerAuditAnalysis()" style="padding: 9px 20px; font-size: 0.86rem; border-radius: 10px;" title="Start automated RAG security audit on selected evidence files">▶ Step 3: Run RAG Scan</button>
-                    <button id="stop-analysis-btn" class="btn-danger" onclick="stopAuditAnalysis()" style="display:none; padding: 9px 14px; font-size: 0.82rem; border-radius: 10px;">⛔ Stop</button>
-                </div>
-            </div>
-
-            <!-- First-Time User Quick-Start Guide Banner -->
-            <div id="quick-start-guide-banner" style="display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(168, 85, 247, 0.15)); border: 1px solid rgba(59, 130, 246, 0.3); padding: 12px 18px; border-radius: 12px; margin: 16px 24px 0 24px;">
-                <div style="display: flex; align-items: center; gap: 12px; font-size: 0.85rem; color: #e2e8f0;">
-                    <span style="font-size: 1.2rem;">🚀</span>
-                    <div>
-                        <strong style="color: #60a5fa;">Quick Start Guide:</strong>
-                        <span>1. Upload Evidence Files in Left Sidebar ➔ 2. Select ISO 27001 or VAPT Standard ➔ 3. Click <b style="color: #34d399;">"▶ Run RAG Scan"</b>.</span>
-                    </div>
-                </div>
-                <button onclick="document.getElementById('quick-start-guide-banner').style.display='none'" style="background: transparent; border: none; color: #94a3b8; font-size: 1.1rem; cursor: pointer; padding: 0 4px;" title="Dismiss Guide">✕</button>
-            </div>
-
             <!-- Tab Content Panel -->
             <div class="tabs-content" id="tabs-content-body">
                 
@@ -359,6 +320,45 @@
 
                 <!-- ── TAB: SCAN WORKSPACE ── -->
                 <section id="tab-scan-workspace" class="tab-panel">
+                    <!-- MAIN WORKSPACE TOP ACTION BAR (STEPS 1, 2, 3) -->
+                    <div id="main-action-bar" style="display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--bg-card); border: 1px solid var(--border-color); padding: 14px 20px; margin: 0 0 16px 0; border-radius: 16px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);">
+                        
+                        <!-- CONTROL #1: Upload Evidence Files -->
+                        <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                            <input type="file" id="sidebar-evidence-file" multiple style="display: none;" onchange="handleSidebarUpload(event)">
+                            <button class="btn-secondary" style="padding: 8px 14px; font-size: 0.82rem; background: rgba(37, 99, 235, 0.15); border-color: rgba(37, 99, 235, 0.4); color: #60a5fa; font-weight: 600; white-space: nowrap;" onclick="document.getElementById('sidebar-evidence-file').click()" title="Upload PDF, DOCX, CSV evidence files">📁 Step 1: Upload Evidence</button>
+                            <div id="sidebar-upload-status" style="font-size: 0.78rem; color: var(--text-muted); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;">No files selected</div>
+                        </div>
+
+                        <!-- CONTROL #2: Framework Target Selector -->
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin: 0; white-space: nowrap;">Step 2: Target Framework</label>
+                            <select id="framework-select" onchange="loadFrameworkControls()" style="padding: 6px 12px; font-size: 0.82rem; min-width: 180px;" title="Select compliance standard target">
+                                <option value="All Standards">All Standards (ISO + VAPT)</option>
+                                <option value="ISO 27001">ISO 27001:2022 Controls</option>
+                                <option value="VAPT">VAPT Framework Controls</option>
+                            </select>
+                        </div>
+
+                        <!-- CONTROL #3: Execute Scan CTA Button -->
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <button id="run-analysis-btn" class="btn-primary pulse-glowing-btn" onclick="triggerAuditAnalysis()" style="padding: 9px 20px; font-size: 0.86rem; border-radius: 10px;" title="Start automated RAG security audit on selected evidence files">▶ Step 3: Run RAG Scan</button>
+                            <button id="stop-analysis-btn" class="btn-danger" onclick="stopAuditAnalysis()" style="display:none; padding: 9px 14px; font-size: 0.82rem; border-radius: 10px;">⛔ Stop</button>
+                        </div>
+                    </div>
+
+                    <!-- First-Time User Quick-Start Guide Banner -->
+                    <div id="quick-start-guide-banner" style="display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(168, 85, 247, 0.15)); border: 1px solid rgba(59, 130, 246, 0.3); padding: 12px 18px; border-radius: 12px; margin: 0 0 16px 0;">
+                        <div style="display: flex; align-items: center; gap: 12px; font-size: 0.85rem; color: #e2e8f0;">
+                            <span style="font-size: 1.2rem;">🚀</span>
+                            <div>
+                                <strong style="color: #60a5fa;">Quick Start Guide:</strong>
+                                <span>1. Upload Evidence Files in Left Sidebar ➔ 2. Select ISO 27001 or VAPT Standard ➔ 3. Click <b style="color: #34d399;">"▶ Run RAG Scan"</b>.</span>
+                            </div>
+                        </div>
+                        <button onclick="document.getElementById('quick-start-guide-banner').style.display='none'" style="background: transparent; border: none; color: #94a3b8; font-size: 1.1rem; cursor: pointer; padding: 0 4px;" title="Dismiss Guide">✕</button>
+                    </div>
+
                     <!-- Uploaded Evidence Section Card -->
                     <div class="modern-evidence-card">
                         <div class="evidence-header-row">
@@ -719,6 +719,6 @@
     </div>
 
     <!-- Script loading -->
-    <script src="/static/app.js?v=20260724_v19"></script>
+    <script src="/static/app.js?v=20260724_v20"></script>
 </body>
 </html>
