@@ -882,15 +882,13 @@ async function loadFindings() {
         const data = await response.json();
         
         const banner = document.getElementById("shakti-commit-banner");
-        const bannerText = document.getElementById("shakti-banner-text");
+        if (banner) {
+            banner.style.display = "flex";
+            if (data.success && data.findings && data.findings.length > 0) {
+                findingsList = data.findings;
+                renderFindingsList();
+                calculateSeverityStats();
 
-        if (data.success && data.findings && data.findings.length > 0) {
-            findingsList = data.findings;
-            renderFindingsList();
-            calculateSeverityStats();
-
-            if (banner) {
-                banner.style.display = "flex";
                 if (data.session_title && data.session_title.includes("Finalized")) {
                     banner.style.background = "rgba(16, 185, 129, 0.12)";
                     banner.style.borderColor = "rgba(52, 211, 153, 0.35)";
@@ -900,10 +898,12 @@ async function loadFindings() {
                     banner.style.borderColor = "rgba(245, 158, 11, 0.35)";
                     if (bannerText) bannerText.innerHTML = `⚠️ <b>Notice:</b> ${data.findings.length} finding(s) loaded. Review records below and click "Save to Shakthi DB" to commit.`;
                 }
+            } else {
+                banner.style.background = "rgba(245, 158, 11, 0.12)";
+                banner.style.borderColor = "rgba(245, 158, 11, 0.35)";
+                if (bannerText) bannerText.innerHTML = `⚠️ <b>Notice:</b> No findings recorded yet. Go to <b>Scan workspace</b> tab, upload evidence, and click <b>"▶ Step 3: Run RAG Scan"</b>.`;
+                container.innerHTML = `<div class="empty-state">No compliance gaps recorded for session ${activeSessionId.slice(0, 8) || 'draft'}. Switch to <b>Scan workspace</b> tab to upload evidence and run RAG scan!</div>`;
             }
-        } else {
-            if (banner) banner.style.display = "none";
-            container.innerHTML = `<div class="empty-state">No compliance gaps recorded for session ${activeSessionId.slice(0, 8) || 'draft'}. Configure scope and click "Step 3: Run RAG Scan" above!</div>`;
         }
     } catch (err) {
         container.innerHTML = `<div class="error-msg">Failed to query findings: ${err.message}</div>`;
