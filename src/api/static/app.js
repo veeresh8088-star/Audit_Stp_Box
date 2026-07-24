@@ -1717,7 +1717,7 @@ async function deliverReportToAuditee() {
 async function loadSubmittedReports() {
     const container = document.getElementById("submitted-reports-container");
     if (!container) return;
-    container.innerHTML = `<div class="empty-state">Loading submitted reports...</div>`;
+    container.innerHTML = `<div class="empty-state">Loading submitted reports from Shakthi DB...</div>`;
     
     try {
         let url = `${API_BASE}/audit/sessions`;
@@ -1730,49 +1730,72 @@ async function loadSubmittedReports() {
         
         if (data.success && data.sessions.length > 0) {
             container.innerHTML = "";
-            const reports = data.sessions.filter(s => s.status !== "Draft" || (currentUser && currentUser.role !== "auditee"));
+            const seen = new Set();
+            const reports = data.sessions.filter(s => {
+                if (!s.session_id || seen.has(s.session_id)) return false;
+                
+                const title = (s.session_title || "").toLowerCase();
+                const st = (s.status || "Draft").toLowerCase();
+                
+                // Exclude chat sessions and error logs
+                if (title.includes("chat") || title.includes("error")) return false;
+                
+                // For auditee, only show sent/delivered/completed reports
+                if (currentUser && currentUser.role === "auditee") {
+                    return st.includes("sent") || st.includes("deliver") || st.includes("complet") || st.includes("submit");
+                }
+                
+                // For auditor/admin, show non-draft submitted/delivered or finalized reports
+                const isSubmitted = st.includes("sent") || st.includes("deliver") || st.includes("complet") || st.includes("submit") || st.includes("pending") || title.includes("finalized");
+                if (isSubmitted) {
+                    seen.add(s.session_id);
+                    return true;
+                }
+                return false;
+            });
             
             if (reports.length === 0) {
-                container.innerHTML = `<div class="empty-state">No submitted audit reports available for inspection.</div>`;
+                container.innerHTML = `<div class="empty-state">No submitted audit reports available yet. Publish a report from the <b>Report</b> tab to view it here.</div>`;
                 return;
             }
             
             reports.forEach(r => {
                 const card = document.createElement("div");
                 card.className = "report-card";
-                card.style = "background: rgba(30, 41, 59, 0.4); border: 1px solid rgba(148, 163, 184, 0.1); border-radius: 8px; padding: 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;";
+                card.style.cssText = "background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px; padding: 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;";
                 
                 let badgeColor = "var(--text-muted)";
                 let badgeBorder = "rgba(148, 163, 184, 0.2)";
-                if (r.status === "Sent to Auditee" || r.status === "Completed") {
-                    badgeColor = "var(--success)";
-                    badgeBorder = "rgba(34, 197, 94, 0.3)";
-                } else if (r.status === "Pending Review") {
-                    badgeColor = "var(--warning)";
-                    badgeBorder = "rgba(234, 179, 8, 0.3)";
+                const statusStr = (r.status || "Submitted").toUpperCase();
+                if (statusStr.includes("SENT") || statusStr.includes("DELIVER") || statusStr.includes("COMPLET")) {
+                    badgeColor = "#10b981";
+                    badgeBorder = "rgba(16, 185, 129, 0.4)";
+                } else if (statusStr.includes("PENDING") || statusStr.includes("REVIEW")) {
+                    badgeColor = "#f59e0b";
+                    badgeBorder = "rgba(245, 158, 11, 0.4)";
                 }
                 
                 card.innerHTML = `
                     <div>
-                        <h4 style="margin:0 0 6px 0; color:var(--text-primary); font-size:1.05rem;">${r.session_title}</h4>
-                        <div style="font-size:0.8rem; color:var(--text-muted); display:flex; gap:16px;">
-                            <span>Standard: <b>${r.framework}</b></span>
-                            <span>Date: <b>${r.created_at.slice(0, 10)}</b></span>
-                            <span>Compliance Score: <b style="color:var(--primary)">${r.score_percent}%</b></span>
+                        <h4 style="margin: 0 0 6px 0; color: var(--text-main); font-size: 1.05rem; font-weight: 700;">${r.session_title}</h4>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 16px; align-items: center;">
+                            <span>Standard: <b style="color: #60a5fa;">${r.framework || 'ISO 27001'}</b></span>
+                            <span>Date: <b>${(r.created_at || '').slice(0, 10) || 'Recent'}</b></span>
+                            <span>Compliance Score: <b style="color: #10b981;">${r.score_percent || 0}%</b></span>
                         </div>
                     </div>
-                    <div style="display:flex; align-items:center; gap:12px;">
-                        <span class="badge-pill" style="color:${badgeColor}; border-color:${badgeBorder};">${r.status.toUpperCase()}</span>
-                        <button class="btn-secondary" style="padding:6px 12px; font-size:0.75rem;" onclick="exportReportCSV('${r.session_id}')">📥 Export</button>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span class="badge-pill" style="color: ${badgeColor}; border-color: ${badgeBorder}; font-weight: 700;">${statusStr}</span>
+                        <button class="btn-secondary" style="padding: 6px 14px; font-size: 0.78rem;" onclick="exportReportCSV('${r.session_id}')">📥 Export CSV</button>
                     </div>
                 `;
                 container.appendChild(card);
             });
         } else {
-            container.innerHTML = `<div class="empty-state">No submitted audit reports found.</div>`;
+            container.innerHTML = `<div class="empty-state">No submitted audit reports available yet. Publish a report from the <b>Report</b> tab to view it here.</div>`;
         }
     } catch (err) {
-        container.innerHTML = `<div class="error-msg">Failed to load reports: ${err.message}</div>`;
+        container.innerHTML = `<div class="error-msg">Error loading submitted reports: ${err.message}</div>`;
     }
 }
 
