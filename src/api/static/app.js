@@ -452,6 +452,71 @@ async function populateAuditeeSelector() {
 
 // ── SIDEBAR FRAMEWORK CHECKLIST ──
 
+// ── SIDEBAR FRAMEWORK CHECKLIST & SEGMENTED CONTROLS ──
+
+function setAnalysisMode(mode) {
+    const deepBtn = document.getElementById("btn-mode-deep");
+    const quickBtn = document.getElementById("btn-mode-quick");
+    const radioDeep = document.getElementById("radio-mode-deep");
+    const radioQuick = document.getElementById("radio-mode-quick");
+
+    if (mode === "Deep") {
+        if (deepBtn) deepBtn.classList.add("active");
+        if (quickBtn) quickBtn.classList.remove("active");
+        if (radioDeep) radioDeep.checked = true;
+    } else {
+        if (quickBtn) quickBtn.classList.add("active");
+        if (deepBtn) deepBtn.classList.remove("active");
+        if (radioQuick) radioQuick.checked = true;
+    }
+}
+
+function setScopingMode(mode) {
+    const aiBtn = document.getElementById("btn-scoping-ai");
+    const chkBtn = document.getElementById("btn-scoping-checklist");
+    const radioAi = document.getElementById("radio-scoping-ai");
+    const radioChk = document.getElementById("radio-scoping-chk");
+    const checklistBox = document.getElementById("sidebar-checklist-setup");
+    const fileContainer = document.getElementById("scoping-file-container");
+
+    if (mode.includes("AI")) {
+        if (aiBtn) aiBtn.classList.add("active");
+        if (chkBtn) chkBtn.classList.remove("active");
+        if (radioAi) radioAi.checked = true;
+        if (checklistBox) checklistBox.style.display = "none";
+        if (fileContainer) fileContainer.style.display = "none";
+    } else {
+        if (chkBtn) chkBtn.classList.add("active");
+        if (aiBtn) aiBtn.classList.remove("active");
+        if (radioChk) radioChk.checked = true;
+        if (checklistBox) checklistBox.style.display = "block";
+        if (fileContainer) fileContainer.style.display = "block";
+    }
+}
+
+function toggleScopeChecklistModal() {
+    const checklistBox = document.getElementById("sidebar-checklist-setup");
+    if (!checklistBox) return;
+    if (checklistBox.style.display === "none" || !checklistBox.style.display) {
+        setScopingMode("Audit Scope Checklist");
+    } else {
+        checklistBox.style.display = "none";
+    }
+}
+
+function toggleClauseAccordion(contentId, headerEl) {
+    const body = document.getElementById(contentId);
+    if (!body) return;
+    const arrow = headerEl.querySelector(".clause-arrow");
+    if (body.style.display === "none") {
+        body.style.display = "block";
+        if (arrow) arrow.innerText = "v";
+    } else {
+        body.style.display = "none";
+        if (arrow) arrow.innerText = "›";
+    }
+}
+
 async function loadFrameworkControls() {
     const select = document.getElementById("framework-select");
     const container = document.getElementById("controls-checkbox-container");
@@ -469,50 +534,96 @@ async function loadFrameworkControls() {
         
         container.innerHTML = "";
         const selectedStd = select ? select.value : "All Standards";
-        const isVaptFramework = selectedStd.toUpperCase().includes("VAPT");
         
-        // Toggle Audit Mode UI options
-        const radios = document.getElementById("audit-mode-radios");
-        const notice = document.getElementById("vapt-mode-notice");
-        if (isVaptFramework) {
-            if (radios) radios.style.display = "none";
-            if (notice) notice.style.display = "block";
-        } else {
-            if (radios) radios.style.display = "flex";
-            if (notice) notice.style.display = "none";
-        }
-
         const filtered = controlsToRender.filter(c => {
             if (selectedStd === "All Standards") return true;
             const isVapt = (c.category || "").toUpperCase().includes("VAPT") || (c.use_case || "").toUpperCase().includes("VAPT");
             if (selectedStd === "ISO 27001") return !isVapt;
             return isVapt;
         });
-        
+
+        // Group into 5 Clause Categories matching Streamlit UI
+        const clauseMap = {
+            "Clause 5 — Organizational Controls": [],
+            "Clause 6 — People Controls": [],
+            "Clause 7 — Physical Controls": [],
+            "Clause 8 — Technological Controls": [],
+            "VAPT Framework Controls": []
+        };
+
         filtered.forEach(c => {
-            const div = document.createElement("div");
-            div.className = "checkbox-item";
-            div.style.cssText = "display: flex; align-items: center; gap: 8px; padding: 4px 6px; margin-bottom: 2px;";
+            const cid = (c.control_id || c.sl || "").toString();
+            const cat = (c.category || "").toUpperCase();
             
-            const input = document.createElement("input");
-            input.type = "checkbox";
-            input.value = c.sl;
-            input.id = `ctrl_chk_${c.sl}`;
-            input.checked = true;
-            input.onchange = updateSelectedScopeCount;
-            
-            const label = document.createElement("label");
-            label.htmlFor = `ctrl_chk_${c.sl}`;
-            label.style.cssText = "cursor: pointer; font-size: 0.78rem; color: var(--text-main); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
-            const displayName = c.label.length > 48 ? c.label.slice(0, 45) + "..." : c.label;
-            label.innerText = `${c.sl} - ${displayName}`;
-            label.title = c.use_case || c.label;
-            
-            div.appendChild(input);
-            div.appendChild(label);
-            container.appendChild(div);
+            if (cid.startsWith("5.") || cat.includes("ORGANIZATIONAL")) {
+                clauseMap["Clause 5 — Organizational Controls"].push(c);
+            } else if (cid.startsWith("6.") || cat.includes("PEOPLE")) {
+                clauseMap["Clause 6 — People Controls"].push(c);
+            } else if (cid.startsWith("7.") || cat.includes("PHYSICAL")) {
+                clauseMap["Clause 7 — Physical Controls"].push(c);
+            } else if (cid.startsWith("8.") || cat.includes("TECH") || cat.includes("IT SECURITY")) {
+                clauseMap["Clause 8 — Technological Controls"].push(c);
+            } else {
+                clauseMap["VAPT Framework Controls"].push(c);
+            }
         });
-        
+
+        // Render each Clause Accordion
+        Object.keys(clauseMap).forEach((clauseTitle, idx) => {
+            const controls = clauseMap[clauseTitle];
+            if (controls.length === 0) return;
+
+            const accordionCard = document.createElement("div");
+            accordionCard.className = "clause-accordion-card";
+
+            const contentId = `clause_body_${idx}`;
+            
+            const header = document.createElement("div");
+            header.className = "clause-header";
+            header.onclick = () => toggleClauseAccordion(contentId, header);
+            header.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="clause-arrow">›</span>
+                    <span>${clauseTitle}</span>
+                </div>
+                <span class="clause-count-badge" style="font-size: 0.72rem; color: #60a5fa; font-weight: 700;">[All]</span>
+            `;
+
+            const body = document.createElement("div");
+            body.id = contentId;
+            body.className = "clause-body";
+
+            controls.forEach(c => {
+                const itemDiv = document.createElement("div");
+                itemDiv.className = "checkbox-item ctrl-checkbox-item";
+
+                const input = document.createElement("input");
+                input.type = "checkbox";
+                input.value = c.sl;
+                input.id = `ctrl_chk_${c.sl}`;
+                input.checked = true;
+                input.style.cssText = "width: 16px; height: 16px; cursor: pointer;";
+                input.onchange = updateSelectedScopeCount;
+
+                const label = document.createElement("label");
+                label.htmlFor = `ctrl_chk_${c.sl}`;
+                label.style.cssText = "cursor: pointer; font-size: 0.78rem; color: var(--text-main); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+                
+                const ctrlId = c.control_id || c.sl;
+                const ctrlName = c.label || c.control_name || "";
+                label.innerText = `${ctrlName} (${ctrlId})`;
+                label.title = `${ctrlId}: ${ctrlName}`;
+
+                itemDiv.appendChild(input);
+                itemDiv.appendChild(label);
+                body.appendChild(itemDiv);
+            });
+
+            accordionCard.appendChild(header);
+            accordionCard.appendChild(body);
+            container.appendChild(accordionCard);
+        });
+
         updateSelectedScopeCount();
     } catch (err) {
         container.innerHTML = `<div style='font-size:11px;color:var(--error);padding:8px;'>Loaded fallback controls.</div>`;
@@ -522,17 +633,47 @@ async function loadFrameworkControls() {
 function updateSelectedScopeCount() {
     const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
     const selected = Array.from(checkboxes).filter(cb => cb.checked);
-    const label = document.getElementById("active-scope-label");
-    if (label) {
-        label.innerText = `⚙️ SCOPE CHECKLIST (${selected.length} of ${checkboxes.length} selected)`;
-    }
+    
+    const countBadge = document.getElementById("sidebar-scope-count-badge");
+    if (countBadge) countBadge.innerText = `${selected.length}/${checkboxes.length} · Edit`;
+
+    const totalBadge = document.getElementById("total-scope-badge");
+    if (totalBadge) totalBadge.innerText = `${selected.length} / ${checkboxes.length} selected`;
 }
 
-function toggleScopingMode() {
-    const scopingModeEl = document.querySelector("input[name='scoping-mode']:checked");
-    const scopingMode = scopingModeEl ? scopingModeEl.value : "AI Audit Scoping";
-    const fileBox = document.getElementById("scoping-file-container");
-    if (fileBox) fileBox.style.display = scopingMode === "Audit Scope Checklist" ? "block" : "none";
+function selectAllCheckboxes(checked) {
+    const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
+    checkboxes.forEach(cb => cb.checked = checked);
+    updateSelectedScopeCount();
+}
+
+function filterCheckboxList() {
+    const input = document.getElementById("controls-search-input");
+    if (!input) return;
+    const query = input.value.toLowerCase().trim();
+    
+    const accordions = document.querySelectorAll(".clause-accordion-card");
+    accordions.forEach(acc => {
+        let hasMatch = false;
+        const items = acc.querySelectorAll(".ctrl-checkbox-item");
+        items.forEach(item => {
+            const text = item.innerText.toLowerCase();
+            if (!query || text.includes(query)) {
+                item.style.display = "flex";
+                hasMatch = true;
+            } else {
+                item.style.display = "none";
+            }
+        });
+        
+        if (query) {
+            acc.style.display = hasMatch ? "block" : "none";
+            const body = acc.querySelector(".clause-body");
+            if (body && hasMatch) body.style.display = "block";
+        } else {
+            acc.style.display = "block";
+        }
+    });
 }
 
 async function handleExcelScopeUpload(e) {

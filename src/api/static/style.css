@@ -1799,6 +1799,92 @@ button {
     box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
 }
 
+/* ── SEGMENTED CONTROL & ACCORDION CHECKLIST STYLES ── */
+.segmented-control {
+    display: flex;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+}
+
+.segmented-btn {
+    flex: 1;
+    padding: 6px 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.segmented-btn.active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);
+}
+
+.clause-accordion-card {
+    margin-bottom: 8px;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 10px;
+    background: rgba(30, 41, 59, 0.3);
+    overflow: hidden;
+    transition: border-color 0.2s;
+}
+
+.clause-accordion-card:hover {
+    border-color: rgba(96, 165, 250, 0.4);
+}
+
+.clause-header {
+    padding: 10px 14px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-main);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+.clause-header:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.clause-arrow {
+    display: inline-block;
+    width: 16px;
+    font-weight: 700;
+    color: #60a5fa;
+    transition: transform 0.2s;
+}
+
+.clause-body {
+    display: none;
+    padding: 10px 14px 14px 14px;
+    border-top: 1px solid rgba(148, 163, 184, 0.1);
+    background: rgba(15, 23, 42, 0.4);
+}
+
+.ctrl-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 4px;
+    border-radius: 6px;
+    transition: background 0.15s;
+}
+
+.ctrl-checkbox-item:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
 .pipeline-pct {
     font-size: 0.82rem;
     font-weight: 800;
