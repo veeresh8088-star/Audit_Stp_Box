@@ -246,9 +246,10 @@
                     <span id="total-scope-badge" class="badge-pill" style="font-size: 0.7rem; color: #60a5fa; border-color: rgba(96, 165, 250, 0.3);">108 / 108 selected</span>
                 </div>
                 <input type="text" id="controls-search-input" placeholder="Search by ID or name..." oninput="filterCheckboxList()" style="margin-bottom: 8px; padding: 6px 12px; font-size: 0.78rem; height: 32px; width: 100%; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); color: var(--text-main);">
-                <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                    <button class="btn-secondary" style="padding: 6px 10px; font-size: 0.74rem; flex: 1; border-radius: 6px;" onclick="selectAllCheckboxes(true)">Select All</button>
-                    <button class="btn-secondary" style="padding: 6px 10px; font-size: 0.74rem; flex: 1; border-radius: 6px;" onclick="selectAllCheckboxes(false)">Clear All</button>
+                <div style="display: flex; gap: 6px; margin-bottom: 10px;">
+                    <button class="btn-secondary" style="padding: 6px 8px; font-size: 0.74rem; flex: 1; border-radius: 6px;" onclick="selectAllCheckboxes(true)">Select All</button>
+                    <button class="btn-secondary" style="padding: 6px 8px; font-size: 0.74rem; flex: 1; border-radius: 6px;" onclick="selectAllCheckboxes(false)">Clear All</button>
+                    <button class="btn-primary" style="padding: 6px 8px; font-size: 0.74rem; flex: 1.2; border-radius: 6px; background: linear-gradient(135deg, #8b5cf6, #6d28d9); font-weight:700;" onclick="openAddCustomControlModal()">✨ + Custom</button>
                 </div>
                 <div class="checkbox-list" id="controls-checkbox-container" style="max-height: 380px; overflow-y: auto;">
                     <!-- Loaded dynamically via js as Clause Accordions -->
@@ -751,7 +752,51 @@
         </div>
     </div>
 
+    <!-- ADD CUSTOM CONTROL MODAL -->
+    <div id="add-custom-control-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); z-index: 10000; align-items: center; justify-content: center;">
+        <div class="modal-card" style="background: rgba(30, 41, 59, 0.96); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 16px; padding: 24px; max-width: 520px; width: 92%; box-shadow: 0 25px 50px rgba(0,0,0,0.6);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); padding-bottom: 12px;">
+                <h3 style="margin: 0; color: #f8fafc; font-size: 1.1rem; font-weight: 700;">✨ Add Custom Control to Audit Scope</h3>
+                <button onclick="closeAddCustomControlModal()" style="background: transparent; border: none; color: #94a3b8; font-size: 1.2rem; cursor: pointer;">✕</button>
+            </div>
+            <form id="modal-custom-control-form" onsubmit="handleModalCustomControlSubmit(event)">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                    <div>
+                        <label style="font-size: 0.76rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Control ID *</label>
+                        <input type="text" id="modal-ctrl-id" placeholder="e.g. CC-1 or 5.38" required style="width: 100%; padding: 8px 12px; font-size: 0.82rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); color: #fff;">
+                    </div>
+                    <div>
+                        <label style="font-size: 0.76rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Category *</label>
+                        <select id="modal-ctrl-cat" style="width: 100%; padding: 8px 12px; font-size: 0.82rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); color: #fff;">
+                            <option value="Custom Controls">✨ Custom Controls</option>
+                            <option value="Organizational Controls">Clause 5 — Organizational</option>
+                            <option value="People Controls">Clause 6 — People</option>
+                            <option value="Physical Controls">Clause 7 — Physical</option>
+                            <option value="Technological Controls">Clause 8 — Technological</option>
+                        </select>
+                    </div>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <label style="font-size: 0.76rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Control Name / Title *</label>
+                    <input type="text" id="modal-ctrl-name" placeholder="e.g. Third-Party SaaS Security Evaluation" required style="width: 100%; padding: 8px 12px; font-size: 0.82rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); color: #fff;">
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <label style="font-size: 0.76rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Scope Description & Expected Evidence</label>
+                    <textarea id="modal-ctrl-desc" placeholder="Details on what audit logic should evaluate..." style="width: 100%; height: 70px; padding: 8px 12px; font-size: 0.82rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); color: #fff;"></textarea>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <label style="font-size: 0.76rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 4px;">Keywords (comma-separated)</label>
+                    <input type="text" id="modal-ctrl-kws" placeholder="saas, third-party, vendor risk, soc2" style="width: 100%; padding: 8px 12px; font-size: 0.82rem; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); color: #fff;">
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button type="button" class="btn-secondary" onclick="closeAddCustomControlModal()">Cancel</button>
+                    <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #8b5cf6, #6d28d9); font-weight:700;">Save & Select Control</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Script loading -->
-    <script src="/static/app.js?v=20260724_v32"></script>
+    <script src="/static/app.js?v=20260724_v33"></script>
 </body>
 </html>

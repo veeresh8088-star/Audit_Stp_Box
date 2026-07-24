@@ -629,17 +629,18 @@ async function loadFrameworkControls() {
             return isVapt;
         });
 
-        // Group into 5 Clause Categories matching Streamlit UI
+        // Group into Clause Categories matching Streamlit UI
         const clauseMap = {
             "Clause 5 — Organizational Controls": [],
             "Clause 6 — People Controls": [],
             "Clause 7 — Physical Controls": [],
             "Clause 8 — Technological Controls": [],
-            "VAPT Framework Controls": []
+            "VAPT Framework Controls": [],
+            "✨ Custom Controls": []
         };
 
         filtered.forEach(c => {
-            const cid = (c.control_id || c.sl || "").toString();
+            const cid = (c.control_id || c.use_case || c.sl || "").toString().toUpperCase();
             const cat = (c.category || "").toUpperCase();
             
             if (cid.startsWith("5.") || cat.includes("ORGANIZATIONAL")) {
@@ -650,8 +651,10 @@ async function loadFrameworkControls() {
                 clauseMap["Clause 7 — Physical Controls"].push(c);
             } else if (cid.startsWith("8.") || cat.includes("TECH") || cat.includes("IT SECURITY")) {
                 clauseMap["Clause 8 — Technological Controls"].push(c);
-            } else {
+            } else if (cid.includes("VAPT") || cat.includes("VAPT")) {
                 clauseMap["VAPT Framework Controls"].push(c);
+            } else {
+                clauseMap["✨ Custom Controls"].push(c);
             }
         });
 
@@ -1730,6 +1733,61 @@ async function deleteCustomControl(id) {
         }
     } catch (err) {
         alert(err.message);
+    }
+}
+
+function openAddCustomControlModal() {
+    const modal = document.getElementById("add-custom-control-modal");
+    if (modal) {
+        modal.style.display = "flex";
+    }
+}
+
+function closeAddCustomControlModal() {
+    const modal = document.getElementById("add-custom-control-modal");
+    if (modal) {
+        modal.style.display = "none";
+    }
+}
+
+async function handleModalCustomControlSubmit(e) {
+    e.preventDefault();
+    const ctrlId = document.getElementById("modal-ctrl-id").value.trim();
+    const ctrlName = document.getElementById("modal-ctrl-name").value.trim();
+    const cat = document.getElementById("modal-ctrl-cat").value;
+    const desc = document.getElementById("modal-ctrl-desc").value.trim();
+    const kwsStr = document.getElementById("modal-ctrl-kws").value.trim();
+    const kws = kwsStr ? kwsStr.split(",").map(k => k.trim()) : [];
+
+    try {
+        const response = await fetch(`${API_BASE}/controls`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                control_id: ctrlId,
+                control_name: ctrlName,
+                category: cat,
+                description: desc,
+                keywords: kws,
+                created_by: currentUser ? currentUser.username : "auditor"
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            closeAddCustomControlModal();
+            showToast("✨ Custom control saved to Shakthi DB!", "info");
+            await loadFrameworkControls();
+            
+            // Auto expand Custom Controls accordion
+            setTimeout(() => {
+                const customHeader = Array.from(document.querySelectorAll(".clause-header")).find(h => h.innerText.includes("Custom Controls"));
+                if (customHeader) customHeader.click();
+            }, 300);
+        } else {
+            alert(`Failed: ${data.message || 'Error saving control'}`);
+        }
+    } catch (err) {
+        alert(`Error: ${err.message}`);
     }
 }
 
