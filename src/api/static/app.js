@@ -575,39 +575,43 @@ async function loadFrameworkControls() {
 
             const accordionCard = document.createElement("div");
             accordionCard.className = "clause-accordion-card";
+            accordionCard.style.cssText = "margin-bottom: 8px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; background: rgba(30, 41, 59, 0.6); overflow: hidden;";
 
             const contentId = `clause_body_${idx}`;
             
             const header = document.createElement("div");
             header.className = "clause-header";
+            header.style.cssText = "padding: 10px 12px; background: rgba(30, 41, 59, 0.8); font-size: 0.82rem; font-weight: 700; color: #f1f5f9; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;";
             header.onclick = () => toggleClauseAccordion(contentId, header);
             header.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span class="clause-arrow">›</span>
-                    <span>${clauseTitle}</span>
+                <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+                    <span class="clause-arrow" style="color: #60a5fa; font-weight: 700; font-size: 0.85rem; width: 14px; text-align: center;">›</span>
+                    <span style="font-weight: 700; color: #f1f5f9; font-size: 0.8rem; text-transform: none; white-space: normal; line-height: 1.2;">${clauseTitle}</span>
                 </div>
-                <span class="clause-count-badge" style="font-size: 0.72rem; color: #60a5fa; font-weight: 700;">[All]</span>
+                <span class="clause-count-badge" style="font-size: 0.7rem; color: #60a5fa; font-weight: 700; background: rgba(37, 99, 235, 0.2); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(59, 130, 246, 0.3); white-space: nowrap; margin-left: 6px;">[All]</span>
             `;
 
             const body = document.createElement("div");
             body.id = contentId;
             body.className = "clause-body";
+            body.style.cssText = "display: none; padding: 10px 12px 12px 12px; border-top: 1px solid rgba(148, 163, 184, 0.15); background: rgba(15, 23, 42, 0.6);";
 
             controls.forEach(c => {
                 const itemDiv = document.createElement("div");
                 itemDiv.className = "checkbox-item ctrl-checkbox-item";
+                itemDiv.style.cssText = "display: flex; align-items: flex-start; gap: 10px; padding: 6px 4px; border-radius: 6px;";
 
                 const input = document.createElement("input");
                 input.type = "checkbox";
                 input.value = c.sl;
                 input.id = `ctrl_chk_${c.sl}`;
                 input.checked = true;
-                input.style.cssText = "width: 16px; height: 16px; cursor: pointer;";
+                input.style.cssText = "width: 16px; height: 16px; min-width: 16px; margin-top: 2px; cursor: pointer;";
                 input.onchange = updateSelectedScopeCount;
 
                 const label = document.createElement("label");
                 label.htmlFor = `ctrl_chk_${c.sl}`;
-                label.style.cssText = "cursor: pointer; font-size: 0.78rem; color: var(--text-main); margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;";
+                label.style.cssText = "cursor: pointer; font-size: 0.78rem; color: #cbd5e1; font-weight: 500; text-transform: none; white-space: normal; word-break: break-word; line-height: 1.35; margin: 0; max-width: none;";
                 
                 const ctrlId = c.control_id || c.sl;
                 const ctrlName = c.label || c.control_name || "";
