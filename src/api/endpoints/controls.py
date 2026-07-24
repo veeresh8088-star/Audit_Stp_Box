@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, File, UploadFile
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from src.db.database import (
@@ -123,3 +123,135 @@ def api_get_framework_controls():
         return {"success": True, "controls": combined}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/parse-scope-excel")
+async def api_parse_scope_excel(file: UploadFile = File(...)):
+    """Parses an uploaded auditor scope Excel mapping (.xlsx/.xls) and returns mapped control SLs and custom evidence."""
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are supported.")
+        
+    try:
+        import io
+        import re as _re
+        import pandas as pd
+        from src.core.controls_data import USE_CASES
+        
+        contents = await file.read()
+        df = pd.read_excel(io.BytesIO(contents))
+        
+        # Header row auto-detection
+        if any("unnamed" in str(c).lower() for c in df.columns):
+            for h_idx in range(min(5, len(df))):
+                row_vals = [str(v).strip().lower() for v in df.iloc[h_idx].values if pd.notna(v)]
+                if any(k in v for v in row_vals for k in ("audit", "check", "control", "file", "doc", "evidence", "expected")):
+                    df.columns = [str(c).strip() for c in df.iloc[h_idx]]
+                    df = df.iloc[h_idx+1:].reset_index(drop=True)
+                    break
+        
+        col_control = None
+        col_document = None
+        col_evidence = None
+        
+        for col in df.columns:
+            col_str = str(col).lower()
+            if any(k in col_str for k in ("evidence", "expected", "proof")):
+                col_evidence = col
+            elif any(k in col_str for k in ("use_case", "sl", "number", "audit", "check")) or "id" in col_str.split() or col_str == "control":
+                col_control = col
+            elif any(k in col_str for k in ("doc", "file", "policy", "source", "name")):
+                col_document = col
+                
+        if col_control is None or col_evidence is None:
+            if len(df.columns) >= 3:
+                col_control = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+                col_evidence = df.columns[2] if len(df.columns) > 2 else df.columns[1]
+                col_document = df.columns[2] if len(df.columns) > 2 else None
+            elif len(df.columns) >= 2:
+                col_control = df.columns[0]
+                col_evidence = df.columns[1]
+                
+        if col_control is None or col_evidence is None:
+            raise HTTPException(status_code=400, detail="Columns for 'Control' and 'Evidence' could not be found.")
+
+        custom_evidence = {}
+        custom_documents = {}
+        matched_sls = set()
+        digit_re = _re.compile(r'(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)')
+        vapt_re = _re.compile(r'(vapt-\d{1,2})', _re.IGNORECASE)
+        
+        for _, row in df.iterrows():
+            ctrl_val = str(row[col_control]).strip()
+            ev_val = str(row[col_evidence]).strip()
+            if not ctrl_val or ctrl_val == "nan" or not ev_val or ev_val == "nan":
+                continue
+                
+            matched_uc = None
+            match_id = digit_re.search(ctrl_val)
+            match_vapt = vapt_re.search(ctrl_val)
+            
+            if match_vapt:
+                target_vapt = match_vapt.group(1).upper()
+                for uc in USE_CASES:
+                    if uc["use_case"].upper().startswith(target_vapt):
+                        matched_uc = uc
+                        break
+            elif match_id:
+                target_id = match_id.group(1)
+                for uc in USE_CASES:
+                    uc_id = uc["use_case"].split(" ")[0]
+                    if uc_id == target_id:
+                        matched_uc = uc
+                        break
+            else:
+                c_lower = ctrl_val.lower()
+                for uc in USE_CASES:
+                    uc_id = uc["use_case"].split(" ")[0]
+                    uc_uc = str(uc.get("use_case", "")).lower()
+                    
+                    if 'ntp' in c_lower:
+                        if uc_id == "8.17": matched_uc = uc; break
+                    elif 'multifactor' in c_lower or 'mfa' in c_lower:
+                        if uc_id in ("5.17", "8.5"): matched_uc = uc; break
+                    elif 'pam' in c_lower:
+                        if uc_id in ("5.15", "8.2", "5.18"): matched_uc = uc; break
+                    elif 'fraud' in c_lower:
+                        if uc_id in ("5.1", "5.15"): matched_uc = uc; break
+                    elif 'archived' in c_lower or 'archival' in c_lower or 'logging' in c_lower:
+                        if uc_id in ("8.15", "5.33"): matched_uc = uc; break
+                    elif any(k in c_lower for k in ('cpu', 'memory', 'disk', 'utilization')):
+                        if uc_id in ("8.16", "8.6"): matched_uc = uc; break
+                    elif 'authentication' in c_lower:
+                        if uc_id in ("5.17", "5.15"): matched_uc = uc; break
+                    elif c_lower in uc_uc:
+                        matched_uc = uc; break
+                        
+            if matched_uc:
+                uc_key = matched_uc["use_case"]
+                if uc_key in custom_evidence:
+                    custom_evidence[uc_key] += f" | {ev_val}"
+                else:
+                    custom_evidence[uc_key] = ev_val
+                    
+                if col_document is not None:
+                    doc_val = str(row[col_document]).strip()
+                    if doc_val and doc_val != "nan":
+                        if uc_key in custom_documents:
+                            if doc_val not in custom_documents[uc_key]:
+                                custom_documents[uc_key] += f", {doc_val}"
+                        else:
+                            custom_documents[uc_key] = doc_val
+                matched_sls.add(int(matched_uc["sl"]))
+
+        return {
+            "success": True,
+            "matched_sls": list(matched_sls),
+            "custom_evidence": custom_evidence,
+            "custom_documents": custom_documents,
+            "total_rows": len(df),
+            "message": f"Loaded {len(df)} checklist items across {len(matched_sls)} unique controls!"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to parse Excel scope file: {e}")
+

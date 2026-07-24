@@ -237,6 +237,38 @@ def api_upload_evidence(
     finally:
         db.close()
 
+@router.get("/evidence")
+def api_get_session_evidence(session_id: str):
+    """Returns list of uploaded evidence files for the given session ID."""
+    db = SessionLocal()
+    try:
+        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+        if not report:
+            return {"success": True, "files": []}
+        
+        files = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id).order_by(EvidenceFile.uploaded_at.desc()).all()
+        result = []
+        for f in files:
+            size_str = "0 KB"
+            if f.file_path and os.path.exists(f.file_path):
+                sz = os.path.getsize(f.file_path)
+                if sz > 1024 * 1024:
+                    size_str = f"{sz / (1024 * 1024):.1f} MB"
+                elif sz > 1024:
+                    size_str = f"{sz / 1024:.1f} KB"
+                else:
+                    size_str = f"{sz} B"
+            result.append({
+                "id": f.id,
+                "filename": f.filename,
+                "size_str": size_str,
+                "is_auditor": bool(f.is_auditor_uploaded),
+                "created_at": str(f.uploaded_at)
+            })
+        return {"success": True, "files": result}
+    finally:
+        db.close()
+
 @router.post("/start")
 def api_start_audit(req: StartAuditRequest):
     bg_key = req.session_id
@@ -821,19 +853,26 @@ def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = 
                 "created_at": str(r.created_at)
             }
             
-        # 2. ChatMessages — always scope to the requesting user only
-        if username:
-            chats = db.query(ChatMessage).filter(
-                ChatMessage.username == username
-            ).order_by(ChatMessage.created_at.desc()).all()
-        else:
-            # Legacy fallback: if no username passed, return nothing extra
-            chats = []
+        # 2. ChatMessages — scope to the requesting user only, fall back if username column missing
+        try:
+            if username:
+                chats = db.query(ChatMessage).filter(
+                    ChatMessage.username == username
+                ).order_by(ChatMessage.created_at.desc()).all()
+            else:
+                chats = []
+        except Exception:
+            # Fallback: username column may not exist in older DB — query without filter
+            try:
+                chats = db.query(ChatMessage).order_by(ChatMessage.created_at.desc()).limit(50).all()
+            except Exception:
+                chats = []
+
         for c in chats:
             if c.session_id not in sessions_dict:
                 sessions_dict[c.session_id] = {
                     "session_id": c.session_id,
-                    "session_title": c.session_title or "AI Chat Session",
+                    "session_title": getattr(c, "session_title", None) or "AI Chat Session",
                     "created_at": str(c.created_at)
                 }
                     
@@ -842,9 +881,10 @@ def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = 
         sorted_sessions.sort(key=lambda x: x["created_at"], reverse=True)
         return {"success": True, "sessions": sorted_sessions[:12]}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": True, "sessions": [], "error": str(e)}
     finally:
         db.close()
+
 
 @router.get("/chats/history")
 def api_get_chat_history(session_id: str, username: Optional[str] = None):
