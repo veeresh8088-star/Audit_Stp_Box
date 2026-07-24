@@ -984,11 +984,16 @@ async function pollAuditProgress() {
             if (stopBtn) stopBtn.style.display = "none";
             if (progressStatus) progressStatus.innerText = `Scan failed`;
             alert("❌ Analysis failed. Verify Ollama or local llama-server is running.");
-        } else if (data.status === "idle") {
+        } else {
+            // If scan is idle, stopped, or not running, reset state cleanly
             clearInterval(progressInterval);
             btn.disabled = false;
             btn.innerText = "▶ Step 3: Run RAG Scan";
-            if (stopBtn) stopBtn.style.display = "none";
+            if (stopBtn) {
+                stopBtn.style.display = "none";
+                stopBtn.disabled = false;
+                stopBtn.innerText = "⛔ Stop";
+            }
         }
     } catch (err) {
         console.error("Progress polling error:", err);
@@ -999,23 +1004,41 @@ async function stopAuditAnalysis() {
     const stopBtn = document.getElementById("stop-analysis-btn");
     const btn = document.getElementById("run-analysis-btn");
     if (!activeSessionId) return;
-    stopBtn.disabled = true;
-    stopBtn.innerText = "⏳ Stopping...";
+    
+    if (stopBtn) {
+        stopBtn.disabled = true;
+        stopBtn.innerText = "⏳ Stopping...";
+    }
+    
     try {
         const res = await fetch(`${API_BASE}/audit/stop/${activeSessionId}`, { method: "POST" });
         const data = await res.json();
+        
         if (data.success) {
-            btn.innerText = "⏳ Stopping after current control...";
+            btn.innerText = "⏳ Stopping Scan...";
             showToast("⛔ Stop signal sent — scan will stop after the current control.", "warning");
         } else {
-            alert(data.message || "No active scan to stop.");
-            stopBtn.disabled = false;
-            stopBtn.innerText = "⛔ Stop Analysis";
+            // No scan currently running -> reset UI state completely!
+            if (progressInterval) clearInterval(progressInterval);
+            btn.disabled = false;
+            btn.innerText = "▶ Step 3: Run RAG Scan";
+            if (stopBtn) {
+                stopBtn.style.display = "none";
+                stopBtn.disabled = false;
+                stopBtn.innerText = "⛔ Stop";
+            }
+            showToast(data.message || "No active scan running.", "info");
         }
     } catch (err) {
+        if (progressInterval) clearInterval(progressInterval);
+        btn.disabled = false;
+        btn.innerText = "▶ Step 3: Run RAG Scan";
+        if (stopBtn) {
+            stopBtn.style.display = "none";
+            stopBtn.disabled = false;
+            stopBtn.innerText = "⛔ Stop";
+        }
         alert(`Failed to stop scan: ${err.message}`);
-        stopBtn.disabled = false;
-        stopBtn.innerText = "⛔ Stop Analysis";
     }
 }
 
