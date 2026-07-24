@@ -886,7 +886,7 @@ async function triggerAuditAnalysis() {
     const btn = document.getElementById("run-analysis-btn");
     const stopBtn = document.getElementById("stop-analysis-btn");
     btn.disabled = true;
-    btn.innerText = "⏳ Running Scan...";
+    btn.innerText = "⏳ Running Scan (0%)...";
     if (stopBtn) stopBtn.style.display = "block";
     
     const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
@@ -922,8 +922,9 @@ async function triggerAuditAnalysis() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Failed to trigger scan.");
         
-        // Start progress polling
-        progressInterval = setInterval(pollAuditProgress, 2000);
+        // Start high-frequency progress polling (every 1 second)
+        if (progressInterval) clearInterval(progressInterval);
+        progressInterval = setInterval(pollAuditProgress, 1000);
     } catch (err) {
         btn.disabled = false;
         btn.innerText = "▶ Run RAG Scan";
@@ -944,13 +945,19 @@ async function pollAuditProgress() {
         const data = await response.json();
         
         if (data.status === "running") {
-            const p = data.progress;
-            const pct = p.percent || 0;
+            const p = data.progress || {};
+            const pct = typeof p.percent === "number" ? Math.min(100, Math.max(0, p.percent)) : 0;
             const txt = p.text || 'Scanning...';
-            btn.innerText = `⏳ ${txt} (${pct}%)`;
+            
+            if (txt && (txt.includes("Scanning") || txt.includes("evaluating"))) {
+                btn.innerText = `⏳ ${pct}% • ${txt}`;
+            } else {
+                btn.innerText = `⏳ Running Scan (${pct}%)...`;
+            }
+            
             if (progressBar) progressBar.style.width = `${pct}%`;
             if (progressPercent) progressPercent.innerText = `${pct}%`;
-            if (progressStatus) progressStatus.innerText = `Verifying ${txt}`;
+            if (progressStatus) progressStatus.innerText = `${txt} (${pct}%)`;
         } else if (data.status === "completed") {
             clearInterval(progressInterval);
             btn.disabled = false;
