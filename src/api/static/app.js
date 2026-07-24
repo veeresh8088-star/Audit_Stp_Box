@@ -276,6 +276,7 @@ async function initializeDashboard(user) {
     
     // Resolve Active Audit Session ID
     await loadOrCreateSession(user);
+    loadRecentSessions();
     
     // Load Chat History list
     if (user.role !== "auditee") {
@@ -378,9 +379,93 @@ function toggleCollapsible(contentId) {
     
     if (el.style.display === "none" || !el.style.display) {
         el.style.display = "block";
+        if (contentId === "recent-sessions-container") {
+            loadRecentSessions();
+        }
     } else {
         el.style.display = "none";
     }
+}
+
+async function loadRecentSessions() {
+    const container = document.getElementById("recent-sessions-list");
+    if (!container) return;
+    container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">Loading sessions...</div>`;
+    
+    try {
+        let url = `${API_BASE}/audit/sessions`;
+        if (currentUser && currentUser.role === "auditee") {
+            url += `?role=auditee&username=${currentUser.username}`;
+        }
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && data.sessions.length > 0) {
+            container.innerHTML = "";
+            const seen = new Set();
+            const filteredSessions = data.sessions.filter(s => {
+                if (!s.session_id || seen.has(s.session_id)) return false;
+                const title = (s.session_title || "").toLowerCase();
+                if (title.includes("chat") || title.includes("error")) return false;
+                seen.add(s.session_id);
+                return true;
+            });
+
+            if (filteredSessions.length === 0) {
+                container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">No recent sessions found.</div>`;
+                return;
+            }
+
+            filteredSessions.forEach(s => {
+                const btn = document.createElement("button");
+                btn.className = "recent-session-item";
+                btn.onclick = () => switchRecentSession(s.session_id, s.session_title);
+                btn.style.cssText = "display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 8px 10px; background: rgba(30, 41, 59, 0.4); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 8px; color: var(--text-main); font-size: 0.78rem; text-align: left; cursor: pointer; margin-bottom: 4px; transition: background 0.15s;";
+                btn.onmouseover = () => btn.style.background = "rgba(59, 130, 246, 0.15)";
+                btn.onmouseout = () => btn.style.background = "rgba(30, 41, 59, 0.4)";
+                
+                btn.innerHTML = `
+                    <div style="font-weight: 700; color: #60a5fa; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;">📌 ${s.session_title}</div>
+                    <div style="font-size: 0.7rem; color: var(--text-muted); display: flex; justify-content: space-between; width: 100%;">
+                        <span>Score: <b style="color:#10b981;">${s.score_percent || 0}%</b></span>
+                        <span>${(s.created_at || '').slice(0, 10)}</span>
+                    </div>
+                `;
+                container.appendChild(btn);
+            });
+        } else {
+            container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">No recent sessions found.</div>`;
+        }
+    } catch (err) {
+        container.innerHTML = `<div style="font-size: 0.75rem; color: #ef4444; text-align: center; padding: 6px;">Failed to load sessions.</div>`;
+    }
+}
+
+async function switchRecentSession(sessionId, sessionTitle) {
+    activeSessionId = sessionId;
+    if (sessionTitle) activeSessionTitle = sessionTitle;
+    
+    const badge = document.getElementById("active-session-badge");
+    const wsTitle = document.getElementById("workspace-title");
+    if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
+    if (wsTitle) wsTitle.innerText = activeSessionTitle || "ISO 27001 Local Compliance Audit";
+
+    // Set filter default to "All" so all detailed findings render immediately
+    const select = document.getElementById("status-filter");
+    if (select) select.value = "All";
+
+    // Refresh evidence files list for this session
+    loadEvidenceFileList();
+    loadAuditeeEvidenceDocs();
+
+    // Load detailed findings from Shakthi DB for this session
+    await loadFindings();
+
+    // Auto switch tab view to Audit Records
+    const recordsTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Records"));
+    if (recordsTabBtn) switchTab("tab-audit-records", recordsTabBtn);
+
+    showToast(`📂 Loaded audit session: ${sessionId.slice(0, 8)}`, "info");
 }
 
 // ── SESSION MANAGEMENT ──
@@ -1135,6 +1220,19 @@ async function commitSessionToShaktiDB() {
     }
 }
 
+function isFindingCompliant(f) {
+    const st = (f.status || "").toUpperCase();
+    const wf = (f.workflow_status || f.display_status || "").toUpperCase();
+
+    if (st.includes("NON") || st.includes("NOT") || st.includes("GAP") || st.includes("FAIL") || st.includes("PARTIAL")) {
+        return false;
+    }
+    if (st.includes("COMPLIANT") || st.includes("PASS") || st.includes("SATISFIED") || st === "ACCEPTED" || wf === "ACCEPTED") {
+        return true;
+    }
+    return false;
+}
+
 function calculateSeverityStats() {
     let p1 = 0, p2 = 0, p3 = 0, p4 = 0;
     let compliant = 0, nonCompliant = 0;
@@ -1145,8 +1243,7 @@ function calculateSeverityStats() {
         else if (sev.includes("p3") || sev.includes("medium")) p3++;
         else if (sev.includes("p4") || sev.includes("low")) p4++;
 
-        const st = (f.status || "").toUpperCase();
-        if ((st.includes("COMPLIANT") && !st.includes("NON") && !st.includes("NOT") && !st.includes("PARTIAL")) || st.includes("ACCEPTED")) {
+        if (isFindingCompliant(f)) {
             compliant++;
         } else {
             nonCompliant++;
@@ -1193,14 +1290,13 @@ function renderFindingsList() {
     const filterStatus = filterStatusElement ? filterStatusElement.value : "All";
     
     const filtered = findingsList.filter(f => {
-        const st = (f.status || "").toUpperCase();
-        const isCompliant = (st.includes("COMPLIANT") && !st.includes("NON") && !st.includes("NOT") && !st.includes("PARTIAL")) || st.includes("ACCEPTED");
+        const isCompliant = isFindingCompliant(f);
 
         // Workflow status filter
         if (filterStatus === "Compliant" && !isCompliant) return false;
         if (filterStatus === "Non-Compliant" && isCompliant) return false;
-        if (filterStatus === "Open" && isCompliant) return false;
-        if (filterStatus === "Accepted" && f.status !== "Accepted" && !isCompliant) return false;
+        if (filterStatus === "Open" && (isCompliant || f.status === "Accepted" || f.status === "Rejected")) return false;
+        if (filterStatus === "Accepted" && f.status !== "Accepted") return false;
         if (filterStatus === "Rejected" && f.status !== "Rejected") return false;
         
         // Severity level filter
@@ -1228,10 +1324,9 @@ function renderFindingsList() {
         card.className = `finding-card ${sevClass}`;
         
         let statusBadgeClass = "non-compliant";
-        const st = (f.status || "").toUpperCase();
-        if ((st.includes("COMPLIANT") && !st.includes("NON") && !st.includes("NOT") && !st.includes("PARTIAL")) || st === "ACCEPTED") {
+        if (isFindingCompliant(f)) {
             statusBadgeClass = "compliant";
-        } else if (st.includes("PARTIAL")) {
+        } else if ((f.status || "").toUpperCase().includes("PARTIAL")) {
             statusBadgeClass = "partial";
         } else {
             statusBadgeClass = "non-compliant";
