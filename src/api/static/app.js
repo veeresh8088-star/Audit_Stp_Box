@@ -65,185 +65,9 @@ function updateHeaderClock() {
     }
 }
 
-// ── AUTHENTICATION CONTROLLERS ──
+// ── AUTHENTICATION CONTROLLERS (Extracted to auth.js) ──
+// Authentication state & logic are managed in /static/auth.js
 
-function selectRole(role) {
-    selectedRole = role;
-    
-    // Update button visual styles
-    document.querySelectorAll(".role-btn").forEach(btn => btn.classList.remove("active"));
-    document.getElementById(`role-${role}-btn`).classList.add("active");
-    
-    // Update descriptions
-    const descEl = document.getElementById("role-desc");
-    if (role === "admin") {
-        descEl.innerText = "SYSTEM ADMINISTRATOR • Full access to settings, analyses, and records";
-    } else if (role === "auditor") {
-        descEl.innerText = "COMPLIANCE AUDITOR • Upload compliance documents and run guided audits";
-    } else {
-        descEl.innerText = "AUDITEE • Upload audit evidence documents for the auditor to review";
-    }
-    
-    // Hide register option for Admin (seeded default is login only)
-    const toggleRow = document.getElementById("toggle-auth-row");
-    if (role === "admin") {
-        toggleRow.style.display = "none";
-        resetAuthActionToLogin();
-    } else {
-        toggleRow.style.display = "flex";
-    }
-    showError("");
-}
-
-function resetAuthActionToLogin() {
-    const submitBtn = document.getElementById("auth-submit-btn");
-    const toggleActionBtn = document.getElementById("toggle-action-btn");
-    const toggleLabel = document.getElementById("toggle-label");
-    
-    submitBtn.innerText = "Secure Sign In";
-    toggleActionBtn.innerText = "Create Account";
-    toggleLabel.innerText = "NEW USER?";
-}
-
-function toggleAuthAction() {
-    const submitBtn = document.getElementById("auth-submit-btn");
-    const toggleActionBtn = document.getElementById("toggle-action-btn");
-    const toggleLabel = document.getElementById("toggle-label");
-    
-    if (submitBtn.innerText === "Secure Sign In") {
-        submitBtn.innerText = "Create Secure Account";
-        toggleActionBtn.innerText = "Back to Login";
-        toggleLabel.innerText = "ALREADY REGISTERED?";
-    } else {
-        resetAuthActionToLogin();
-    }
-    showError("");
-}
-
-async function handleLoginSubmit(e) {
-    e.preventDefault();
-    showError("");
-    
-    const username = document.getElementById("username-input").value.trim();
-    const password = document.getElementById("password-input").value;
-    const submitBtn = document.getElementById("auth-submit-btn");
-    
-    const isRegister = submitBtn.innerText.includes("Create");
-    
-    try {
-        if (isRegister) {
-            // Register Action
-            const response = await fetch(`${API_BASE}/auth/register`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password, role: selectedRole })
-            });
-            
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || "Registration failed.");
-            
-            // Show QR Setup
-            document.getElementById("login-form").style.display = "none";
-            document.getElementById("register-setup-form").style.display = "block";
-            document.getElementById("register-qr-img").src = data.qr_code_base64;
-            document.getElementById("register-qr-secret").innerText = data.totp_secret;
-        } else {
-            // Login Action
-            const response = await fetch(`${API_BASE}/auth/login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username, password })
-            });
-            
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || "Authentication failed.");
-            
-            // Switch to OTP verify
-            document.getElementById("login-form").style.display = "none";
-            document.getElementById("otp-form").style.display = "block";
-            document.getElementById("otp-input").value = "";
-            document.getElementById("otp-input").focus();
-            
-            // If admin, show the seeded OTP QR code
-            if (data.username === "admin" && data.qr_code_base64) {
-                document.getElementById("admin-qr-container").style.display = "block";
-                document.getElementById("admin-qr-img").src = data.qr_code_base64;
-                document.getElementById("admin-qr-secret").innerText = data.totp_secret_preview;
-            } else {
-                document.getElementById("admin-qr-container").style.display = "none";
-            }
-            
-            // Stash user detail temporarily
-            currentUser = { username: data.username, role: data.role };
-        }
-    } catch (err) {
-        showError(err.message);
-    }
-}
-
-async function handleOTPSubmit(e) {
-    e.preventDefault();
-    showError("");
-    
-    const otpCode = document.getElementById("otp-input").value.trim();
-    if (!currentUser) return;
-    
-    try {
-        const response = await fetch(`${API_BASE}/auth/verify-otp`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username: currentUser.username, otp_code: otpCode })
-        });
-        
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Invalid code.");
-        
-        currentUser.token = data.token;
-        
-        // Login Successful
-        document.getElementById("auth-overlay").classList.remove("active");
-        document.getElementById("app-shell").style.display = "grid";
-        
-        initializeDashboard(currentUser);
-    } catch (err) {
-        showError(err.message);
-    }
-}
-
-function resetOTPForm() {
-    document.getElementById("otp-form").style.display = "none";
-    document.getElementById("login-form").style.display = "block";
-    showError("");
-}
-
-function proceedToSignInAfterRegister() {
-    document.getElementById("register-setup-form").style.display = "none";
-    document.getElementById("login-form").style.display = "block";
-    resetAuthActionToLogin();
-    showError("");
-}
-
-function showError(msg) {
-    const errorEl = document.getElementById("auth-error");
-    if (msg) {
-        errorEl.innerText = msg;
-        errorEl.style.display = "block";
-    } else {
-        errorEl.style.display = "none";
-    }
-}
-
-function logout() {
-    currentUser = null;
-    document.getElementById("app-shell").style.display = "none";
-    document.getElementById("auth-overlay").classList.add("active");
-    document.getElementById("login-form").style.display = "block";
-    document.getElementById("otp-form").style.display = "none";
-    document.getElementById("register-setup-form").style.display = "none";
-    document.getElementById("username-input").value = "";
-    document.getElementById("password-input").value = "";
-    showError("");
-}
 
 // ── DASHBOARD INITIALIZATION ──
 
@@ -290,24 +114,24 @@ function setupTabs(role) {
     let tabs = [];
     if (role === "auditee") {
         tabs = [
-            { id: "tab-upload-evidence", label: "📁 Upload Evidence" },
-            { id: "tab-submitted-reports", label: "📋 Submitted Reports" }
+            { id: "tab-upload-evidence", label: "Upload Evidence" },
+            { id: "tab-submitted-reports", label: "Submitted" }
         ];
     } else if (role === "admin") {
         tabs = [
-            { id: "tab-audit-records", label: "🛡️ Audit Records" },
-            { id: "tab-audit-report", label: "📋 Audit Report" },
-            { id: "tab-manage-controls", label: "⚙️ Manage Controls" },
-            { id: "tab-admin-logs", label: "📜 Admin Logs" }
+            { id: "tab-audit-records", label: "Scan workspace" },
+            { id: "tab-audit-report", label: "Report" },
+            { id: "tab-manage-controls", label: "Controls" },
+            { id: "tab-admin-logs", label: "Admin Logs" }
         ];
     } else {
         // Auditor Role
         tabs = [
-            { id: "tab-audit-records", label: "🛡️ Audit Records" },
-            { id: "tab-auditee-docs", label: "📂 Auditee Documents" },
-            { id: "tab-audit-report", label: "📋 Audit Report" },
-            { id: "tab-submitted-reports", label: "📑 Submitted Reports" },
-            { id: "tab-manage-controls", label: "⚙️ Manage Controls" }
+            { id: "tab-audit-records", label: "Scan workspace" },
+            { id: "tab-auditee-docs", label: "Auditee docs" },
+            { id: "tab-audit-report", label: "Report" },
+            { id: "tab-submitted-reports", label: "Submitted" },
+            { id: "tab-manage-controls", label: "Controls" }
         ];
     }
     
@@ -319,7 +143,6 @@ function setupTabs(role) {
         tabsBar.appendChild(btn);
     });
     
-    // Switch to first tab (Audit Records)
     if (tabsBar.firstChild) {
         switchTab(tabs[0].id, tabsBar.firstChild);
     }
@@ -616,6 +439,7 @@ async function uploadFiles(files) {
 
 async function loadEvidenceFileList() {
     const registry = document.getElementById("uploaded-files-registry");
+    const countBadge = document.getElementById("evidence-count-badge");
     if (!registry) return;
     registry.innerHTML = "";
     
@@ -624,14 +448,10 @@ async function loadEvidenceFileList() {
         const data = await response.json();
         
         if (data.success && data.sessions.length > 0) {
-            // Find active session in files list
-            // Note: in clean local SPA, files are loaded from activeSessionId
             const filesRes = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}`);
             const filesData = await filesRes.json();
             
-            // Renders mock evidence registry list (normally queried via EvidenceFile table)
             if (filesData.success && filesData.findings.length > 0) {
-                // Parse source files from findings
                 const filesList = new Set();
                 filesData.findings.forEach(f => {
                     if (f.source_files) {
@@ -639,6 +459,8 @@ async function loadEvidenceFileList() {
                     }
                 });
                 
+                if (countBadge) countBadge.innerText = `${filesList.size} files`;
+
                 if (filesList.size === 0) {
                     registry.innerHTML = `<div class="empty-state">No files recorded. Drag files to start.</div>`;
                     return;
@@ -646,20 +468,28 @@ async function loadEvidenceFileList() {
                 
                 filesList.forEach(fn => {
                     if (!fn) return;
+                    const ext = fn.split('.').pop().toLowerCase();
+                    let fileClass = "file-type-slate";
+                    let fileIconText = "FILE";
+                    
+                    if (ext === "pdf") { fileClass = "file-type-pdf"; fileIconText = "PDF"; }
+                    else if (["doc", "docx"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "DOC"; }
+                    else if (["xls", "xlsx", "csv"].includes(ext)) { fileClass = "file-type-xls"; fileIconText = "XLS"; }
+                    else if (["xml", "json", "txt", "log"].includes(ext)) { fileClass = "file-type-xml"; fileIconText = "XML"; }
+
                     const card = document.createElement("div");
-                    card.className = "file-card";
+                    card.className = "modern-file-card";
                     card.innerHTML = `
-                        <div class="file-info">
-                            <span class="file-icon">📄</span>
-                            <div>
-                                <span class="file-name" title="${fn}">${fn}</span>
-                            </div>
+                        <div class="file-icon-badge ${fileClass}">${fileIconText}</div>
+                        <div class="file-details">
+                            <span class="file-title" title="${fn}">${fn}</span>
+                            <span class="file-meta">Ready</span>
                         </div>
-                        <span class="badge-pill" style="color:var(--success); border-color:rgba(34,197,94,0.3);">READY</span>
                     `;
                     registry.appendChild(card);
                 });
             } else {
+                if (countBadge) countBadge.innerText = "0 files";
                 registry.innerHTML = `<div class="empty-state">No files uploaded yet. Drag files to begin audit.</div>`;
             }
         }
