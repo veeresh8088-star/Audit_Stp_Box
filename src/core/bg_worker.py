@@ -22,7 +22,7 @@ from src.core.controls_data import USE_CASES
 from src.core.input_guardrail import scan_file_security
 from src.core.parsers.doc_parsers import extract_text
 from src.core.retrieval import save_document_chunks
-from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock
+from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg_stop_flags
 from src.ai.audit_graph import audit_graph
 
 _CUSTOM_USE_CASES_CACHE = []
@@ -310,6 +310,11 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     summary_text = _generate_context_summary(context, ollama_model)
 
     for idx, c in enumerate(controls):
+        # ── STOP FLAG CHECK ─────────────────────────────────────────────
+        if _bg_stop_flags.get(bg_key):
+            print(f"[AUDIT STOPPED] User requested stop at control {idx + 1}/{total}. Exiting early.", flush=True)
+            break
+        # ────────────────────────────────────────────────────────────────
         control_start_time = time.time()
         start_msg = f"-> Running Control {idx + 1}/{total}: {c['control']} ({c['label']})"
         print(f"[{time.strftime('%H:%M:%S')}]   {start_msg}", flush=True)
@@ -382,6 +387,9 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             result = state_output.get("final_finding")
             if result:
                 all_results.append(result)
+            ctrl_duration = time.time() - control_start_time
+            res_status = result.get("status", "Unknown") if result else "None"
+            log_dev_latency(f"[{idx + 1}/{total}] [SUCCESS] Control {c['control']} {c['label']} completed in {ctrl_duration:.2f}s (Result: {res_status})")
         except Exception as e:
             print(f"[AUDIT ERROR] Error evaluating control {c['control']}: {e}", flush=True)
             log_dev_latency(f"ERROR: Control {c['control']} failed: {e}")
@@ -550,6 +558,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         with _bg_lock:
             _bg_running.discard(bg_key)
             _bg_store["progress"].pop(bg_key, None)
+            _bg_stop_flags.pop(bg_key, None)  # Clear stop flag on thread exit
 
 def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=None):
     all_findings = []

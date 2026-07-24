@@ -156,6 +156,7 @@ class ChatMessage(Base):
     session_title = Column(String(300))
     role          = Column(String(50))
     content       = Column(Text)
+    username      = Column(String(150), nullable=True, index=True)  # owner of this chat
     created_at    = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 class DocumentChunk(Base):

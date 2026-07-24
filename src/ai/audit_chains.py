@@ -540,8 +540,8 @@ class NativeOllamaChain:
         else:
             resolved_url = url or "http://127.0.0.1:11434"
             
-        # Set a high timeout (30 minutes) to prevent read timeouts on slower CPU-only environments
-        self.client = ollama.Client(host=resolved_url, timeout=1800.0)
+        # Set a 9 minute timeout — allows local llama.cpp CPU inference to complete without freezing.
+        self.client = ollama.Client(host=resolved_url, timeout=540.0)
         
     def invoke(self, input_dict: dict) -> AuditFindingSchema:
         import re

@@ -63,6 +63,24 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
         r = requests.post(url, json=payload, timeout=timeout)
         if r.status_code == 200:
             return r.json().get("response", "").strip()
+        elif r.status_code == 404:
+            # Fallback check for llama.cpp server running on same host
+            l_url = f"{host}/completion"
+            l_prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n" if "gemma" in model.lower() else prompt
+            l_payload = {
+                "prompt": l_prompt,
+                "temperature": temperature,
+                "stream": False,
+                "n_predict": 1024,
+                "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>"]
+            }
+            try:
+                lr = requests.post(l_url, json=l_payload, timeout=timeout)
+                if lr.status_code == 200:
+                    return lr.json().get("content", "").strip()
+            except Exception:
+                pass
+            raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
         else:
             raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
 

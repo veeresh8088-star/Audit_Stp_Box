@@ -431,7 +431,19 @@ async function loadFrameworkControls() {
         if (data.success) {
             container.innerHTML = "";
             const selectedStd = select.value;
+            const isVaptFramework = selectedStd.toUpperCase().includes("VAPT");
             
+            // Toggle Audit Mode UI options to match Streamlit exact workflow
+            const radios = document.getElementById("audit-mode-radios");
+            const notice = document.getElementById("vapt-mode-notice");
+            if (isVaptFramework) {
+                if (radios) radios.style.display = "none";
+                if (notice) notice.style.display = "block";
+            } else {
+                if (radios) radios.style.display = "flex";
+                if (notice) notice.style.display = "none";
+            }
+
             const filtered = data.controls.filter(c => {
                 if (selectedStd === "All Standards") return true;
                 const isVapt = (c.category || "").toUpperCase().includes("VAPT") || (c.use_case || "").toUpperCase().includes("VAPT");
@@ -638,8 +650,10 @@ let progressInterval = null;
 
 async function triggerAuditAnalysis() {
     const btn = document.getElementById("run-analysis-btn");
+    const stopBtn = document.getElementById("stop-analysis-btn");
     btn.disabled = true;
     btn.innerText = "⏳ Running Scan...";
+    if (stopBtn) stopBtn.style.display = "block";
     
     const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
     const selectedSls = Array.from(checkboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
@@ -648,11 +662,14 @@ async function triggerAuditAnalysis() {
         alert("⚠️ Please select at least one control to analyze.");
         btn.disabled = false;
         btn.innerText = "▶ Run RAG Scan";
+        if (stopBtn) stopBtn.style.display = "none";
         return;
     }
     
+    const frameworkSelect = document.getElementById("framework-select");
+    const isVaptFramework = frameworkSelect ? frameworkSelect.value.toUpperCase().includes("VAPT") : false;
     const model = document.getElementById("llm-model-select").value;
-    const mode = document.querySelector("input[name='audit-mode']:checked").value;
+    const mode = isVaptFramework ? "VAPT validation" : document.querySelector("input[name='audit-mode']:checked").value;
     
     try {
         const response = await fetch(`${API_BASE}/audit/start`, {
@@ -676,12 +693,14 @@ async function triggerAuditAnalysis() {
     } catch (err) {
         btn.disabled = false;
         btn.innerText = "▶ Run RAG Scan";
+        if (stopBtn) stopBtn.style.display = "none";
         alert(`Failed to start scan: ${err.message}`);
     }
 }
 
 async function pollAuditProgress() {
     const btn = document.getElementById("run-analysis-btn");
+    const stopBtn = document.getElementById("stop-analysis-btn");
     try {
         const response = await fetch(`${API_BASE}/audit/status/${activeSessionId}`);
         const data = await response.json();
@@ -693,6 +712,7 @@ async function pollAuditProgress() {
             clearInterval(progressInterval);
             btn.disabled = false;
             btn.innerText = "▶ Run RAG Scan";
+            if (stopBtn) stopBtn.style.display = "none";
             alert("✅ Local audit RAG analysis completed successfully!");
             
             // Reload findings list if active tab is audit records
@@ -703,10 +723,41 @@ async function pollAuditProgress() {
             clearInterval(progressInterval);
             btn.disabled = false;
             btn.innerText = "▶ Run RAG Scan";
+            if (stopBtn) stopBtn.style.display = "none";
             alert("❌ Analysis failed. Verify Ollama or local llama-server is running.");
+        } else if (data.status === "idle") {
+            // Could be a user-stopped scan
+            clearInterval(progressInterval);
+            btn.disabled = false;
+            btn.innerText = "▶ Run RAG Scan";
+            if (stopBtn) stopBtn.style.display = "none";
         }
     } catch (err) {
         console.error("Progress polling error:", err);
+    }
+}
+
+async function stopAuditAnalysis() {
+    const stopBtn = document.getElementById("stop-analysis-btn");
+    const btn = document.getElementById("run-analysis-btn");
+    if (!activeSessionId) return;
+    stopBtn.disabled = true;
+    stopBtn.innerText = "⏳ Stopping...";
+    try {
+        const res = await fetch(`${API_BASE}/audit/stop/${activeSessionId}`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            btn.innerText = "⏳ Stopping after current control...";
+            showToast("⛔ Stop signal sent — scan will stop after the current control.", "warning");
+        } else {
+            alert(data.message || "No active scan to stop.");
+            stopBtn.disabled = false;
+            stopBtn.innerText = "⛔ Stop Analysis";
+        }
+    } catch (err) {
+        alert(`Failed to stop scan: ${err.message}`);
+        stopBtn.disabled = false;
+        stopBtn.innerText = "⛔ Stop Analysis";
     }
 }
 
@@ -720,11 +771,28 @@ async function loadFindings() {
         const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser.role}`);
         const data = await response.json();
         
+        const banner = document.getElementById("shakti-commit-banner");
+        const bannerText = document.getElementById("shakti-banner-text");
+
         if (data.success && data.findings.length > 0) {
             findingsList = data.findings;
             renderFindingsList();
             calculateSeverityStats();
+
+            if (banner) {
+                banner.style.display = "flex";
+                if (data.session_title && data.session_title.includes("Finalized")) {
+                    banner.style.background = "rgba(16, 185, 129, 0.12)";
+                    banner.style.borderColor = "rgba(52, 211, 153, 0.35)";
+                    bannerText.innerHTML = `✅ <b>Committed to Shakthi DB:</b> ${data.findings.length} audit record(s) finalized and locked.`;
+                } else {
+                    banner.style.background = "rgba(245, 158, 11, 0.12)";
+                    banner.style.borderColor = "rgba(245, 158, 11, 0.35)";
+                    bannerText.innerHTML = `⚠️ <b>Notice:</b> ${data.findings.length} finding(s) loaded. Review records below and click "Save to Shakthi DB" to commit.`;
+                }
+            }
         } else {
+            if (banner) banner.style.display = "none";
             container.innerHTML = `<div class="empty-state">No compliance gaps recorded. Configure scope and click "Run RAG Scan" above!</div>`;
         }
     } catch (err) {
@@ -732,20 +800,56 @@ async function loadFindings() {
     }
 }
 
+async function commitSessionToShaktiDB() {
+    if (!activeSessionId) return;
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}`, {
+            method: "PUT"
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert(`✅ ${data.message}`);
+            loadFindings();
+        } else {
+            alert(`Failed to commit: ${data.message || 'Unknown error'}`);
+        }
+    } catch (err) {
+        alert(`Failed to commit findings to Shakthi DB: ${err.message}`);
+    }
+}
+
 function calculateSeverityStats() {
     let p1 = 0, p2 = 0, p3 = 0, p4 = 0;
+    let compliant = 0, nonCompliant = 0;
     findingsList.forEach(f => {
         const sev = (f.severity || "").toLowerCase();
         if (sev.includes("p1") || sev.includes("critical")) p1++;
         else if (sev.includes("p2") || sev.includes("high")) p2++;
         else if (sev.includes("p3") || sev.includes("medium")) p3++;
         else if (sev.includes("p4") || sev.includes("low")) p4++;
+
+        const st = (f.status || "").toUpperCase();
+        if (st.includes("COMPLIANT") && !st.includes("NON") && !st.includes("NOT") && !st.includes("PARTIAL")) {
+            compliant++;
+        } else {
+            nonCompliant++;
+        }
     });
     
-    document.getElementById("count-p1").innerText = p1;
-    document.getElementById("count-p2").innerText = p2;
-    document.getElementById("count-p3").innerText = p3;
-    document.getElementById("count-p4").innerText = p4;
+    if (document.getElementById("count-p1")) document.getElementById("count-p1").innerText = p1;
+    if (document.getElementById("count-p2")) document.getElementById("count-p2").innerText = p2;
+    if (document.getElementById("count-p3")) document.getElementById("count-p3").innerText = p3;
+    if (document.getElementById("count-p4")) document.getElementById("count-p4").innerText = p4;
+    if (document.getElementById("count-compliant")) document.getElementById("count-compliant").innerText = compliant;
+    if (document.getElementById("count-noncompliant")) document.getElementById("count-noncompliant").innerText = nonCompliant;
+}
+
+function toggleComplianceFilter(statusType) {
+    const select = document.getElementById("status-filter");
+    if (select) {
+        select.value = statusType;
+        renderFindingsList();
+    }
 }
 
 function toggleSeverityFilter(sev) {
@@ -770,13 +874,19 @@ function renderFindingsList() {
     const filterStatus = document.getElementById("status-filter").value;
     
     const filtered = findingsList.filter(f => {
+        const st = (f.status || "").toUpperCase();
+        const isCompliant = st.includes("COMPLIANT") && !st.includes("NON") && !st.includes("NOT") && !st.includes("PARTIAL");
+
         // Workflow status filter
-        if (filterStatus === "Open" && f.status === "Compliant") return false;
-        if (filterStatus === "Accepted" && f.status !== "Compliant") return false; // mappings from app.py
+        if (filterStatus === "Compliant" && !isCompliant) return false;
+        if (filterStatus === "Non-Compliant" && isCompliant) return false;
+        if (filterStatus === "Open" && isCompliant) return false;
+        if (filterStatus === "Accepted" && f.status !== "Accepted" && !isCompliant) return false;
+        if (filterStatus === "Rejected" && f.status !== "Rejected") return false;
         
         // Severity level filter
         if (activeSeverityFilter) {
-            const f_sev = f.severity.toLowerCase();
+            const f_sev = (f.severity || "").toLowerCase();
             const filter_sev = activeSeverityFilter.toLowerCase();
             if (!f_sev.includes(filter_sev.slice(0,2))) return false;
         }
@@ -799,15 +909,25 @@ function renderFindingsList() {
         
         card.className = `finding-card ${sevClass}`;
         
-        // Status Badge Style
+        // Case-Insensitive Status Badge Style (Compliant = GREEN)
         let statusBadgeClass = "non-compliant";
-        if (f.status === "Compliant") statusBadgeClass = "compliant";
-        else if (f.status === "Partially Compliant") statusBadgeClass = "partial";
+        const st = (f.status || "").toUpperCase();
+        if (st.includes("COMPLIANT") && !st.includes("NON") && !st.includes("NOT") && !st.includes("PARTIAL")) {
+            statusBadgeClass = "compliant";
+        } else if (st.includes("PARTIAL")) {
+            statusBadgeClass = "partial";
+        } else {
+            statusBadgeClass = "non-compliant";
+        }
         
+        // Clean Title formatting (fix '- null' bug)
+        const ctrlTitle = (f.control_name && f.control_name !== "null") ? f.control_name : ((f.control && f.control !== "null") ? f.control : "");
+        const displayTitle = ctrlTitle ? `${f.control_id} - ${ctrlTitle}` : f.control_id;
+
         card.innerHTML = `
             <div class="finding-card-header">
                 <div class="finding-card-title">
-                    <h3>${f.control_id} - ${f.control_name}</h3>
+                    <h3>${displayTitle}</h3>
                 </div>
                 <div class="finding-badges">
                     <span class="badge-status ${statusBadgeClass}">${f.status}</span>
@@ -949,7 +1069,8 @@ async function sendChatMessage() {
             body: JSON.stringify({
                 session_id: activeSessionId,
                 message: msg,
-                model_choice: model
+                model_choice: model,
+                username: currentUser.username
             })
         });
         
@@ -1563,7 +1684,7 @@ async function loadChatSessions() {
     sidebar.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;'>Loading history...</div>";
     
     try {
-        const response = await fetch(`${API_BASE}/audit/chats/sessions?role=${currentUser.role}`);
+        const response = await fetch(`${API_BASE}/audit/chats/sessions?role=${currentUser.role}&username=${encodeURIComponent(currentUser.username || '')}`);
         const data = await response.json();
         
         if (data.success) {
@@ -1613,7 +1734,7 @@ async function selectChatSession(sessionId) {
     feed.innerHTML = "<div class='empty-state'>Loading conversation...</div>";
     
     try {
-        const response = await fetch(`${API_BASE}/audit/chats/history?session_id=${sessionId}`);
+        const response = await fetch(`${API_BASE}/audit/chats/history?session_id=${sessionId}&username=${encodeURIComponent(currentUser.username || '')}`);
         const data = await response.json();
         
         if (data.success) {
@@ -1677,6 +1798,7 @@ async function clearChatSession(sessionId, event) {
     
     const body = new FormData();
     body.append("session_id", sessionId);
+    if (currentUser && currentUser.username) body.append("username", currentUser.username);
     
     try {
         const response = await fetch(`${API_BASE}/audit/chats/clear`, {

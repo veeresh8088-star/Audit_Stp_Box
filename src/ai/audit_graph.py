@@ -6,6 +6,7 @@ Integrates custom validators and retrieval with LangChain ChatOllama.
 """
 
 import time as _time
+import threading
 from typing import TypedDict, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, START, END
 from src.ai.audit_models import AuditFindingSchema
@@ -123,17 +124,30 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
     generator_chain = get_generator_chain(state["ollama_model"])
     
     try:
-        draft = generator_chain.invoke({
-            "summary_text": state["summary_text"],
-            "condensed_context": state["retrieved_context"],
-            "control_id": state["control_id"],
-            "control_label": state["control_label"],
-            "expected_evidence": state["expected_evidence"],
-            "feedback_section": feedback_section,
-            "standard": state.get("standard", "")
-        })
+        result_holder = {}
+        def _run():
+            try:
+                result_holder["draft"] = generator_chain.invoke({
+                    "summary_text": state["summary_text"],
+                    "condensed_context": state["retrieved_context"],
+                    "control_id": state["control_id"],
+                    "control_label": state["control_label"],
+                    "expected_evidence": state["expected_evidence"],
+                    "feedback_section": feedback_section,
+                    "standard": state.get("standard", "")
+                })
+            except Exception as ex:
+                result_holder["error"] = str(ex)
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=540)  # 9-minute hard limit per LLM call (local llama.cpp)
+        if t.is_alive():
+            print(f"[LANGGRAPH TIMEOUT] Generator timed out for control {state.get('control_id','')}. Skipping.", flush=True)
+            return {"draft_finding": None, "validation_error": "LLM call timed out after 120s"}
+        if "error" in result_holder:
+            raise Exception(result_holder["error"])
+        draft = result_holder["draft"]
 
-        
         return {
             "draft_finding": draft.model_dump(),
             "validation_error": None
@@ -292,25 +306,42 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
     draft = state["draft_finding"] or {}
     
     try:
-        refined = reflection_chain.invoke({
-            "condensed_context": state["retrieved_context"],
-            "control_id": state["control_id"],
-            "control_label": state["control_label"],
-            "draft_status": draft.get("status", "NON_COMPLIANT"),
-            "draft_severity": draft.get("severity", "P3 Medium"),
-            "draft_evidence": draft.get("evidence_quote", "NOT_FOUND"),
-            "draft_gap": draft.get("gap_description", ""),
-            "draft_recommendation": draft.get("recommendation", ""),
-            "draft_reasoning": draft.get("reasoning", ""),
-            "draft_business_impact": draft.get("business_impact", ""),
-            "draft_remediation_priority": draft.get("remediation_priority", "Medium"),
-            "draft_evidence_strength": draft.get("evidence_strength", "None"),
-            "draft_control_coverage": draft.get("control_coverage", 0),
-            "validation_error": state["validation_error"],
-            "standard": state.get("standard", "")
-        })
+        result_holder = {}
+        def _run_reflect():
+            try:
+                result_holder["refined"] = reflection_chain.invoke({
+                    "condensed_context": state["retrieved_context"],
+                    "control_id": state["control_id"],
+                    "control_label": state["control_label"],
+                    "draft_status": draft.get("status", "NON_COMPLIANT"),
+                    "draft_severity": draft.get("severity", "P3 Medium"),
+                    "draft_evidence": draft.get("evidence_quote", "NOT_FOUND"),
+                    "draft_gap": draft.get("gap_description", ""),
+                    "draft_recommendation": draft.get("recommendation", ""),
+                    "draft_reasoning": draft.get("reasoning", ""),
+                    "draft_business_impact": draft.get("business_impact", ""),
+                    "draft_remediation_priority": draft.get("remediation_priority", "Medium"),
+                    "draft_evidence_strength": draft.get("evidence_strength", "None"),
+                    "draft_control_coverage": draft.get("control_coverage", 0),
+                    "validation_error": state["validation_error"],
+                    "standard": state.get("standard", "")
+                })
+            except Exception as ex:
+                result_holder["error"] = str(ex)
+        t = threading.Thread(target=_run_reflect, daemon=True)
+        t.start()
+        t.join(timeout=540)  # 9-minute hard limit per reflection call (local llama.cpp)
+        if t.is_alive():
+            print(f"[LANGGRAPH TIMEOUT] Reflection timed out for control {state.get('control_id','')}. Accepting draft as-is.", flush=True)
+            return {
+                "draft_finding": draft,
+                "validation_error": None,
+                "retry_count": state["retry_count"] + 1
+            }
+        if "error" in result_holder:
+            raise Exception(result_holder["error"])
+        refined = result_holder["refined"]
 
-        
         return {
             "draft_finding": refined.model_dump(),
             "validation_error": None,

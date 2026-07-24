@@ -1,4 +1,6 @@
 @echo off
+cd /d "%~dp0"
+set "PYTHONPATH=%~dp0;%PYTHONPATH%"
 title AICyberAuditBox - Start All Local Services
 echo ==================================================
 echo   AICyberAuditBox: Unified Single-Click Launcher
@@ -47,4 +49,10 @@ set MKL_NUM_THREADS=4
 set OPENBLAS_NUM_THREADS=4
 
 start http://127.0.0.1:8000/
+echo.
+echo ==================================================
+echo   AICyberAuditBox API Server Running Live on 8000
+echo   Press Ctrl+C in this terminal to stop server.
+echo ==================================================
 python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+pause

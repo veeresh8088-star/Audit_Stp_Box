@@ -1,4 +1,3 @@
-# Auto-extracted document parsing utilities from app.py
 import os
 import io
 import re
@@ -6,10 +5,14 @@ import time
 import hashlib
 import numpy as np
 from src.db.database import DocumentChunk, force_master, SessionLocal
+from src.core.retrieval import _ingested_chunks_cache
 
-# Thread-safe global cache for custom ingested document chunks (imported from retrieval.py)
-# _ingested_chunks_cache is imported at the top of the file
-
+def get_ocr_reader():
+    try:
+        import easyocr
+        return easyocr.Reader(['en'], gpu=False)
+    except Exception:
+        return None
 
 # Regex for matching section headers (e.g. Clause 5.1, Section A.12, 12.6.1, A.12.6.1)
 HEADER_REGEX = re.compile(

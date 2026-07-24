@@ -21,7 +21,7 @@ from src.db.database import (
     AuditorFeedback,
     force_master
 )
-from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock
+from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg_stop_flags
 from src.core.bg_worker import (
     _run_ollama_bg,
     _run_fast_technical_vapt_bg,
@@ -105,6 +105,7 @@ class ChatSendRequest(BaseModel):
     session_id: str
     message: str
     model_choice: str
+    username: Optional[str] = None  # logged-in user sending this message
 
 # --- Endpoints ---
 
@@ -305,7 +306,24 @@ def api_start_audit(req: StartAuditRequest):
     finally:
         db.close()
 
+@router.post("/stop/{session_id}")
+def api_stop_audit(session_id: str):
+    """Signal the background audit thread to stop after the current control."""
+    with _bg_lock:
+        is_running = session_id in _bg_running
+    if not is_running:
+        return {"success": False, "message": "No audit is currently running for this session."}
+    _bg_stop_flags[session_id] = True
+    # Update progress to show user that stop was requested
+    with _bg_lock:
+        _bg_store["progress"][session_id] = {
+            "text": "⛔ Stop requested — finishing current control then stopping...",
+            "percent": _bg_store["progress"].get(session_id, {}).get("percent", 0)
+        }
+    return {"success": True, "message": "Stop signal sent. Scan will stop after the current control completes."}
+
 @router.get("/status/{session_id}")
+
 def api_get_status(session_id: str):
     with _bg_lock:
         is_running = session_id in _bg_running
@@ -428,17 +446,60 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest):
     finally:
         db.close()
 
+@router.put("/findings/commit-session/{session_id}")
+def api_commit_session_findings(session_id: str):
+    """Commits and finalizes all findings for a session into Shakthi DB, removing unreviewed warnings."""
+    db = SessionLocal()
+    try:
+        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+        if not report:
+            raise HTTPException(status_code=404, detail="Session not found.")
+            
+        with force_master():
+            report.status = "Reviewed & Finalized"
+            findings = db.query(Finding).filter(Finding.report_id == report.id).all()
+            
+            # Recalculate Compliance Score
+            total_ctrls = len(findings)
+            compliant_count = sum(1 for f in findings if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS"))
+            score_pct = int((compliant_count / total_ctrls) * 100) if total_ctrls > 0 else 0
+            
+            score_row = db.query(ComplianceScore).filter(ComplianceScore.report_id == report.id).first()
+            if score_row:
+                score_row.score_percent = score_pct
+                score_row.compliant_controls = compliant_count
+                score_row.total_controls = total_ctrls
+            else:
+                db.add(ComplianceScore(
+                    report_id=report.id,
+                    score_percent=score_pct,
+                    compliant_controls=compliant_count,
+                    total_controls=total_ctrls
+                ))
+            db.commit()
+            return {
+                "success": True, 
+                "message": f"Successfully committed {total_ctrls} audit record(s) to Shakthi DB (Compliance Score: {score_pct}%).",
+                "status": report.status,
+                "score_percent": score_pct
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Commit to Shakthi DB failed: {e}")
+    finally:
+        db.close()
+
 @router.post("/chats/send")
 def api_chat_send(req: ChatSendRequest):
     db = SessionLocal()
     try:
-        # Save user message
+        # Save user message (tagged with username for role isolation)
         with force_master():
             db.add(ChatMessage(
                 session_id=req.session_id,
                 session_title="AI Chat Session",
                 role="user",
-                content=req.message
+                content=req.message,
+                username=req.username
             ))
             db.commit()
             
@@ -462,13 +523,14 @@ Answer:"""
         ollama_model = _resolve_ollama_model(req.model_choice)
         response_text = query_llm(prompt, model=ollama_model)
         
-        # Save AI assistant message
+        # Save AI assistant message (tagged with same username)
         with force_master():
             db.add(ChatMessage(
                 session_id=req.session_id,
                 session_title="AI Chat Session",
                 role="assistant",
-                content=response_text
+                content=response_text,
+                username=req.username
             ))
             db.commit()
             
@@ -738,13 +800,20 @@ def api_import_feedback(file: UploadFile = File(...)):
         db.close()
 
 @router.get("/chats/sessions")
-def api_get_chat_sessions(role: Optional[str] = None):
-    """Retrieves list of active compliance sessions and conversations."""
+def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = None):
+    """Retrieves list of active compliance sessions scoped to the logged-in user."""
     db = SessionLocal()
     try:
         sessions_dict = {}
-        # 1. AuditReports
-        reports = db.query(AuditReport).all()
+        # 1. AuditReports — filter by user if auditee role
+        if role == "auditee" and username:
+            user = db.query(User).filter(User.username == username).first()
+            if user:
+                reports = db.query(AuditReport).filter(AuditReport.auditee_id == user.id).all()
+            else:
+                reports = []
+        else:
+            reports = db.query(AuditReport).all()
         for r in reports:
             sessions_dict[r.session_id] = {
                 "session_id": r.session_id,
@@ -752,16 +821,21 @@ def api_get_chat_sessions(role: Optional[str] = None):
                 "created_at": str(r.created_at)
             }
             
-        # 2. ChatMessages (incorporate any pure chat sessions)
-        if role != "auditee":
-            chats = db.query(ChatMessage).order_by(ChatMessage.created_at.desc()).all()
-            for c in chats:
-                if c.session_id not in sessions_dict:
-                    sessions_dict[c.session_id] = {
-                        "session_id": c.session_id,
-                        "session_title": c.session_title or "AI Chat Session",
-                        "created_at": str(c.created_at)
-                    }
+        # 2. ChatMessages — always scope to the requesting user only
+        if username:
+            chats = db.query(ChatMessage).filter(
+                ChatMessage.username == username
+            ).order_by(ChatMessage.created_at.desc()).all()
+        else:
+            # Legacy fallback: if no username passed, return nothing extra
+            chats = []
+        for c in chats:
+            if c.session_id not in sessions_dict:
+                sessions_dict[c.session_id] = {
+                    "session_id": c.session_id,
+                    "session_title": c.session_title or "AI Chat Session",
+                    "created_at": str(c.created_at)
+                }
                     
         # Sort
         sorted_sessions = list(sessions_dict.values())
@@ -773,11 +847,16 @@ def api_get_chat_sessions(role: Optional[str] = None):
         db.close()
 
 @router.get("/chats/history")
-def api_get_chat_history(session_id: str):
-    """Retrieves messages for specified chat session."""
+def api_get_chat_history(session_id: str, username: Optional[str] = None):
+    """Retrieves messages for specified chat session — filtered to the requesting user."""
     db = SessionLocal()
     try:
-        messages = db.query(ChatMessage).filter(ChatMessage.session_id == session_id).order_by(ChatMessage.created_at.asc()).all()
+        query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
+        if username:
+            # Only show messages that belong to this user OR have no username (legacy rows)
+            from sqlalchemy import or_
+            query = query.filter(or_(ChatMessage.username == username, ChatMessage.username == None))
+        messages = query.order_by(ChatMessage.created_at.asc()).all()
         res = []
         for m in messages:
             res.append({
@@ -792,12 +871,16 @@ def api_get_chat_history(session_id: str):
         db.close()
 
 @router.post("/chats/clear")
-def api_clear_chat_session(session_id: str = Form(...)):
-    """Clears messages and checkpoints for specified session."""
+def api_clear_chat_session(session_id: str = Form(...), username: Optional[str] = Form(None)):
+    """Clears only the current user's messages for a session."""
     db = SessionLocal()
     try:
         with force_master():
-            db.query(ChatMessage).filter(ChatMessage.session_id == session_id).delete()
+            q = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
+            if username:
+                from sqlalchemy import or_
+                q = q.filter(or_(ChatMessage.username == username, ChatMessage.username == None))
+            q.delete(synchronize_session=False)
             db.query(AuditCheckpoint).filter(AuditCheckpoint.session_id == session_id).delete()
             db.commit()
         return {"success": True, "message": "Chat history cleared successfully."}

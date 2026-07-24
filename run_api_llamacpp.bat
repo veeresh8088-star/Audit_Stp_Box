@@ -1,4 +1,6 @@
 @echo off
+cd /d "%~dp0"
+set "PYTHONPATH=%~dp0;%PYTHONPATH%"
 title AICyberAuditBox llama.cpp Local API Launcher
 echo ==========================================
 echo    AICyberAuditBox - Local Web Dashboard (llama.cpp)
