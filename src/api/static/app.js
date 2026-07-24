@@ -882,6 +882,7 @@ async function loadFindings() {
         const data = await response.json();
         
         const banner = document.getElementById("shakti-commit-banner");
+        const bannerText = document.getElementById("shakti-banner-text");
         if (banner) {
             banner.style.display = "flex";
             if (data.success && data.findings && data.findings.length > 0) {
