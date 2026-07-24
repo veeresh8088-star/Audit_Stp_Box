@@ -1000,6 +1000,37 @@ async function pollAuditProgress() {
     }
 }
 
+// ── TOAST NOTIFICATION HELPER ──
+function showToast(message, type = "info") {
+    let toast = document.getElementById("app-toast-notification");
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "app-toast-notification";
+        toast.style.cssText = "position: fixed; bottom: 24px; right: 24px; z-index: 9999; padding: 12px 20px; border-radius: 10px; font-size: 0.85rem; font-weight: 600; color: #ffffff; background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(148, 163, 184, 0.2); box-shadow: 0 10px 25px rgba(0,0,0,0.4); transition: all 0.3s ease; transform: translateY(100px); opacity: 0;";
+        document.body.appendChild(toast);
+    }
+    
+    if (type === "warning") {
+        toast.style.borderColor = "rgba(245, 158, 11, 0.6)";
+        toast.style.boxShadow = "0 4px 20px rgba(245, 158, 11, 0.2)";
+    } else if (type === "error") {
+        toast.style.borderColor = "rgba(239, 68, 68, 0.6)";
+        toast.style.boxShadow = "0 4px 20px rgba(239, 68, 68, 0.2)";
+    } else {
+        toast.style.borderColor = "rgba(59, 130, 246, 0.6)";
+        toast.style.boxShadow = "0 4px 20px rgba(59, 130, 246, 0.2)";
+    }
+    
+    toast.innerText = message;
+    toast.style.transform = "translateY(0)";
+    toast.style.opacity = "1";
+    
+    setTimeout(() => {
+        toast.style.transform = "translateY(100px)";
+        toast.style.opacity = "0";
+    }, 4000);
+}
+
 async function stopAuditAnalysis() {
     const stopBtn = document.getElementById("stop-analysis-btn");
     const btn = document.getElementById("run-analysis-btn");
