@@ -279,11 +279,13 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     class VAPTPDF(FPDF):
         def header(self):
             if self.page_no() > 1:
-                if os.path.exists(logo_path):
-                    self.image(logo_path, x=175, y=8, w=18)
                 self.set_font("Helvetica", "", 8.5)
                 self.set_text_color(100, 116, 139)
-                self.cell(0, 5, clean_text(f"{scope_type} Network VAPT Validation Report"), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                if os.path.exists(logo_path):
+                    self.image(logo_path, x=175, y=6, w=18)
+                    self.cell(155, 5, clean_text(f"{scope_type} Network VAPT Validation Report"), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                else:
+                    self.cell(0, 5, clean_text(f"{scope_type} Network VAPT Validation Report"), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(3)
 
         def footer(self):
@@ -988,7 +990,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             pdf.add_page()
             
         vuln_title = html.unescape(str(f.get("title") or f.get("finding") or f.get("control") or f"Finding 3.3.{idx}"))
-        desc = html.unescape(str(f.get("finding") or f.get("gap_description") or f.get("description") or "-"))
+        desc = html.unescape(str(f.get("description") or f.get("gap_description") or f.get("finding") or "-"))
         target = html.unescape(str(f.get("target") or f.get("control_id") or "Scoped Network Endpoints / Systems"))
         conf_val = str(f.get("confidence") or "").strip()
         if conf_val and conf_val.lower() in ("certain", "firm", "tentative"):
@@ -1583,7 +1585,7 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         sev_label = str(f.get("severity", "Low")).split()[-1].upper()
         
         status_val = html.unescape(str(f.get("status") or "Detected"))
-        desc_val = html.unescape(str(f.get("finding", "") or f.get("gap_description", "") or ""))
+        desc_val = html.unescape(str(f.get("description", "") or f.get("gap_description", "") or f.get("finding", "") or ""))
         target_val = html.unescape(str(f.get("target") or f.get("control_id", "") or "Web / Network infrastructure"))
         poc_val = html.unescape(str(f.get("evidence") or f.get("evidence_snippet") or f.get("evidence_quote") or f.get("poc") or "N/A"))
         remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
