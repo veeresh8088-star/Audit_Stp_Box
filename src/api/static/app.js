@@ -80,12 +80,12 @@ function selectRole(role) {
     const targetBtn = document.getElementById(`role-${role}-btn`);
     if (targetBtn) targetBtn.classList.add("active");
     
-    // Auto-fill default credentials for instant frictionless testing
+    // Keep input fields clean for user manual entry
     const usernameInput = document.getElementById("username-input");
     const passwordInput = document.getElementById("password-input");
     if (usernameInput && passwordInput) {
-        usernameInput.value = role;
-        passwordInput.value = role === "admin" ? "admin123" : `${role}123`;
+        usernameInput.value = "";
+        passwordInput.value = "";
     }
 
     // Update descriptions
