@@ -182,8 +182,8 @@ async function handleLoginSubmit(e) {
             document.getElementById("otp-input").value = "";
             document.getElementById("otp-input").focus();
             
-            // If admin, show the seeded OTP QR code
-            if (data.username === "admin" && data.qr_code_base64) {
+            // Display 2FA TOTP QR code for authenticator apps
+            if (data.qr_code_base64) {
                 document.getElementById("admin-qr-container").style.display = "block";
                 document.getElementById("admin-qr-img").src = data.qr_code_base64;
                 document.getElementById("admin-qr-secret").innerText = data.totp_secret_preview;
@@ -2413,6 +2413,8 @@ async function exportFindingsDOCX() {
     } catch (err) {
         alert(`Failed to export Word document: ${err.message}`);
     }
+}
+
 async function renderAuditReportPreview() {
     const container = document.getElementById("report-preview-container");
     if (!container) return;

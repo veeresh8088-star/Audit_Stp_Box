@@ -65,25 +65,25 @@ def api_login(req: LoginRequest):
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
     
-    # Check if user is admin (requires custom QR code display if TOTP not set, handled in UI)
-    is_admin = user["username"] == "admin"
-    
-    # For seeded admin, return QR code data if they need to scan it first
+    # Generate TOTP QR code and secret preview for Authenticator apps
     qr_code_base64 = None
-    if is_admin:
-        totp = pyotp.totp.TOTP(user["totp_secret"])
-        provisioning_uri = totp.provisioning_uri(name="admin", issuer_name="AICyberAuditBox")
-        img = qrcode.make(provisioning_uri)
-        buf = BytesIO()
-        img.save(buf, format="PNG")
-        qr_code_base64 = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
+    totp_secret = user.get("totp_secret")
+    if not totp_secret:
+        totp_secret = pyotp.random_base32()
+        
+    totp = pyotp.totp.TOTP(totp_secret)
+    provisioning_uri = totp.provisioning_uri(name=user["username"], issuer_name="AICyberAuditBox")
+    img = qrcode.make(provisioning_uri)
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    qr_code_base64 = f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('utf-8')}"
         
     return {
         "success": True,
         "username": user["username"],
         "role": user["role"],
         "requires_otp": True,
-        "totp_secret_preview": user["totp_secret"] if is_admin else None,
+        "totp_secret_preview": totp_secret,
         "qr_code_base64": qr_code_base64
     }
 
