@@ -7,10 +7,16 @@ import numpy as np
 from src.db.database import DocumentChunk, force_master, SessionLocal
 from src.core.retrieval import _ingested_chunks_cache
 
+_OCR_READER = None
+
 def get_ocr_reader():
+    global _OCR_READER
+    if _OCR_READER is not None:
+        return _OCR_READER
     try:
         import easyocr
-        return easyocr.Reader(['en'], gpu=False)
+        _OCR_READER = easyocr.Reader(['en'], gpu=False, verbose=False)
+        return _OCR_READER
     except Exception:
         return None
 

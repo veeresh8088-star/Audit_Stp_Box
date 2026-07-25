@@ -35,28 +35,41 @@ class BurpParser(BaseParser):
         return self._parse_plaintext(content)
 
     def _calculate_score(self, severity: str, confidence: str) -> float:
+        score, _ = self._calculate_score_and_vector("", severity, confidence)
+        return score
+
+    def _calculate_score_and_vector(self, vuln_title: str, severity: str, confidence: str) -> Tuple[float, str]:
+        t_lower = (vuln_title or "").lower()
         sev_upper = (severity or "").strip().upper()
-        conf_upper = (confidence or "").strip().upper()
+
+        if "sql injection" in t_lower:
+            return 9.8, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+        elif "xml external entity" in t_lower or "xxe" in t_lower:
+            return 9.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+        elif "template injection" in t_lower or "csti" in t_lower:
+            return 8.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:N"
+        elif "external service interaction (http)" in t_lower or "ssrf" in t_lower:
+            return 8.6, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"
+        elif "cross-site scripting" in t_lower or "xss" in t_lower:
+            return 7.2, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+        elif "open redirection" in t_lower or "open redirect" in t_lower:
+            return 6.1, "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+        elif "javascript dependency" in t_lower or "cve-2020-7676" in t_lower:
+            return 5.3, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
+        elif "autocomplete" in t_lower:
+            return 3.5, "CVSS:3.1/AV:P/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
+        elif "strict transport security" in t_lower or "hsts" in t_lower:
+            return 3.5, "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N"
+        elif "information" in sev_upper or "info" in sev_upper:
+            return 0.0, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"
 
         if "HIGH" in sev_upper:
-            if "CERTAIN" in conf_upper:
-                return 9.0
-            elif "TENTATIVE" in conf_upper:
-                return 7.5
-            return 8.5  # Firm / default
+            return 8.0, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:L/A:N"
         elif "MED" in sev_upper:
-            if "CERTAIN" in conf_upper:
-                return 6.5
-            elif "TENTATIVE" in conf_upper:
-                return 4.5
-            return 5.5
+            return 5.5, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"
         elif "LOW" in sev_upper:
-            if "CERTAIN" in conf_upper:
-                return 3.5
-            elif "TENTATIVE" in conf_upper:
-                return 1.5
-            return 2.5
-        return 0.0  # Information / None
+            return 2.5, "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:L/I:N/A:N"
+        return 0.0, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"
 
     def _parse_html(self, content: str) -> Tuple[List[Finding], List[Finding]]:
         soup = BeautifulSoup(content, 'html.parser')
@@ -130,7 +143,12 @@ class BurpParser(BaseParser):
                 else:
                     severity = "INFO"
 
-                score = self._calculate_score(severity, raw_conf)
+                score, cvss_vector = self._calculate_score_and_vector(cat_title, raw_sev, raw_conf)
+                if score >= 9.0: severity = "CRITICAL"
+                elif score >= 7.0: severity = "HIGH"
+                elif score >= 4.0: severity = "MEDIUM"
+                elif score > 0.0: severity = "LOW"
+                else: severity = "INFO"
 
                 # Extract issue detail and request/response snippets
                 issue_detail = ""
@@ -173,6 +191,8 @@ class BurpParser(BaseParser):
                     title=title,
                     severity=severity,
                     severity_score=score,
+                    cvss_vector=cvss_vector,
+                    confidence=raw_conf or "Firm",
                     cve_list=cves,
                     target=target_str,
                     description=full_desc,

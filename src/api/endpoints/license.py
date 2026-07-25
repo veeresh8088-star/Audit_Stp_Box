@@ -101,6 +101,28 @@ def activate_license(req: LicenseActivateRequest):
             wallet = _get_or_create_default_wallet(db)
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             
+            # Parse parameters from key format e.g. STPI-30D-20A-2000INR-SIG
+            import re
+            match = re.match(r'^([A-Z0-9]+)-(\d+)D-(\d+)A-(\d+)INR-([A-Z0-9]+)$', key_clean)
+            if match:
+                prefix, days, audits, credit, sig = match.groups()
+                days_add = int(days)
+                audits_add = int(audits)
+                credit_add = float(credit)
+                
+                wallet.license_type = "ENTERPRISE" if "ENT" in prefix or "PRO" in prefix else "STPI_TRIAL"
+                wallet.license_key = key_clean
+                wallet.balance_rupees += credit_add
+                wallet.audits_allowed += audits_add
+                wallet.audits_completed = 0  # reset completed count on fresh key
+                wallet.expiry_date = (wallet.expiry_date if wallet.expiry_date and wallet.expiry_date > now else now) + timedelta(days=days_add)
+                wallet.is_active = True
+                db.commit()
+                return {
+                    "message": f"License Activated! Added +{days_add} Days, +{audits_add} Audits, and +₹{credit_add:.2f} Credit Balance.",
+                    "new_balance": wallet.balance_rupees
+                }
+
             if "ENTERPRISE" in key_clean or "PRO" in key_clean or "STPI" in key_clean:
                 wallet.license_type = "ENTERPRISE"
                 wallet.license_key = key_clean

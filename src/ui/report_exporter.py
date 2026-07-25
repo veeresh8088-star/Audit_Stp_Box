@@ -65,6 +65,26 @@ def _get_all_parsed_findings_from_registry():
 
         dict_findings = []
         for f in deduped.values():
+            sev = str(f.severity or "INFO").strip().upper()
+            score_val = f.severity_score
+            try:
+                score_num = float(score_val) if score_val is not None else 0.0
+            except Exception:
+                score_num = 0.0
+
+            if "CRIT" in sev and (score_num < 9.0 or score_num > 10.0):
+                score_num = 9.5
+            elif "HIGH" in sev and (score_num < 7.0 or score_num > 8.9):
+                score_num = 8.0
+            elif "MED" in sev and (score_num < 4.0 or score_num > 6.9):
+                score_num = 5.5
+            elif "LOW" in sev and (score_num < 0.1 or score_num > 3.9):
+                score_num = 2.5
+            elif "INFO" in sev:
+                score_num = 0.0
+            elif score_num == 0.0:
+                score_num = 2.5
+
             dict_findings.append({
                 "control": f.title,
                 "title": f.title,
@@ -73,7 +93,7 @@ def _get_all_parsed_findings_from_registry():
                 "target": f.target or "Scoped Targets",
                 "finding": f.description or f.title,
                 "status": "Detected",
-                "severity_score": f.severity_score if f.severity_score is not None else (9.5 if f.severity == "CRITICAL" else (8.0 if f.severity == "HIGH" else (5.0 if f.severity == "MEDIUM" else 2.5))),
+                "severity_score": score_num,
                 "severity": f.severity,
                 "cvss_vector": f.cvss_vector or "",
                 "evidence_quote": f.evidence,
@@ -238,8 +258,19 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     poc_lk13  = os.path.join(assets_dir, "poc_lucky13.png")
     poc_hsts  = os.path.join(assets_dir, "poc_hsts.png")
 
-    scope_type = "External" if "external" in session_title.lower() else "Internal"
-    doc_title = f"{scope_type} Network Vulnerability Assessment and Penetration Testing Validation Report"
+    s_title_lower = session_title.lower()
+    if "combined" in s_title_lower or ("web" in s_title_lower and "internal" in s_title_lower):
+        scope_type = "Internal & Web App"
+        doc_title = "Combined Internal Network & Web Application VAPT Validation Report"
+    elif "web" in s_title_lower or "app" in s_title_lower:
+        scope_type = "Web Application"
+        doc_title = "Web Application Vulnerability Assessment and Penetration Testing Validation Report"
+    elif "external" in s_title_lower:
+        scope_type = "External Network"
+        doc_title = "External Network Vulnerability Assessment and Penetration Testing Validation Report"
+    else:
+        scope_type = "Internal Network"
+        doc_title = "Internal Network Vulnerability Assessment and Penetration Testing Validation Report"
 
     TUV_BLUE = (0, 80, 157)      # Corporate TÜV SÜD Blue #00509D
     DARK_TEXT = (15, 23, 42)
@@ -434,6 +465,63 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     draw_banner("TABLE OF CONTENTS")
     pdf.ln(2)
 
+    if findings:
+        active_findings = [f.to_dict() if hasattr(f, "to_dict") else dict(f) for f in findings if (isinstance(f, dict) and f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")) or (hasattr(f, "status") and f.status not in ("Out of Scope", "False Positive", "FALSE_POSITIVE"))]
+    else:
+        active_findings = _get_all_parsed_findings_from_registry()
+
+    for f in active_findings:
+        s_val = f.get("severity_score") if f.get("severity_score") is not None else f.get("score")
+        try:
+            s_num = float(s_val) if s_val is not None else 0.0
+        except Exception:
+            s_num = 0.0
+
+        r_sev = str(f.get("severity", "")).upper()
+        if s_num > 0.0:
+            if s_num >= 9.0: c_sev = "CRITICAL"
+            elif s_num >= 7.0: c_sev = "HIGH"
+            elif s_num >= 4.0: c_sev = "MEDIUM"
+            else: c_sev = "LOW"
+        else:
+            if "CRIT" in r_sev or "P1" in r_sev: c_sev, s_num = "CRITICAL", 9.8
+            elif "HIGH" in r_sev or "P2" in r_sev: c_sev, s_num = "HIGH", 8.0
+            elif "MED" in r_sev or "P3" in r_sev: c_sev, s_num = "MEDIUM", 5.5
+            elif "LOW" in r_sev or "P4" in r_sev: c_sev, s_num = "LOW", 2.5
+            else: c_sev, s_num = "INFO", 0.0
+
+        f["severity"] = c_sev
+        f["severity_score"] = s_num
+        f["score"] = s_num
+
+    critical_cnt = sum(1 for f in active_findings if f.get("severity") == "CRITICAL")
+    high_cnt = sum(1 for f in active_findings if f.get("severity") == "HIGH")
+    medium_cnt = sum(1 for f in active_findings if f.get("severity") == "MEDIUM")
+    low_cnt = sum(1 for f in active_findings if f.get("severity") == "LOW")
+
+    def sort_key(f):
+        sc = float(f.get("severity_score") or f.get("score") or 0.0)
+        is_web = 1.0 if (str(f.get("source_tool", "")).lower() in ("burp suite", "burp") or "http" in str(f.get("target", "")).lower()) else 0.0
+        return (sc, is_web)
+
+    if active_findings:
+        active_findings = sorted(active_findings, key=sort_key, reverse=True)
+
+    import math
+    list_to_show = active_findings if active_findings else default_findings
+    total_cnt = len(list_to_show)
+    detail_findings = list_to_show[:40]
+    summary_findings = list_to_show[40:]
+
+    # Dynamic TOC page calculations
+    vapt_table_pages = max(1, math.ceil(total_cnt / 22))
+    p_sec_2_4 = 8 + vapt_table_pages
+    p_sec_3_0 = p_sec_2_4 + 1
+    detail_card_pages = math.ceil(len(detail_findings) * 0.65) if detail_findings else 1
+    summary_table_pages = math.ceil(len(summary_findings) / 30) if summary_findings else 0
+    p_sec_4_0 = p_sec_3_0 + detail_card_pages + summary_table_pages
+    p_sec_5_0 = p_sec_4_0 + 1
+
     toc_items = [
         ("1 Penetration Test Methodology", "4"),
         ("   1.2 Standards-Based Testing and Reporting", "4"),
@@ -446,16 +534,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         ("      2.3.2 Tabular Summary", "7"),
         ("      2.3.3 Graphical Summary", "7"),
         ("      2.3.4 Vulnerabilities Summary", "8"),
-        ("   2.4 Tactical Recommendations", "8"),
-        (f"3 Technical Detail Report: {scope_type} Network Vulnerability Assessment and Penetration Testing", "9"),
-        ("   3.2 Testing Environment", "9"),
-        ("   3.3 Findings", "9"),
-        ("4 Appendix", "12"),
-        ("   4.1 Testing Environment: Production", "12"),
-        ("      4.1.1 Testing Environment Conditions", "12"),
-        ("      4.1.2 Tools Used", "12"),
-        ("      4.1.3 Provided Documentation", "12"),
-        ("5 Disclaimer", "13")
+        ("   2.4 Tactical Recommendations", str(p_sec_2_4)),
+        (f"3 Technical Detail Report: {scope_type} Network Vulnerability Assessment and Penetration Testing", str(p_sec_3_0)),
+        ("   3.2 Testing Environment", str(p_sec_3_0)),
+        ("   3.3 Findings", str(p_sec_3_0)),
+        ("4 Appendix", str(p_sec_4_0)),
+        ("   4.1 Testing Environment: Production", str(p_sec_4_0)),
+        ("      4.1.1 Testing Environment Conditions", str(p_sec_4_0)),
+        ("      4.1.2 Tools Used", str(p_sec_4_0)),
+        ("      4.1.3 Provided Documentation", str(p_sec_4_0)),
+        ("5 Disclaimer", str(p_sec_5_0))
     ]
 
     pdf.set_font("Helvetica", "", 9)
@@ -486,7 +574,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
     pdf.multi_cell(0, 4, clean_text(
-        f"The overarching goal of a penetration test is to identify the vulnerabilities in a target of evaluation. To assist in the prioritization of vulnerability remediation, {auditor_firm} utilizes the Common Vulnerability Scoring System (CVSS v4.0). "
+        f"The overarching goal of a penetration test is to identify the vulnerabilities in a target of evaluation. To assist in the prioritization of vulnerability remediation, {auditor_firm} utilizes the Common Vulnerability Scoring System (CVSS v3.0 / v3.1 / v4.0). "
         "CVSS assists in the assessment of a vulnerability's severity by providing a standard set of characteristics by which the vulnerability is scored. These scores are then used to calculate an overall severity score from 1-10; 1 being lowest and 10 being highest."
     ))
     pdf.ln(2.5)
@@ -566,7 +654,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             ("Vulnerability Description", "Provides an overview of identified vulnerability including how it could be useful to an adversary."),
             ("Target(s)", "Provides a list of systems and network endpoints relevant to the vulnerability."),
             ("Status", "Contains either 'Verified' or 'Detected' indicating whether the flaw was actively exploited."),
-            ("CVSSv4.0 Scoring", "Provides overall severity score and individual vector metrics (AV, AC, AT, PR, UI, VC, VI, VA)."),
+            ("CVSS Base Metrics & Scoring", "Provides overall severity score and individual vector metrics (AV, AC, PR, UI, C, I, A)."),
             ("Proof of Concept", "Provides descriptions, screenshots, or command logs showing how the flaw was detected/reproduced."),
             ("Remediation", "Provides suggestions and technical steps on how to mitigate the vulnerability."),
             ("References", "Provides links to CVEs, CWEs, and official documentation resources.")
@@ -596,15 +684,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     try:
         import streamlit as st
         dynamic_ips = st.session_state.get("target_ips") or st.session_state.get("scoped_ips")
-        if not dynamic_ips and findings:
+        if findings:
             extracted_hosts = set()
             for f in findings:
                 host_val = f.get("host") or f.get("target") or f.get("ip")
                 if host_val:
-                    # extract IP or hostname string
                     for h in str(host_val).replace(",", " ").split():
                         h_clean = h.strip()
-                        if h_clean and h_clean.lower() not in ("n/a", "none", "unknown"):
+                        if h_clean and h_clean.lower() not in ("n/a", "none", "unknown", "—"):
                             extracted_hosts.add(h_clean)
             if extracted_hosts:
                 dynamic_ips = sorted(list(extracted_hosts))
@@ -636,21 +723,11 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     else:
         active_findings = _get_all_parsed_findings_from_registry()
 
-    critical_cnt = 0
-    high_cnt = 0
-    medium_cnt = 0
-    low_cnt = 0
-
-    for f in active_findings:
-        s_raw = str(f.get("severity", "")).upper()
-        if "CRITICAL" in s_raw or "P1" in s_raw:
-            critical_cnt += 1
-        elif "HIGH" in s_raw or "P2" in s_raw:
-            high_cnt += 1
-        elif "MEDIUM" in s_raw or "P3" in s_raw:
-            medium_cnt += 1
-        elif "LOW" in s_raw or "P4" in s_raw:
-            low_cnt += 1
+    critical_cnt = sum(1 for f in active_findings if f.get("severity") == "CRITICAL")
+    high_cnt     = sum(1 for f in active_findings if f.get("severity") == "HIGH")
+    medium_cnt   = sum(1 for f in active_findings if f.get("severity") == "MEDIUM")
+    low_cnt      = sum(1 for f in active_findings if f.get("severity") == "LOW")
+    info_cnt     = sum(1 for f in active_findings if f.get("severity") == "INFO")
 
     total_cnt = len(active_findings) if active_findings else 2
 
@@ -668,14 +745,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     hdr_high = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(255, 0, 0))
     hdr_med  = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(255, 192, 0))
     hdr_low  = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(0, 176, 80))
+    hdr_info = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(0, 112, 192))
     hdr_tot  = FontFace(emphasis="B", color=(255, 255, 255), fill_color=(127, 127, 127))
 
-    with pdf.table(col_widths=(35, 35, 35, 35, 40), text_align="C") as table:
+    with pdf.table(col_widths=(30, 30, 30, 30, 30, 30), text_align="C") as table:
         h = table.row()
         h.cell("Critical", style=hdr_crit)
         h.cell("High", style=hdr_high)
         h.cell("Medium", style=hdr_med)
         h.cell("Low", style=hdr_low)
+        h.cell("Info", style=hdr_info)
         h.cell("Total Findings", style=hdr_tot)
 
         r = table.row()
@@ -683,6 +762,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         r.cell(str(high_cnt), style=body_style)
         r.cell(str(medium_cnt), style=body_style)
         r.cell(str(low_cnt), style=body_style)
+        r.cell(str(info_cnt), style=body_style)
         r.cell(str(total_cnt), style=lbl_style)
 
     pdf.ln(4)
@@ -690,9 +770,77 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.cell(0, 4.5, "2.3.3 Graphical Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
 
-    # Embed Risk Severity Bar Chart image
-    if os.path.exists(chart_path):
-        pdf.image(chart_path, x=20, y=pdf.get_y(), w=170)
+    # Dynamic Risk Severity Bar Chart Generation (Native FPDF2 - 100% Environment Compatible)
+    chart_drawn = False
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import tempfile, uuid
+
+        tmp_chart_file = os.path.join(tempfile.gettempdir(), f"vapt_chart_{uuid.uuid4().hex[:8]}.png")
+        fig, ax = plt.subplots(figsize=(6.5, 2.2), dpi=200)
+        categories = ['Low', 'Medium', 'High', 'Critical']
+        values = [int(low_cnt), int(medium_cnt), int(high_cnt), int(critical_cnt)]
+        colors = ['#00b050', '#ffc000', '#ff0000', '#c00000']
+
+        bars = ax.barh(categories, values, color=colors, height=0.55)
+        ax.set_xlim(0, max(values + [10]) * 1.15)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        ax.spines['left'].set_color('#cbd5e1')
+        ax.tick_params(axis='both', which='both', length=0, labelsize=9)
+        ax.set_title("Vulnerability Severity Distribution", fontsize=11, fontweight='bold', pad=10, color='#0f172a')
+
+        for bar, val in zip(bars, values):
+            if val > 0:
+                ax.text(val + (max(values)*0.02), bar.get_y() + bar.get_height()/2, f" {val}",
+                        va='center', ha='left', fontsize=9, fontweight='bold', color='#0f172a')
+
+        plt.tight_layout()
+        plt.savefig(tmp_chart_file, format='png', bbox_inches='tight')
+        plt.close(fig)
+        if os.path.exists(tmp_chart_file):
+            pdf.image(tmp_chart_file, x=20, y=pdf.get_y(), w=170)
+            chart_drawn = True
+    except Exception:
+        chart_drawn = False
+
+    # Native FPDF2 Chart Fallback (Guarantees exact counts 99/7 if matplotlib missing)
+    if not chart_drawn:
+        pdf.ln(2)
+        start_chart_y = pdf.get_y()
+        max_val = max([critical_cnt, high_cnt, medium_cnt, low_cnt, info_cnt, 1])
+        max_bar_w = 110.0
+        categories_data = [
+            ("Critical", critical_cnt, (192, 0, 0)),
+            ("High",     high_cnt,     (255, 0, 0)),
+            ("Medium",   medium_cnt,   (255, 192, 0)),
+            ("Low",      low_cnt,      (0, 176, 80)),
+            ("Info",     info_cnt,     (0, 112, 192))
+        ]
+        for c_idx, (c_label, c_val, c_col) in enumerate(categories_data):
+            row_y = start_chart_y + (c_idx * 7.5)
+            pdf.set_xy(20, row_y)
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(*DARK_TEXT)
+            pdf.cell(22, 5, c_label)
+            
+            bar_w = max(3.0, (c_val / max_val) * max_bar_w) if c_val > 0 else 0
+            if bar_w > 0:
+                pdf.set_fill_color(*c_col)
+                pdf.rect(45, row_y + 0.5, bar_w, 4.0, style="F")
+                pdf.set_xy(47 + bar_w, row_y)
+                pdf.set_font("Helvetica", "B", 8.5)
+                pdf.set_text_color(*DARK_TEXT)
+                pdf.cell(15, 5, str(c_val))
+            else:
+                pdf.set_xy(47, row_y)
+                pdf.set_font("Helvetica", "", 8.5)
+                pdf.set_text_color(*BODY_TEXT)
+                pdf.cell(15, 5, "0")
+        pdf.set_y(start_chart_y + 34)
 
     # ── PAGE 8: VULNERABILITIES SUMMARY TABLE ──────────────────────────────
     pdf.add_page()
@@ -716,17 +864,30 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         list_to_show = active_findings if active_findings else default_findings
         for idx, f in enumerate(list_to_show, 1):
             title = f.get("title", "") or f.get("finding", "") or f.get("control", "") or f"Vulnerability {idx}"
-            score_str = str(f.get("severity_score", f.get("score", "2.3")))
             sev_str = str(f.get("severity", f.get("sev", "LOW"))).split()[-1].upper()
+            score_val = f.get("severity_score") or f.get("score")
+            try:
+                score_num = float(score_val) if score_val is not None else 0.0
+            except Exception:
+                score_num = 0.0
+
+            if score_num <= 0.0:
+                if "CRIT" in sev_str: score_num = 9.5
+                elif "HIGH" in sev_str: score_num = 8.0
+                elif "MED" in sev_str: score_num = 5.5
+                elif "LOW" in sev_str: score_num = 2.5
+                else: score_num = 0.0
+
+            score_str = f"{score_num:.1f}"
+            f["derived_score_str"] = score_str
             r = table.row()
             r.cell(f"{idx}.", style=body_style)
             r.cell(clean_text(title), style=body_style)
             r.cell(score_str, style=body_style)
             r.cell(sev_str, style=body_style)
 
-        # Dynamic Overall Score calculation
-        scores = [float(f.get("severity_score", f.get("score", 0.0)) or 0.0) for f in list_to_show]
-        max_score_val = max(scores) if scores else 9.8
+        # Dynamic Overall Score calculation based on active finding severities
+        overall_score_val = 10.0 if critical_cnt > 0 else (8.5 if high_cnt > 0 else (5.5 if medium_cnt > 0 else 2.5))
         if critical_cnt > 0:
             overall_sev = "CRITICAL"
         elif high_cnt > 0:
@@ -739,7 +900,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         r_over = table.row()
         r_over.cell("", style=lbl_style)
         r_over.cell("OVERALL SCORE", style=lbl_style)
-        r_over.cell(f"{max_score_val:.1f}", style=lbl_style)
+        r_over.cell(f"{overall_score_val:.1f}", style=lbl_style)
         r_over.cell(overall_sev, style=lbl_style)
 
     pdf.ln(5)
@@ -827,17 +988,18 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         vuln_title = html.unescape(str(f.get("title") or f.get("finding") or f.get("control") or f"Finding 3.3.{idx}"))
         desc = html.unescape(str(f.get("finding") or f.get("gap_description") or f.get("description") or "-"))
         target = html.unescape(str(f.get("target") or f.get("control_id") or "Scoped Network Endpoints / Systems"))
-        status_raw = str(f.get("status") or "Detected").strip()
-        if status_raw.lower() in ("non-compliant", "non_compliant", "failed"):
-            status_str = "Detected"
-        elif status_raw.lower() in ("compliant", "passed"):
-            status_str = "Mitigated"
+        conf_val = str(f.get("confidence") or "").strip()
+        if conf_val and conf_val.lower() in ("certain", "firm", "tentative"):
+            status_str = f"Detected ({conf_val.capitalize()})"
         else:
-            status_str = status_raw
+            status_str = "Detected"
+
         score_val = float(f.get("severity_score", f.get("score", 2.3)) or 2.3)
         sev_val = str(f.get("severity", f.get("sev", "LOW"))).split()[-1].upper()
         
-        if f.get("metrics_text"):
+        if f.get("cvss_vector"):
+            metrics = f"{score_val:.1f} {sev_val}\nVector: {f.get('cvss_vector')}"
+        elif f.get("metrics_text"):
             metrics = f.get("metrics_text")
         else:
             is_high_impact = score_val >= 7.0 or any(k in vuln_title.lower() or k in desc.lower() for k in ("rce", "execution", "traversal", "critical", "high"))
@@ -877,8 +1039,9 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             r.cell("Status", style=lbl_style)
             r.cell(clean_text(status_str), style=body_style)
 
+            cvss_lbl_title = f.get("cvss_version") or ("CVSSv3.0 Base Metrics" if "3.0" in str(f.get("cvss_vector", "")) else "CVSS Base Metrics")
             r = table.row()
-            r.cell("CVSSv4.0 Base Metrics", style=lbl_style)
+            r.cell(cvss_lbl_title, style=lbl_style)
             r.cell(clean_text(metrics[:400]), style=body_style)
 
             r = table.row()
@@ -924,9 +1087,22 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             hrow.cell("Severity",   style=hdr_blue)
             hrow.cell("Target",     style=hdr_blue)
             for sidx, sf_item in enumerate(summary_findings, len(detail_findings) + 1):
-                st_title  = clean_text((sf_item.get("title") or sf_item.get("control") or f"Finding {sidx}")[:80])
-                st_score  = str(sf_item.get("severity_score", sf_item.get("score", "—")))
-                st_sev    = str(sf_item.get("severity", "—")).split()[-1].upper()[:8]
+                st_title  = clean_text((sf_item.get("title") or sf_item.get("finding") or sf_item.get("control_name") or f"Finding {sidx}")[:80])
+                st_score_val = sf_item.get("severity_score") or sf_item.get("score")
+                try:
+                    st_score_num = float(st_score_val) if st_score_val is not None else 0.0
+                except Exception:
+                    st_score_num = 0.0
+
+                st_sev = str(sf_item.get("severity", "—")).split()[-1].upper()[:8]
+                if st_score_num <= 0.0:
+                    if "CRIT" in st_sev: st_score_num = 9.5
+                    elif "HIGH" in st_sev: st_score_num = 8.0
+                    elif "MED" in st_sev: st_score_num = 5.5
+                    elif "LOW" in st_sev: st_score_num = 2.5
+                    else: st_score_num = 0.0
+                    
+                st_score = f"{st_score_num:.1f}"
                 st_target = clean_text(str(sf_item.get("target") or sf_item.get("control_id") or "—")[:30])
                 srow = tbl.row()
                 srow.cell(f"{sidx}.", style=body_style)
@@ -939,7 +1115,6 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.add_page()
     draw_banner("4 APPENDIX")
 
-
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 5.5, "4.1 Testing Environment: Production", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -949,7 +1124,11 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.cell(0, 4.5, "4.1.1 Testing Environment Conditions", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4, clean_text("The test was carried out as Black Box. No difficulties were faced during testing. Industrial Standard for Security were followed, such as OWASP, OSSTMM and NIST."))
+    if scope_type == "Internal":
+        env_text = "The test was carried out as Gray Box (Internal Network & Authorized Access). No operational disruptions were encountered during testing. Industrial Standard for Security were followed, such as OWASP, OSSTMM and NIST."
+    else:
+        env_text = "The test was carried out as Black Box (External Perimeter Testing). Industrial Standard for Security were followed, such as OWASP, OSSTMM and NIST."
+    pdf.multi_cell(0, 4, clean_text(env_text))
     pdf.ln(3)
 
     pdf.set_font("Helvetica", "B", 9)
@@ -957,7 +1136,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.cell(0, 4.5, "4.1.2 Tools Used", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4, "Nessus\nNmap\nOpenSSL")
+    pdf.multi_cell(0, 4, "Nessus\nNmap\nBurp Suite / PortSwigger\nOpenSSL")
     pdf.ln(3)
 
     pdf.set_font("Helvetica", "B", 9)
@@ -965,7 +1144,11 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.cell(0, 4.5, "4.1.3 Provided Documentation", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
-    pdf.multi_cell(0, 4, "IP addresses provided for testing.\nVPN access\n\nNote: For the given set of external IPs, only port 443 (HTTPS) was found open and no other issues were found.")
+    if scope_type == "Internal":
+        doc_text = "Internal Network Subnet Ranges & Target Host Lists.\nAuthorized Internal VPN / LAN Credentials."
+    else:
+        doc_text = "Public Domain Names, External IP Ranges & REST API Endpoints."
+    pdf.multi_cell(0, 4, clean_text(doc_text))
 
     # ── PAGE 13: DISCLAIMER ───────────────────────────────────────────────
     pdf.add_page()

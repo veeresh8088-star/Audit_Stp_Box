@@ -586,13 +586,14 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
                 ftext = reg_text
 
             actionable, info = parse_tool_file(fname, ftext or "")
+            combined_tool_findings = actionable + (info or [])
 
-            for f in actionable:
+            for f in combined_tool_findings:
                 c_id = map_finding_to_control(f)
                 f_dict = f.to_dict() if hasattr(f, "to_dict") else dict(f)
                 f_dict["control_id"] = c_id
                 f_dict["control"] = f_dict.get("control") or c_id
-                f_dict["status"] = "Non-Compliant"
+                f_dict["status"] = "Non-Compliant" if f_dict.get("severity") != "INFO" else "Informational"
                 f_dict["display_status"] = "Open"
                 all_findings.append(f_dict)
                 resolved_ctrls.add(c_id)
@@ -603,23 +604,21 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
                 db_write = SessionLocal()
                 report = db_write.query(AuditReport).filter(AuditReport.session_id == bg_key).first()
                 if report:
-                    # Clear old findings
-                    db_write.query(Finding).filter(Finding.report_id == report.id).delete()
                     for f in all_findings:
                         db_write.add(Finding(
                             report_id=report.id,
                             control_id=f.get("control_id"),
-                            control_name=f.get("control") or f.get("control_id"),
+                            control_name=f.get("title") or f.get("finding") or f.get("control") or f.get("control_id"),
                             severity=f.get("severity", "P3 Medium"),
-                            description=f.get("finding", "") or f.get("description", ""),
-                            gap_detected=f.get("finding", "") or f.get("description", ""),
+                            description=f.get("description") or f.get("finding") or "",
+                            gap_detected=f.get("finding") or f.get("description") or "",
                             relevance_score=f.get("relevance_score", 0),
-                            evidence_found=f.get("evidence_found", ""),
-                            evidence_snippet=f.get("evidence_snippet", ""),
-                            recommendation=f.get("recommendation", ""),
+                            evidence_found=str(f.get("severity_score", 0.0)),
+                            evidence_snippet=f.get("evidence_snippet") or f.get("evidence") or "",
+                            recommendation=f.get("remediation") or f.get("recommendation", ""),
                             reasoning=f.get("reasoning", ""),
                             status=f.get("status", "Non-Compliant"),
-                            source_files=f.get("source_files", "")
+                            source_files=f.get("target") or f.get("source_files", "")
                         ))
                     
                     # Update Compliance Score

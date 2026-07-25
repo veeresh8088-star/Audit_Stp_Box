@@ -45,21 +45,34 @@ class NessusParser(BaseParser):
                 else:
                     severity = raw_sev.upper()
 
-                score = 2.3
-                m_cvss = re.search(r'CVSS v3\.0 Base Score\s*\n*\s*([\d\.]+)', txt)
+                m_cvss = re.search(r'CVSS\s*(?:v[32]\.0)?\s*Base\s*Score\s*:?\s*([\d\.]+)', txt, re.IGNORECASE)
+                if not m_cvss:
+                    m_cvss = re.search(r'CVSS\s*Score\s*:?\s*([\d\.]+)', txt, re.IGNORECASE)
+                
+                score = None
                 if m_cvss:
                     try:
                         score = float(m_cvss.group(1))
                     except Exception:
-                        score = 2.3
-                elif severity == "CRITICAL":
-                    score = 9.8
-                elif severity == "HIGH":
-                    score = 7.5
-                elif severity == "MEDIUM":
-                    score = 5.3
+                        score = None
+
+                if score is None or score <= 0.0:
+                    if raw_sev.upper() in ("CRITICAL", "P1"): score = 9.8
+                    elif raw_sev.upper() in ("HIGH", "P2"): score = 8.0
+                    elif raw_sev.upper() in ("MEDIUM", "P3"): score = 5.5
+                    elif raw_sev.upper() in ("LOW", "P4"): score = 2.5
+                    else: score = 0.0
+
+                if score >= 9.0:
+                    severity = "CRITICAL"
+                elif score >= 7.0:
+                    severity = "HIGH"
+                elif score >= 4.0:
+                    severity = "MEDIUM"
+                elif score > 0.0:
+                    severity = "LOW"
                 else:
-                    score = 2.3
+                    severity = "INFO"
 
                 m_vec = re.search(r'\(CVSS:3\.0/([^\)]+)\)', txt)
                 cvss_vector = f"CVSS:3.0/{m_vec.group(1)}" if m_vec else None

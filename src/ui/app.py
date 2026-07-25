@@ -100,7 +100,7 @@ def _sanitize_log_comment(comment: str) -> str:
 def get_ocr_reader():
     import easyocr
     # Only load English models into memory when needed
-    return easyocr.Reader(['en'], gpu=False)
+    return easyocr.Reader(['en'], gpu=False, verbose=False)
 
 def render_custom_table(data_list):
     if not data_list:
@@ -5666,7 +5666,11 @@ if run or st.session_state.get("start_analysis_on_next_run"):
                 json.dumps({"findings": [], "resolved_list": [], "stage": 5})
             )
             
-            is_tech_only = st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only")
+            is_tech_only = (
+                st.session_state.get("assessment_mode") in ("VAPT validation", "Technical findings only") or
+                "VAPT" in (st.session_state.get("selected_framework") or "").upper() or
+                "VAPT" in (st.session_state.get("compliance_standard") or "").upper()
+            )
 
             
             if is_tech_only:

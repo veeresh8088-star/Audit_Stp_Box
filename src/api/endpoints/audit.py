@@ -276,6 +276,7 @@ def api_start_audit(req: StartAuditRequest):
     with _bg_lock:
         if bg_key in _bg_running:
             return {"success": True, "status": "already_running", "message": "Audit is already running."}
+        _bg_stop_flags.pop(bg_key, None)
     
     db = SessionLocal()
     try:
@@ -303,8 +304,17 @@ def api_start_audit(req: StartAuditRequest):
                 })
         
         # Determine standard/scoping
-        is_vapt_std = report.framework in ("VAPT Framework Controls", "VAPT")
-        is_tech_only = is_vapt_std and (req.audit_mode in ("VAPT validation", "Technical findings only"))
+        if req.audit_mode in ("VAPT validation", "Technical findings only") or "VAPT" in (report.framework or "").upper():
+            is_vapt_std = True
+            is_tech_only = True
+            report.framework = "VAPT Framework Controls"
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()
+        else:
+            is_vapt_std = report.framework in ("VAPT Framework Controls", "VAPT")
+            is_tech_only = False
         
         # Spawn Background Worker thread
         with _bg_lock:
@@ -340,19 +350,12 @@ def api_start_audit(req: StartAuditRequest):
 
 @router.post("/stop/{session_id}")
 def api_stop_audit(session_id: str):
-    """Signal the background audit thread to stop after the current control."""
-    with _bg_lock:
-        is_running = session_id in _bg_running
-    if not is_running:
-        return {"success": False, "message": "No audit is currently running for this session."}
+    """Signal the background audit thread to stop and unblock session execution."""
     _bg_stop_flags[session_id] = True
-    # Update progress to show user that stop was requested
     with _bg_lock:
-        _bg_store["progress"][session_id] = {
-            "text": "⛔ Stop requested — finishing current control then stopping...",
-            "percent": _bg_store["progress"].get(session_id, {}).get("percent", 0)
-        }
-    return {"success": True, "message": "Stop signal sent. Scan will stop after the current control completes."}
+        _bg_running.discard(session_id)
+        _bg_store["progress"].pop(session_id, None)
+    return {"success": True, "message": "Scan stopped successfully."}
 
 @router.get("/status/{session_id}")
 
@@ -1013,25 +1016,34 @@ def api_export_pdf(session_id: str):
         resolved_list = []
         for f in db_findings:
             sev = f.severity or "Medium"
-            sev_score = 5.0
-            if "Critical" in sev or "1" in sev:
-                sev_score = 9.5
-            elif "High" in sev:
-                sev_score = 8.0
-            elif "Medium" in sev or "2" in sev:
-                sev_score = 5.0
-            else:
-                sev_score = 2.5
+            sev_score = 0.0
+            try:
+                if f.evidence_found:
+                    sev_score = float(f.evidence_found)
+            except Exception:
+                sev_score = 0.0
+
+            if sev_score <= 0.0:
+                if "Critical" in sev or "1" in sev:
+                    sev_score = 9.5
+                elif "High" in sev:
+                    sev_score = 8.0
+                elif "Medium" in sev or "2" in sev:
+                    sev_score = 5.5
+                else:
+                    sev_score = 2.5
                 
             findings_mapped.append({
                 "control_id": f.control_id,
+                "title": f.control_name or f.control_id,
+                "finding": f.control_name or f.description or "",
                 "control": f.control_name or f.control_id,
                 "clause": "ISO 27001 Annex A",
-                "finding": f.description or f.gap_detected or "",
                 "description": f.description or f.gap_detected or "",
                 "status": f.status or "Non-Compliant",
                 "severity": f.severity or "Medium",
                 "severity_score": sev_score,
+                "target": f.source_files or "Scoped Target Systems",
                 "business_impact": f.reasoning or "Compliance verification pending.",
                 "recommendation": f.recommendation or "",
                 "evidence_snippet": f.evidence_snippet or "",
@@ -1041,13 +1053,25 @@ def api_export_pdf(session_id: str):
             if f.status == "Compliant":
                 resolved_list.append(f.control_id)
                 
-        pdf_bytes = export_pdf_report(
-            session_title=report.framework,
-            findings=findings_mapped,
-            resolved_list=resolved_list,
-            status=report.status or "Draft",
-            comments="Lead auditor generated report"
-        )
+        is_vapt = report.framework in ("VAPT Framework Controls", "VAPT") or "VAPT" in (report.framework or "").upper()
+        if is_vapt:
+            from src.ui.report_exporter import _export_vapt_pdf
+            pdf_bytes = _export_vapt_pdf(
+                session_title=report.framework,
+                findings=findings_mapped,
+                resolved_list=resolved_list,
+                status=report.status or "Completed",
+                comments="Lead auditor generated report"
+            )
+        else:
+            from src.ui.report_exporter import export_pdf_report
+            pdf_bytes = export_pdf_report(
+                session_title=report.framework,
+                findings=findings_mapped,
+                resolved_list=resolved_list,
+                status=report.status or "Draft",
+                comments="Lead auditor generated report"
+            )
         
         return StreamingResponse(
             io.BytesIO(pdf_bytes),

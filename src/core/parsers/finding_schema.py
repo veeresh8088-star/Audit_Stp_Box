@@ -14,6 +14,7 @@ class Finding:
     remediation: str = ""                 # Solution / Recommended fix
     evidence: str = ""                    # Raw plugin output text / proof
     plugin_id: str = ""                   # Scanner plugin ID
+    confidence: Optional[str] = "Certain" # Certain, Firm, Tentative
     source_tool: str = ""                 # Nessus, Nmap, Burp, Qualys, etc.
     control_id: str = ""                  # Mapped centrally by ControlMapper
 
