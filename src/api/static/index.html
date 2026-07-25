@@ -445,42 +445,77 @@
                     </div>
                 </section>
 
-                <!-- ── TAB: AUDIT REPORT (DELIVERY) ── -->
+                <!-- ── TAB: AUDIT REPORT (DELIVERY CENTER) ── -->
                 <section id="tab-audit-report" class="tab-panel">
-                    <div class="report-delivery-card">
-                        <h3>Report Generation & Delivery Center</h3>
-                        <p>Generate, export, and distribute completed compliance evaluations to your auditee profiles.</p>
+                    <div style="margin-bottom: 20px;">
+                        <h3 style="margin: 0 0 4px 0; font-size: 1.1rem; font-weight: 800; color: #f8fafc;">Executive Report Generation & Delivery Center</h3>
+                        <p style="margin: 0; font-size: 0.78rem; color: var(--text-muted);">Generate formal TÜV SÜD compliance audit artifacts, export data, and distribute reports to auditees.</p>
+                    </div>
+
+                    <!-- Top 3 Action Cards Grid -->
+                    <div style="display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 16px; margin-bottom: 20px; align-items: stretch;">
                         
-                        <div class="delivery-grid">
-                            <div class="delivery-panel">
-                                <h4>📤 Share Findings with Client</h4>
-                                <div class="form-group">
-                                    <label>Select Target Auditee Account</label>
-                                    <select id="report-target-auditee">
+                        <!-- Card 1: Executive Audit Artifact Downloads -->
+                        <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between;">
+                            <div style="font-size: 0.76rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+                                <span>📥</span> <span>EXECUTIVE REPORT ARTIFACTS</span>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 10px;">
+                                <button type="button" class="btn-primary" onclick="exportFindingsPDF()" style="width: 100%; padding: 12px 14px; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); border-radius: 10px; font-weight: 700; font-size: 0.84rem; display: flex; align-items: center; justify-content: space-between; cursor: pointer; box-shadow: 0 4px 14px rgba(239,68,68,0.3);">
+                                    <span style="display: flex; align-items: center; gap: 8px;"><span>📄</span> <span>Download Formal PDF Report</span></span>
+                                    <span style="font-size: 0.7rem; background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px;">PDF</span>
+                                </button>
+                                <button type="button" class="btn-primary" onclick="exportFindingsDOCX()" style="width: 100%; padding: 12px 14px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border-radius: 10px; font-weight: 700; font-size: 0.84rem; display: flex; align-items: center; justify-content: space-between; cursor: pointer; box-shadow: 0 4px 14px rgba(37,99,235,0.3);">
+                                    <span style="display: flex; align-items: center; gap: 8px;"><span>📘</span> <span>Export Editable Word Report</span></span>
+                                    <span style="font-size: 0.7rem; background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px;">DOCX</span>
+                                </button>
+                                <button type="button" class="btn-primary" onclick="exportFindingsCSV()" style="width: 100%; padding: 12px 14px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border-radius: 10px; font-weight: 700; font-size: 0.84rem; display: flex; align-items: center; justify-content: space-between; cursor: pointer; box-shadow: 0 4px 14px rgba(16,185,129,0.3);">
+                                    <span style="display: flex; align-items: center; gap: 8px;"><span>📊</span> <span>Download Raw CSV Dataset</span></span>
+                                    <span style="font-size: 0.7rem; background: rgba(0,0,0,0.2); padding: 2px 6px; border-radius: 4px;">CSV</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Card 2: Share Findings with Auditee Client -->
+                        <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between;">
+                            <div>
+                                <div style="font-size: 0.76rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+                                    <span>🤝</span> <span>CLIENT REPORT DISTRIBUTION</span>
+                                </div>
+                                <div class="form-group" style="margin-bottom: 12px;">
+                                    <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: block; margin-bottom: 4px;">Target Auditee Account</label>
+                                    <select id="report-target-auditee" style="width: 100%; padding: 8px 10px; font-size: 0.8rem; border-radius: 8px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.25); color: #fff;">
                                         <!-- Loaded dynamically -->
                                     </select>
                                 </div>
-                                <button class="btn-primary" onclick="deliverReportToAuditee()">Send Audit Findings</button>
                             </div>
-                            
-                            <div class="export-panel">
-                                <h4>💾 Download Audit Artifacts</h4>
-                                <div class="export-buttons" style="display: flex; flex-direction: column; gap: 8px;">
-                                    <button class="btn-secondary" style="width: 100%;" onclick="exportFindingsCSV()">Download CSV Report</button>
-                                    <button class="btn-secondary" style="width: 100%; background: rgba(59,130,246,0.1); border-color: rgba(59,130,246,0.2); color: #3b82f6;" onclick="exportFindingsDOCX()">⬇️ Download Word (.docx) Report</button>
-                                    <button class="btn-secondary" style="width: 100%; background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.2); color: #ef4444;" onclick="exportFindingsPDF()">📄 Download PDF Report</button>
-                                    <hr style="border: 0; border-top: 1px solid rgba(148,163,184,0.1); margin: 8px 0;">
-                                    <button class="btn-secondary" style="background: rgba(14,165,233,0.15); border-color: rgba(14,165,233,0.3); color: #0ea5e9; width: 100%;" onclick="exportFeedbackBackup()">📥 Export Feedback Backup (JSON)</button>
-                                    <input type="file" id="feedback-backup-file" accept=".json" style="display: none;" onchange="importFeedbackBackup(event)">
-                                    <button class="btn-secondary" style="background: rgba(168,85,247,0.15); border-color: rgba(168,85,247,0.3); color: #a855f7; width: 100%;" onclick="document.getElementById('feedback-backup-file').click()">📤 Import Feedback Backup (JSON)</button>
+                            <button type="button" class="btn-primary pulse-glowing-btn" onclick="deliverReportToAuditee()" style="width: 100%; padding: 12px; font-weight: 800; font-size: 0.86rem; background: linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%); border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
+                                <span>🚀</span> <span>Send Audit Findings to Client</span>
+                            </button>
+                        </div>
+
+                        <!-- Card 3: Report Branding Metadata Summary -->
+                        <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; justify-content: space-between;">
+                            <div>
+                                <div style="font-size: 0.76rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+                                    <span style="display: flex; align-items: center; gap: 6px;"><span>🏷️</span> <span>REPORT METADATA</span></span>
+                                    <button type="button" style="background: transparent; border: none; color: #60a5fa; font-size: 0.72rem; cursor: pointer; font-weight: 700;" onclick="toggleCollapsible('branding-fields')">✏️ Edit</button>
                                 </div>
-                                <button class="btn-danger" style="margin-top: 20px; width: 100%;" onclick="triggerDeleteAllRecords()">Wipe All Database Records (Entire System)</button>
+                                <div style="font-size: 0.76rem; color: #cbd5e1; display: flex; flex-direction: column; gap: 6px;">
+                                    <div><strong style="color: var(--text-muted);">Firm:</strong> <span id="summary-brand-firm">TÜV SÜD South Asia</span></div>
+                                    <div><strong style="color: var(--text-muted);">Auditor:</strong> <span id="summary-brand-auditor">Mr. Subhash Rao</span></div>
+                                    <div><strong style="color: var(--text-muted);">Client:</strong> <span id="summary-brand-client">Motorola Solutions</span></div>
+                                    <div><strong style="color: var(--text-muted);">Doc ID:</strong> <span id="summary-brand-docid">3153142723</span></div>
+                                </div>
+                            </div>
+                            <div style="font-size: 0.7rem; color: #10b981; font-weight: 700; background: rgba(16,185,129,0.1); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(16,185,129,0.25); text-align: center;">
+                                ✔️ TÜV SÜD Compliance Branding Active
                             </div>
                         </div>
                     </div>
 
-                    <!-- Real-Time Executive Audit Review Preview Container -->
-                    <div id="report-preview-container" style="margin-top: 24px;">
+                    <!-- Digital Paper Executive Report Preview Canvas Container -->
+                    <div id="report-preview-container" style="margin-top: 16px;">
                         <!-- Loaded dynamically via renderAuditReportPreview() -->
                     </div>
                 </section>
@@ -569,6 +604,31 @@
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- 🛠️ SYSTEM MAINTENANCE & KNOWLEDGE BACKUP CARD -->
+                    <div style="margin-top: 24px; background: var(--bg-card); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 16px; padding: 20px;">
+                        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+                            <div>
+                                <h4 style="margin: 0 0 4px 0; font-size: 0.96rem; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                                    <span>🛠️</span> <span>System Maintenance & Knowledge Loop Backup</span>
+                                </h4>
+                                <p style="margin: 0; font-size: 0.76rem; color: var(--text-muted);">Manage database backups, import auditor feedback JSON, or execute emergency system wipe.</p>
+                            </div>
+                            <span style="font-size: 0.7rem; color: #ef4444; background: rgba(239, 68, 68, 0.15); padding: 3px 8px; border-radius: 6px; font-weight: 700; border: 1px solid rgba(239, 68, 68, 0.3);">ADMIN TOOLS</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 12px; align-items: center;">
+                            <button type="button" class="btn-secondary" style="padding: 10px 14px; font-size: 0.8rem; font-weight: 700; background: rgba(14, 165, 233, 0.15); border-color: rgba(14, 165, 233, 0.3); color: #0ea5e9; border-radius: 8px;" onclick="exportFeedbackBackup()">
+                                📥 Export Feedback Backup (JSON)
+                            </button>
+                            <input type="file" id="feedback-backup-file" accept=".json" style="display: none;" onchange="importFeedbackBackup(event)">
+                            <button type="button" class="btn-secondary" style="padding: 10px 14px; font-size: 0.8rem; font-weight: 700; background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.3); color: #a855f7; border-radius: 8px;" onclick="document.getElementById('feedback-backup-file').click()">
+                                📤 Import Feedback Backup (JSON)
+                            </button>
+                            <button type="button" class="btn-danger" style="padding: 10px 14px; font-size: 0.8rem; font-weight: 800; border-radius: 8px;" onclick="triggerDeleteAllRecords()">
+                                ⚠️ Wipe All Database Records (Entire System)
+                            </button>
                         </div>
                     </div>
                 </section>
@@ -885,6 +945,6 @@
     </div>
 
     <!-- Script loading -->
-    <script src="/static/app.js?v=20260725_v10006"></script>
+    <script src="/static/app.js?v=20260725_v10007"></script>
 </body>
 </html>

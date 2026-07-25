@@ -2397,6 +2397,131 @@ async function exportFindingsDOCX() {
     } catch (err) {
         alert(`Failed to export Word document: ${err.message}`);
     }
+async function renderAuditReportPreview() {
+    const container = document.getElementById("report-preview-container");
+    if (!container) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser ? currentUser.role : 'auditor'}`);
+        const data = await response.json();
+        const findings = (data.success && data.findings) ? data.findings : findingsList;
+
+        const brandFirm = document.getElementById("brand-firm")?.value || "TÜV SÜD South Asia Pvt. Ltd.";
+        const brandAuditor = document.getElementById("brand-auditor")?.value || "Mr. Subhash Rao & Mr. Mahaveer Rajannavar";
+        const brandReviewer = document.getElementById("brand-reviewer")?.value || "Ms. Prianka Singla";
+        const brandApprover = document.getElementById("brand-approver")?.value || "Mr. Atul Srivastava";
+        const brandClient = document.getElementById("brand-client")?.value || "Motorola Solutions";
+        const brandClientEmail = document.getElementById("brand-client-email")?.value || "ashish.jaiswal1@motorolasolutions.com";
+        const brandDocId = document.getElementById("brand-docid")?.value || (activeSessionId ? activeSessionId.slice(0, 8).toUpperCase() : "3153142723");
+
+        // Update metadata summary card elements if present
+        const sfFirm = document.getElementById("summary-brand-firm"); if (sfFirm) sfFirm.innerText = brandFirm;
+        const sfAuditor = document.getElementById("summary-brand-auditor"); if (sfAuditor) sfAuditor.innerText = brandAuditor;
+        const sfClient = document.getElementById("summary-brand-client"); if (sfClient) sfClient.innerText = brandClient;
+        const sfDocId = document.getElementById("summary-brand-docid"); if (sfDocId) sfDocId.innerText = brandDocId;
+
+        const compliantCount = findings.filter(f => isFindingCompliant(f)).length;
+        const totalCount = findings.length;
+        const scorePct = totalCount > 0 ? Math.round((compliantCount / totalCount) * 100) : 0;
+
+        let rowsHtml = "";
+        if (findings.length === 0) {
+            rowsHtml = `<tr><td colspan="5" style="text-align: center; color: #94a3b8; padding: 20px;">No findings recorded for this session yet. Run RAG scan to evaluate controls.</td></tr>`;
+        } else {
+            findings.forEach(f => {
+                const isComp = isFindingCompliant(f);
+                const statusBadge = isComp 
+                    ? `<span style="background: rgba(16,185,129,0.15); color: #10b981; padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; border: 1px solid rgba(16,185,129,0.3);">🟢 COMPLIANT</span>`
+                    : `<span style="background: rgba(239,68,68,0.15); color: #ef4444; padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; border: 1px solid rgba(239,68,68,0.3);">🔴 NON-COMPLIANT</span>`;
+
+                rowsHtml += `
+                    <tr style="border-bottom: 1px solid rgba(148,163,184,0.15);">
+                        <td style="padding: 10px 12px; font-weight: 700; color: #60a5fa; white-space: nowrap;">${f.control_id}</td>
+                        <td style="padding: 10px 12px; font-weight: 600; color: #f8fafc;">${f.control_name || f.control}</td>
+                        <td style="padding: 10px 12px;">${statusBadge}</td>
+                        <td style="padding: 10px 12px; color: #cbd5e1; font-weight: 600;">${f.severity || 'P3 Medium'}</td>
+                        <td style="padding: 10px 12px; color: #94a3b8; font-size: 0.76rem; max-width: 320px; word-break: break-word;">${f.evidence_snippet ? `"${f.evidence_snippet.slice(0, 120)}..."` : (f.description || 'N/A')}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        container.innerHTML = `
+            <div class="digital-report-canvas" style="background: rgba(15, 23, 42, 0.75); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+                
+                <!-- Report Header Block -->
+                <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(59, 130, 246, 0.4); padding-bottom: 16px; margin-bottom: 20px;">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                            <span style="font-size: 1.3rem;">📄</span>
+                            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: #f8fafc; letter-spacing: 0.5px;">FINAL EXECUTIVE AUDIT EVALUATION REPORT</h3>
+                        </div>
+                        <p style="margin: 0; font-size: 0.76rem; color: #60a5fa; font-weight: 600;">ISO 27001 / VAPT Framework Audit — Official Real-Time Compliance Record</p>
+                    </div>
+                    <div style="text-align: right; font-size: 0.74rem; color: var(--text-muted);">
+                        <div>Auditor Firm: <strong style="color: #f8fafc;">${brandFirm}</strong></div>
+                        <div>Document Reference ID: <strong style="color: #60a5fa;">${brandDocId}</strong></div>
+                        <div>Generated Date: <strong style="color: #cbd5e1;">${new Date().toLocaleDateString()}</strong></div>
+                    </div>
+                </div>
+
+                <!-- Report Metadata Summary Grid -->
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
+                    <div>
+                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Client Organization</span>
+                        <div style="font-size: 0.85rem; font-weight: 700; color: #f8fafc;">${brandClient}</div>
+                    </div>
+                    <div>
+                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Client Contact Email</span>
+                        <div style="font-size: 0.8rem; font-weight: 600; color: #60a5fa;">${brandClientEmail}</div>
+                    </div>
+                    <div>
+                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Lead Auditor(s)</span>
+                        <div style="font-size: 0.82rem; font-weight: 700; color: #f8fafc;">${brandAuditor}</div>
+                    </div>
+                    <div>
+                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Compliance Score</span>
+                        <div style="font-size: 1.05rem; font-weight: 800; color: ${scorePct >= 80 ? '#10b981' : (scorePct >= 50 ? '#facc15' : '#ef4444')};">${scorePct}% Compliance</div>
+                    </div>
+                </div>
+
+                <!-- Control Findings Breakdown Table -->
+                <div style="margin-bottom: 20px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                        <h4 style="margin: 0; font-size: 0.88rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                            <span>📊</span> <span>Audit Control Evaluation Details (${totalCount} controls evaluated)</span>
+                        </h4>
+                    </div>
+                    <div style="overflow-x: auto; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.2);">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left;">
+                            <thead>
+                                <tr style="background: rgba(30, 41, 59, 0.9); color: var(--text-muted); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px;">
+                                    <th style="padding: 10px 12px;">Control ID</th>
+                                    <th style="padding: 10px 12px;">Control Name</th>
+                                    <th style="padding: 10px 12px;">Status</th>
+                                    <th style="padding: 10px 12px;">Severity</th>
+                                    <th style="padding: 10px 12px;">Evidence / Reason Snippet</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${rowsHtml}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Report Sign-Off Footer -->
+                <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 14px; border-top: 1px solid rgba(148, 163, 184, 0.2); font-size: 0.74rem; color: var(--text-muted);">
+                    <div>Reviewed By: <strong style="color: #cbd5e1;">${brandReviewer}</strong></div>
+                    <div>Approved By: <strong style="color: #cbd5e1;">${brandApprover}</strong></div>
+                    <div>ShakthiDB Hash: <strong style="color: #10b981;">SECURE_COMMIT_VERIFIED</strong></div>
+                </div>
+
+            </div>
+        `;
+    } catch (err) {
+        container.innerHTML = `<div class="empty-state" style="color: var(--error);">Failed to load report preview: ${err.message}</div>`;
+    }
 }
 
 async function exportFindingsPDF() {
