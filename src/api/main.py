@@ -52,7 +52,17 @@ app.mount("/static", StaticFiles(directory="src/api/static"), name="static")
 
 @app.get("/")
 def read_root():
-    return FileResponse("src/api/static/index.html")
+    headers = {
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0"
+    }
+    return FileResponse("src/api/static/index.html", headers=headers)
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
 if __name__ == "__main__":
     port = int(os.environ.get("API_PORT", 8000))

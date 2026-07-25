@@ -4879,28 +4879,11 @@ with st.sidebar:
 
             st.divider()
 
-        # 🔍 SCOPE DETECTION
-        if st.session_state.user_role != "auditee":
-            st.markdown("**🔍 Scope Detection**")
-    
-            if "scoping_mode" not in st.session_state or st.session_state.scoping_mode == "Automatic AI Scoping":
-                st.session_state.scoping_mode = "AI Audit Scoping"
-            elif st.session_state.scoping_mode == "Upload Excel Scope Document":
-                st.session_state.scoping_mode = "Audit Scope Checklist"
-            
-            scoping_options = ["AI Audit Scoping", "Manual Scoping", "Audit Scope Checklist"]
-            try:
-                default_index = scoping_options.index(st.session_state.scoping_mode)
-            except ValueError:
-                default_index = 0
-            
-            st.session_state.scoping_mode = st.radio(
-                "Scoping Mode",
-                options=scoping_options,
-                index=default_index,
-                label_visibility="collapsed",
-                horizontal=True
-            )
+        # ⚙️ Scope Detection & Scoping Mode configuration initialized in session state
+        if "scoping_mode" not in st.session_state or st.session_state.scoping_mode == "Automatic AI Scoping":
+            st.session_state.scoping_mode = "AI Audit Scoping"
+        elif st.session_state.scoping_mode == "Upload Excel Scope Document":
+            st.session_state.scoping_mode = "Audit Scope Checklist"
             
             # --- CUSTOM EXCEL SCOPING UPLOADER ---
             if st.session_state.scoping_mode in ("Audit Scope Checklist", "Upload Excel Scope Document"):
@@ -5330,21 +5313,34 @@ with st.sidebar:
 
         categories = {}
         for uc in filtered_for_selector:
-            cat = str(uc.get("category", "")).strip()
-            if not cat:
-                cat = "General Framework Controls"
+            cat_raw = str(uc.get("category", "")).strip()
+            uc_label = str(uc.get("label", ""))
+            
+            if "VAPT" in uc_label or "VAPT" in cat_raw:
+                cat = "VAPT Framework"
+            elif uc_label.startswith("5.") or "Organizational" in cat_raw:
+                cat = "Clause 5 — Organizational Controls"
+            elif uc_label.startswith("6.") or "People" in cat_raw:
+                cat = "Clause 6 — People Controls"
+            elif uc_label.startswith("7.") or "Physical" in cat_raw:
+                cat = "Clause 7 — Physical Controls"
+            elif uc_label.startswith("8.") or "Technical" in cat_raw or "Technological" in cat_raw:
+                cat = "Clause 8 — Technological Controls"
+            else:
+                cat = cat_raw if cat_raw else "Clause 5 — Organizational Controls"
+                
             if cat not in categories:
                 categories[cat] = []
             categories[cat].append(uc)
 
         for cat, cat_ucs in categories.items():
-            total_in_cat = len([u for u in filtered_use_cases if str(u.get("category", "")).strip() == cat])
-            selected_in_cat = len([u for u in filtered_use_cases if str(u.get("category", "")).strip() == cat and st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
+            total_in_cat = len(cat_ucs)
+            selected_in_cat = len([u for u in cat_ucs if st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
         
             if search_query:
                 total_visible = len(cat_ucs)
                 selected_visible = len([u for u in cat_ucs if st.session_state.get(f"ctrl_chk_{u['sl']}", True)])
-                status_suffix = f"[{selected_visible}/{total_visible} matching, {selected_in_cat}/{total_in_cat} selected]"
+                status_suffix = f"[{selected_visible}/{total_visible} matching]"
             else:
                 if selected_in_cat == total_in_cat:
                     status_suffix = "[All]"
@@ -5356,7 +5352,7 @@ with st.sidebar:
             clean_key_cat = re.sub(r'[^a-zA-Z0-9_]', '_', cat)
             with st.expander(f"{cat} {status_suffix}", expanded=False, key=f"expander_{clean_key_cat}"):
                 for uc in cat_ucs:
-                    st.checkbox(uc["label"], key=f"ctrl_chk_{uc['sl']}", disabled=False)
+                    st.checkbox(f"{uc['use_case']}", key=f"ctrl_chk_{uc['sl']}", disabled=False)
 
         # ── 3. RUN ANALYSIS ACTION BUTTON ──────────────────────────────────────
         run = False

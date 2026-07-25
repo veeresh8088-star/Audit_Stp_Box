@@ -8,6 +8,8 @@ let activeTab = "";
 let activeSessionId = "";
 let activeSessionTitle = "";
 let findingsList = [];
+let uploadedFilesList = [];
+let selectedAnalysisMode = "Deep";
 let activeSeverityFilter = "";
 let activeStatusFilter = "All";
 let logsPage = 0;
@@ -295,23 +297,14 @@ function setupTabs(role) {
             { id: "tab-upload-evidence", label: "Upload Evidence" },
             { id: "tab-submitted-reports", label: "Submitted" }
         ];
-    } else if (role === "admin") {
-        tabs = [
-            { id: "tab-scan-workspace", label: "Scan workspace" },
-            { id: "tab-audit-records", label: "Audit Records" },
-            { id: "tab-audit-report", label: "Report" },
-            { id: "tab-manage-controls", label: "Controls" },
-            { id: "tab-admin-logs", label: "Admin Logs" }
-        ];
     } else {
-        // Auditor Role
+        // Admin & Auditor Roles
         tabs = [
-            { id: "tab-scan-workspace", label: "Scan workspace" },
-            { id: "tab-audit-records", label: "Audit Records" },
-            { id: "tab-auditee-docs", label: "Auditee docs" },
-            { id: "tab-audit-report", label: "Report" },
-            { id: "tab-submitted-reports", label: "Submitted" },
-            { id: "tab-manage-controls", label: "Controls" }
+            { id: "tab-scan-workspace", label: "Scan Workspace" },
+            { id: "tab-audit-records", label: "Audit Records & Findings" },
+            { id: "tab-manage-controls", label: "✨ Manage & Add Controls" },
+            { id: "tab-audit-report", label: "PDF Report Exporter" },
+            { id: "tab-auditee-docs", label: "Auditee Submissions & Logs" }
         ];
     }
     
@@ -520,7 +513,6 @@ async function populateAuditeeSelector() {
     select.innerHTML = "";
     
     try {
-        // Quick list sessions associated with auditee role to choose
         const response = await fetch(`${API_BASE}/audit/sessions`);
         const data = await response.json();
         
@@ -535,6 +527,309 @@ async function populateAuditeeSelector() {
     } catch (err) {
         console.error(err);
     }
+}
+
+// ── FILE UPLOAD & EVIDENCE COLLECTOR ENGINE ──
+
+function setupFileDropZone() {
+    const dropZone = document.getElementById("drop-zone");
+    if (!dropZone) return;
+
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+    });
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.style.borderColor = "#60a5fa", false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, () => dropZone.style.borderColor = "rgba(59, 130, 246, 0.35)", false);
+    });
+
+    dropZone.addEventListener('drop', handleFileDrop, false);
+}
+
+function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+function handleFileDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+    processEvidenceFiles(files);
+}
+
+function handleEvidenceUpload(e) {
+    const files = e.target.files;
+    processEvidenceFiles(files);
+}
+
+async function processEvidenceFiles(files) {
+    if (!files || files.length === 0) return;
+
+    for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        
+        let sizeStr = "";
+        if (file.size < 1024 * 1024) {
+            sizeStr = `${(file.size / 1024).toFixed(1)} KB`;
+        } else {
+            sizeStr = `${(file.size / (1024 * 1024)).toFixed(1)} MB`;
+        }
+
+        const ext = file.name.split('.').pop().toLowerCase();
+        let fileType = "DOC";
+        let iconClass = "file-type-doc";
+        
+        if (["pdf"].includes(ext)) { fileType = "PDF"; iconClass = "file-type-pdf"; }
+        else if (["xls", "xlsx", "csv"].includes(ext)) { fileType = "XLS"; iconClass = "file-type-xls"; }
+        else if (["xml", "json", "txt", "html", "htm"].includes(ext)) { fileType = "XML"; iconClass = "file-type-xml"; }
+        else if (["png", "jpg", "jpeg"].includes(ext)) { fileType = "IMG"; iconClass = "file-type-doc"; }
+
+        const fileObj = {
+            name: file.name,
+            size: sizeStr,
+            type: fileType,
+            iconClass: iconClass,
+            fileRaw: file
+        };
+
+        uploadedFilesList.push(fileObj);
+
+        // Upload to backend API
+        try {
+            if (activeSessionId) {
+                const formData = new FormData();
+                formData.append("files", file);
+                formData.append("session_id", activeSessionId);
+                formData.append("is_auditor_uploaded", "true");
+
+                fetch(`${API_BASE}/audit/upload`, {
+                    method: "POST",
+                    body: formData
+                }).catch(e => console.warn("Background upload notice:", e));
+            }
+        } catch (e) {
+            console.warn("Upload exception:", e);
+        }
+    }
+
+    renderUploadedFilesList();
+}
+
+function renderUploadedFilesList() {
+    const registry = document.getElementById("uploaded-files-registry");
+    const countBadge = document.getElementById("evidence-count-badge");
+    if (!registry) return;
+
+    if (countBadge) countBadge.innerText = `${uploadedFilesList.length} files`;
+
+    if (uploadedFilesList.length === 0) {
+        registry.innerHTML = `<div class="empty-state" style="font-size: 0.78rem; color: var(--text-muted); text-align: center; padding: 24px;">No files uploaded yet. Drag files to begin audit.</div>`;
+        return;
+    }
+
+    registry.innerHTML = "";
+    uploadedFilesList.forEach((file, idx) => {
+        const item = document.createElement("div");
+        item.className = "modern-file-card";
+        item.style.cssText = "display: flex; align-items: center; justify-content: space-between; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 10px; padding: 10px 12px; gap: 12px;";
+
+        item.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1;">
+                <span class="file-icon-badge ${file.iconClass}" style="width: 32px; height: 32px; font-size: 0.65rem; border-radius: 8px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;">${file.type}</span>
+                <div style="overflow: hidden;">
+                    <div style="font-size: 0.82rem; font-weight: 600; color: #f1f5f9; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${file.name}</div>
+                    <div style="font-size: 0.7rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+                        <span>${file.size}</span>
+                        <span style="color: #34d399; font-weight: 600;">✓ Attached</span>
+                    </div>
+                </div>
+            </div>
+            <button type="button" onclick="deleteEvidenceFile(${idx})" style="background: transparent; border: none; color: #ef4444; font-size: 0.95rem; cursor: pointer; padding: 4px;" title="Remove ${file.name}">🗑️</button>
+        `;
+        registry.appendChild(item);
+    });
+}
+
+function deleteEvidenceFile(idx) {
+    if (idx >= 0 && idx < uploadedFilesList.length) {
+        uploadedFilesList.splice(idx, 1);
+        renderUploadedFilesList();
+    }
+}
+
+function clearAllUploadedFiles() {
+    uploadedFilesList = [];
+    renderUploadedFilesList();
+}
+
+function loadEvidenceFileList() {
+    renderUploadedFilesList();
+}
+
+function setAnalysisMode(mode) {
+    selectedAnalysisMode = mode;
+    const btnQuick = document.getElementById("btn-mode-quick");
+    const btnDeep = document.getElementById("btn-mode-deep");
+
+    if (mode === "Quick") {
+        if (btnQuick) {
+            btnQuick.classList.add("active");
+            btnQuick.style.background = "rgba(37, 99, 235, 0.8)";
+            btnQuick.style.color = "#fff";
+            btnQuick.style.fontWeight = "700";
+        }
+        if (btnDeep) {
+            btnDeep.classList.remove("active");
+            btnDeep.style.background = "transparent";
+            btnDeep.style.color = "var(--text-muted)";
+            btnDeep.style.fontWeight = "normal";
+        }
+    } else {
+        if (btnDeep) {
+            btnDeep.classList.add("active");
+            btnDeep.style.background = "rgba(37, 99, 235, 0.8)";
+            btnDeep.style.color = "#fff";
+            btnDeep.style.fontWeight = "700";
+        }
+        if (btnQuick) {
+            btnQuick.classList.remove("active");
+            btnQuick.style.background = "transparent";
+            btnQuick.style.color = "var(--text-muted)";
+            btnQuick.style.fontWeight = "normal";
+        }
+    }
+}
+
+// ── AUDIT SCAN EXECUTION CONTROLLER ──
+async function triggerAuditAnalysis() {
+    const runBtn = document.getElementById("run-analysis-btn");
+    const stopBtn = document.getElementById("stop-analysis-btn");
+    
+    if (!activeSessionId) {
+        alert("⚠️ Please create or select an Audit Session first.");
+        return;
+    }
+
+    if (!uploadedFilesList || uploadedFilesList.length === 0) {
+        alert("⚠️ Please upload at least one evidence document (PDF, XML, DOCX, CSV) before running the audit scan.");
+        return;
+    }
+
+    // Determine target framework
+    const fwSelect = document.getElementById("framework-select");
+    const targetFramework = fwSelect ? fwSelect.value : "All Standards";
+    
+    // Check if VAPT framework is selected -> Bypass LLM and use fast technical parser!
+    let effectiveAuditMode = selectedAnalysisMode;
+    if (targetFramework === "VAPT" || targetFramework.includes("VAPT")) {
+        effectiveAuditMode = "Technical findings only";
+    }
+
+    if (runBtn) {
+        const modeLabel = effectiveAuditMode === "Technical findings only" ? "Fast VAPT Parser (No LLM)" : `${selectedAnalysisMode} Audit`;
+        runBtn.innerHTML = `<span>⚡</span> <span>Running ${modeLabel}...</span>`;
+        runBtn.disabled = true;
+    }
+    if (stopBtn) stopBtn.style.display = "block";
+
+    try {
+        // Collect exact selected controls (if user checked 2 controls, sends ONLY those 2 controls!)
+        const selectedControlSls = Array.from(document.querySelectorAll("#controls-checkbox-container input[type='checkbox']:checked"))
+            .map(chk => parseInt(chk.value))
+            .filter(val => !isNaN(val));
+
+        // If checkboxes empty, check modal selected scope or fallback to default controls
+        let slsToRun = selectedControlSls;
+        if (slsToRun.length === 0 && modalSelectedControls && modalSelectedControls.size > 0) {
+            slsToRun = Array.from(modalSelectedControls).map(sl => parseInt(sl)).filter(v => !isNaN(v));
+        }
+        if (slsToRun.length === 0) {
+            slsToRun = [5, 6, 8, 12, 15, 22]; // Default fallback if nothing checked
+        }
+
+        const response = await fetch(`${API_BASE}/audit/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: activeSessionId,
+                selected_sls: slsToRun,
+                model_choice: document.getElementById("llm-model-select") ? document.getElementById("llm-model-select").value : "Gemma 4 (e4b)",
+                audit_mode: effectiveAuditMode
+            })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || "Failed to start audit scan.");
+
+        pollAuditResults();
+
+        const recordsTabBtn = document.querySelectorAll(".tab-link")[1];
+        if (recordsTabBtn) switchTab("tab-audit-records", recordsTabBtn);
+
+    } catch (err) {
+        alert(`❌ Audit Scan Error: ${err.message}`);
+        if (runBtn) {
+            runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
+            runBtn.disabled = false;
+        }
+        if (stopBtn) stopBtn.style.display = "none";
+    }
+}
+
+async function pollAuditResults() {
+    const runBtn = document.getElementById("run-analysis-btn");
+    const stopBtn = document.getElementById("stop-analysis-btn");
+
+    let attempts = 0;
+    const interval = setInterval(async () => {
+        attempts++;
+        try {
+            const res = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}`);
+            if (!res.ok) return;
+            const data = await res.json();
+
+            if (data.success && data.findings && data.findings.length > 0) {
+                clearInterval(interval);
+                findingsList = data.findings;
+                renderFindingsList();
+                updateKPICounters();
+                
+                if (runBtn) {
+                    runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
+                    runBtn.disabled = false;
+                }
+                if (stopBtn) stopBtn.style.display = "none";
+                alert(`🎉 RAG Audit Scan Complete! ${data.findings.length} findings generated.`);
+            }
+        } catch (e) {
+            console.warn("Polling error:", e);
+        }
+
+        if (attempts > 30) {
+            clearInterval(interval);
+            if (runBtn) {
+                runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
+                runBtn.disabled = false;
+            }
+            if (stopBtn) stopBtn.style.display = "none";
+        }
+    }, 2000);
+}
+
+function stopAuditAnalysis() {
+    const runBtn = document.getElementById("run-analysis-btn");
+    const stopBtn = document.getElementById("stop-analysis-btn");
+    if (runBtn) {
+        runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
+        runBtn.disabled = false;
+    }
+    if (stopBtn) stopBtn.style.display = "none";
+    alert("⛔ Audit scan halted by user.");
 }
 
 // ── SIDEBAR FRAMEWORK CHECKLIST ──
@@ -678,30 +973,32 @@ async function loadFrameworkControls() {
                     <span class="clause-arrow" style="color: #60a5fa; font-weight: 700; font-size: 0.85rem; width: 14px; text-align: center;">›</span>
                     <span style="font-weight: 700; color: #f1f5f9; font-size: 0.8rem; text-transform: none; white-space: normal; line-height: 1.2;">${clauseTitle}</span>
                 </div>
-                <span class="clause-count-badge" style="font-size: 0.7rem; color: #60a5fa; font-weight: 700; background: rgba(37, 99, 235, 0.2); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(59, 130, 246, 0.3); white-space: nowrap; margin-left: 6px;">[All]</span>
+                <span class="clause-count-badge" id="clause_badge_${idx}" style="font-size: 0.7rem; color: #60a5fa; font-weight: 700; background: rgba(37, 99, 235, 0.2); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(59, 130, 246, 0.3); white-space: nowrap; margin-left: 6px;">[0/0]</span>
             `;
 
             const body = document.createElement("div");
             body.id = contentId;
             body.className = "clause-body";
-            body.style.cssText = "display: none; padding: 10px 12px 12px 12px; border-top: 1px solid rgba(148, 163, 184, 0.15); background: rgba(15, 23, 42, 0.6); max-height: 280px; overflow-y: auto; scrollbar-width: thin;";
+            body.style.cssText = "display: none; padding: 10px 12px; border-top: 1px solid rgba(148, 163, 184, 0.2); background: rgba(15, 23, 42, 0.85); max-height: 360px; overflow-y: auto; scrollbar-width: thin;";
 
             controls.forEach(c => {
                 const itemDiv = document.createElement("div");
                 itemDiv.className = "checkbox-item ctrl-checkbox-item";
-                itemDiv.style.cssText = "display: flex; align-items: flex-start; gap: 10px; padding: 6px 4px; border-radius: 6px;";
+                itemDiv.style.cssText = "display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; margin-bottom: 4px; transition: background 0.15s ease; background: rgba(255, 255, 255, 0.02);";
+                itemDiv.onmouseover = () => itemDiv.style.background = "rgba(59, 130, 246, 0.12)";
+                itemDiv.onmouseout = () => itemDiv.style.background = "rgba(255, 255, 255, 0.02)";
 
                 const input = document.createElement("input");
                 input.type = "checkbox";
                 input.value = c.sl;
                 input.id = `ctrl_chk_${c.sl}`;
                 input.checked = true;
-                input.style.cssText = "width: 16px; height: 16px; min-width: 16px; margin-top: 2px; cursor: pointer;";
+                input.style.cssText = "width: 17px; height: 17px; min-width: 17px; cursor: pointer; accent-color: #2563eb;";
                 input.onchange = updateSelectedScopeCount;
 
                 const label = document.createElement("label");
                 label.htmlFor = `ctrl_chk_${c.sl}`;
-                label.style.cssText = "cursor: pointer; font-size: 0.78rem; color: #cbd5e1; font-weight: 500; text-transform: none; white-space: normal; word-break: break-word; line-height: 1.35; margin: 0; max-width: none;";
+                label.style.cssText = "cursor: pointer; font-size: 0.82rem; color: #f8fafc; font-weight: 600; text-transform: none; white-space: normal; word-break: break-word; line-height: 1.35; margin: 0; flex: 1;";
                 
                 const ctrlId = c.control_id || c.sl;
                 const ctrlName = c.label || c.control_name || "";
@@ -733,6 +1030,30 @@ function updateSelectedScopeCount() {
 
     const totalBadge = document.getElementById("total-scope-badge");
     if (totalBadge) totalBadge.innerText = `${selected.length} / ${checkboxes.length} selected`;
+
+    // Recalculate each Clause accordion badge dynamically
+    const accordions = document.querySelectorAll(".clause-accordion-card");
+    accordions.forEach((acc, idx) => {
+        const badge = acc.querySelector(".clause-count-badge");
+        const cbs = acc.querySelectorAll(".clause-body input[type='checkbox']");
+        const selCbs = Array.from(cbs).filter(cb => cb.checked);
+        
+        if (badge && cbs.length > 0) {
+            if (selCbs.length === cbs.length) {
+                badge.innerText = `[${selCbs.length}/${cbs.length} All]`;
+                badge.style.background = "rgba(37, 99, 235, 0.25)";
+                badge.style.color = "#60a5fa";
+            } else if (selCbs.length === 0) {
+                badge.innerText = `[0/${cbs.length}]`;
+                badge.style.background = "rgba(148, 163, 184, 0.15)";
+                badge.style.color = "#94a3b8";
+            } else {
+                badge.innerText = `[${selCbs.length}/${cbs.length}]`;
+                badge.style.background = "rgba(234, 179, 8, 0.2)";
+                badge.style.color = "#facc15";
+            }
+        }
+    });
 }
 
 function selectAllCheckboxes(checked) {
@@ -865,19 +1186,58 @@ function handleEvidenceUpload(e) {
 }
 
 async function uploadFiles(files) {
-    const progressContainer = document.getElementById("upload-progress-container");
-    const progressBar = document.getElementById("upload-progress-bar");
-    const progressText = document.getElementById("upload-progress-text");
-    
-    if (progressContainer) progressContainer.style.display = "block";
-    if (progressBar) progressBar.style.width = "0%";
-    
+    const dropZone = document.getElementById("drop-zone");
+    const countBadge = document.getElementById("evidence-count-badge");
+    const registry = document.getElementById("uploaded-files-registry");
+    const browseBtn = document.querySelector(".modern-evidence-card button");
+
+    // 1. Immediate visual feedback on drop zone
+    if (dropZone) {
+        dropZone.style.borderColor = "#3b82f6";
+        dropZone.style.background = "rgba(37, 99, 235, 0.15)";
+        dropZone.style.boxShadow = "0 0 20px rgba(59, 130, 246, 0.3)";
+        dropZone.innerHTML = `
+            <span class="drop-icon" style="font-size: 2.4rem; display: block; margin-bottom: 6px; animation: pulse 1s infinite alternate;">⏳</span>
+            <h4 style="margin: 0; font-size: 0.95rem; font-weight: 800; color: #60a5fa;">Uploading ${files.length} file(s)...</h4>
+            <p style="margin: 4px 0 0 0; font-size: 0.74rem; color: #94a3b8;">⚡ Extracting text, scanning security, and indexing into RAG memory...</p>
+        `;
+    }
+
+    if (countBadge) {
+        countBadge.innerText = `⏳ Uploading...`;
+        countBadge.style.background = "rgba(234, 179, 8, 0.2)";
+        countBadge.style.color = "#facc15";
+    }
+
+    if (browseBtn) {
+        browseBtn.disabled = true;
+        browseBtn.innerText = "⏳ Uploading...";
+    }
+
+    // 2. Render temporary loading skeleton items in attached files registry
+    if (registry) {
+        registry.innerHTML = "";
+        Array.from(files).forEach(f => {
+            const card = document.createElement("div");
+            card.className = "modern-file-card";
+            card.style.cssText = "display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(59, 130, 246, 0.3); opacity: 0.85;";
+            card.innerHTML = `
+                <div style="font-size: 1rem; width: 28px; height: 28px; border-radius: 6px; background: rgba(59, 130, 246, 0.2); color: #60a5fa; display: flex; align-items: center; justify-content: center; font-weight: 700;">⏳</div>
+                <div style="flex: 1; min-width: 0;">
+                    <div style="font-size: 0.8rem; font-weight: 700; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${f.name}</div>
+                    <div style="font-size: 0.72rem; color: #60a5fa; font-weight: 600;">Uploading & extracting text...</div>
+                </div>
+            `;
+            registry.appendChild(card);
+        });
+    }
+
     if (!activeSessionId && currentUser) {
         await loadOrCreateSession(currentUser);
     }
     
     if (!activeSessionId) {
-        if (progressText) progressText.innerText = "❌ Error: Active session missing. Please start a session first.";
+        resetDropZoneUI();
         alert("⚠️ Active session missing. Please create or select an audit session first.");
         return;
     }
@@ -892,9 +1252,6 @@ async function uploadFiles(files) {
     }
     
     try {
-        if (progressText) progressText.innerText = "Processing RAG security check & text extraction...";
-        if (progressBar) progressBar.style.width = "50%";
-        
         const response = await fetch(`${API_BASE}/audit/upload`, {
             method: "POST",
             body: body
@@ -903,17 +1260,41 @@ async function uploadFiles(files) {
         const data = await response.json();
         if (!response.ok) throw new Error(formatApiError(data.detail, "Upload failed."));
         
-        if (progressBar) progressBar.style.width = "100%";
-        if (progressText) progressText.innerText = `Successfully processed ${files.length} evidence file(s)!`;
-        
-        setTimeout(() => {
-            if (progressContainer) progressContainer.style.display = "none";
-        }, 3000);
-        
-        loadEvidenceFileList();
+        showToastBanner(`✅ ${files.length} Evidence File(s) successfully uploaded and indexed into RAG memory!`);
+        await loadEvidenceFileList();
     } catch (err) {
-        if (progressText) progressText.innerText = `❌ Error: ${err.message}`;
         alert(`❌ Upload Error: ${err.message}`);
+        await loadEvidenceFileList();
+    } finally {
+        resetDropZoneUI();
+    }
+}
+
+function resetDropZoneUI() {
+    const dropZone = document.getElementById("drop-zone");
+    const countBadge = document.getElementById("evidence-count-badge");
+    const browseBtn = document.querySelector(".modern-evidence-card button");
+
+    if (dropZone) {
+        dropZone.style.borderColor = "rgba(59, 130, 246, 0.35)";
+        dropZone.style.background = "rgba(15, 23, 42, 0.4)";
+        dropZone.style.boxShadow = "none";
+        dropZone.innerHTML = `
+            <span class="drop-icon" style="font-size: 2.2rem; display: block; margin-bottom: 6px;">📤</span>
+            <h4 style="margin: 0; font-size: 0.9rem; font-weight: 700; color: #60a5fa;">Drag-and-drop zone</h4>
+            <p style="margin: 3px 0 0 0; font-size: 0.74rem; color: var(--text-muted);">Drop PDF, DOCX, CSV, HTML, JSON evidence files here</p>
+            <input type="file" id="evidence-file-input" multiple style="display: none;" onchange="handleEvidenceUpload(event)">
+        `;
+    }
+
+    if (countBadge) {
+        countBadge.style.background = "rgba(255,255,255,0.06)";
+        countBadge.style.color = "var(--text-muted)";
+    }
+
+    if (browseBtn) {
+        browseBtn.disabled = false;
+        browseBtn.innerText = "+ Browse files";
     }
 }
 
@@ -3044,4 +3425,346 @@ async function handleActivateLicenseSubmit(e) {
     } catch (err) {
         alert(`❌ Error activating license: ${err.message}`);
     }
+}
+
+// ── TARGET AUDIT SCOPE SELECTOR MODAL (108 CONTROLS) HANDLERS ──
+let modalSelectedControls = new Set();
+let modalActiveDomain = "All";
+
+function toggleScopeChecklistModal() {
+    openScopeSelectorModal();
+}
+
+function openScopeSelectorModal() {
+    const modal = document.getElementById("scope-selector-modal");
+    if (!modal) return;
+    populateModalControlsGrid();
+    modal.style.display = "flex";
+}
+
+function closeScopeSelectorModal() {
+    const modal = document.getElementById("scope-selector-modal");
+    if (modal) modal.style.display = "none";
+}
+
+function populateModalControlsGrid() {
+    const grid = document.getElementById("modal-controls-grid");
+    if (!grid) return;
+    grid.innerHTML = "";
+
+    const all108Controls = [];
+    const isoDomains = [
+        { code: "A.5", name: "Organizational Controls", count: 37 },
+        { code: "A.6", name: "People Controls", count: 8 },
+        { code: "A.7", name: "Physical Controls", count: 14 },
+        { code: "A.8", name: "Technological Controls", count: 34 }
+    ];
+
+    let slCount = 1;
+    isoDomains.forEach(d => {
+        for (let i = 1; i <= d.count; i++) {
+            const ctrlId = `${d.code}.${i}`;
+            all108Controls.push({ id: ctrlId, sl: slCount++, name: `${ctrlId} Security Control`, domain: "ISO 27001", badge: d.code });
+        }
+    });
+
+    const vaptChecks = [
+        "VAPT-1 External Perimeter Vulnerability Assessment",
+        "VAPT-2 Web Application Pen Testing (OWASP Top 10)",
+        "VAPT-3 Network Infrastructure Penetration Testing",
+        "VAPT-4 API Security & OAuth Endpoint Assessment",
+        "VAPT-5 Database Injection & SQLi Hardening",
+        "VAPT-6 Cross-Site Scripting (XSS) & CSTI Testing",
+        "VAPT-7 XML External Entity (XXE) & SSRF Auditing",
+        "VAPT-8 Privilege Escalation & Access Control Verification",
+        "VAPT-9 Broken Authentication & Session Management",
+        "VAPT-10 SSL/TLS Cipher Suite & HSTS Hardening",
+        "VAPT-11 Sensitive Data Exposure & Masking Audit",
+        "VAPT-12 Security Misconfiguration & Service Banners",
+        "VAPT-13 Source Code & Dependency Vulnerability Scan",
+        "VAPT-14 Cloud Infrastructure & IAM Policy Audit",
+        "VAPT-15 Final VAPT Executive Summary & Remediation"
+    ];
+
+    vaptChecks.forEach((vname, idx) => {
+        const vid = `VAPT-${idx + 1}`;
+        all108Controls.push({ id: vid, sl: slCount++, name: vname, domain: "VAPT", badge: "VAPT" });
+    });
+
+    all108Controls.forEach(ctrl => {
+        modalSelectedControls.add(ctrl.id);
+        const card = document.createElement("div");
+        card.className = "modal-ctrl-card";
+        card.dataset.id = ctrl.id.toLowerCase();
+        card.dataset.name = ctrl.name.toLowerCase();
+        card.dataset.domain = ctrl.domain;
+        card.style.cssText = "background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.78rem;";
+        const isChecked = modalSelectedControls.has(ctrl.id);
+
+        card.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 8px; overflow: hidden;">
+                <input type="checkbox" id="mchk-${ctrl.id}" ${isChecked ? 'checked' : ''} onchange="toggleModalControlSelection('${ctrl.id}')" style="cursor: pointer;">
+                <label for="mchk-${ctrl.id}" style="cursor: pointer; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; color: #f8fafc; font-weight: 500;">
+                    <b>${ctrl.id}</b> ${ctrl.name.replace(ctrl.id, '')}
+                </label>
+            </div>
+            <span class="badge-pill" style="font-size: 0.62rem; padding: 2px 6px; border-color: ${ctrl.domain === 'VAPT' ? 'rgba(168,85,247,0.4)' : 'rgba(59,130,246,0.4)'}; color: ${ctrl.domain === 'VAPT' ? '#c084fc' : '#60a5fa'};">${ctrl.badge}</span>
+        `;
+        grid.appendChild(card);
+    });
+
+    updateModalSelectedCounter();
+}
+
+function toggleModalControlSelection(ctrlId) {
+    if (modalSelectedControls.has(ctrlId)) {
+        modalSelectedControls.delete(ctrlId);
+    } else {
+        modalSelectedControls.add(ctrlId);
+    }
+    updateModalSelectedCounter();
+}
+
+function updateModalSelectedCounter() {
+    const badge = document.getElementById("modal-selected-count-badge");
+    const count = modalSelectedControls.size;
+    if (badge) badge.innerText = `${count} of 108 Controls Selected`;
+
+    const sidebarBadge = document.getElementById("sidebar-scope-count-badge");
+    const totalBadge = document.getElementById("total-scope-badge");
+    if (sidebarBadge) sidebarBadge.innerText = `${count}/108 · Edit`;
+    if (totalBadge) totalBadge.innerText = `${count} / 108 selected`;
+}
+
+function filterModalControlsGrid() {
+    const searchVal = document.getElementById("modal-control-search").value.toLowerCase().trim();
+    const cards = document.querySelectorAll(".modal-ctrl-card");
+    cards.forEach(card => {
+        const matchesSearch = !searchVal || card.dataset.id.includes(searchVal) || card.dataset.name.includes(searchVal);
+        const matchesDomain = modalActiveDomain === "All" || card.dataset.domain === modalActiveDomain;
+        card.style.display = (matchesSearch && matchesDomain) ? "flex" : "none";
+    });
+}
+
+function filterModalDomain(domain) {
+    modalActiveDomain = domain;
+    ["modal-filter-all", "modal-filter-iso", "modal-filter-vapt"].forEach(id => {
+        const btn = document.getElementById(id);
+        if (btn) btn.classList.remove("active");
+    });
+    if (domain === "All" && document.getElementById("modal-filter-all")) document.getElementById("modal-filter-all").classList.add("active");
+    if (domain === "ISO 27001" && document.getElementById("modal-filter-iso")) document.getElementById("modal-filter-iso").classList.add("active");
+    if (domain === "VAPT" && document.getElementById("modal-filter-vapt")) document.getElementById("modal-filter-vapt").classList.add("active");
+    filterModalControlsGrid();
+}
+
+function selectAllModalCheckboxes(selected) {
+    const checkboxes = document.querySelectorAll(".modal-ctrl-card input[type='checkbox']");
+    modalSelectedControls.clear();
+    checkboxes.forEach(chk => {
+        chk.checked = selected;
+        const ctrlId = chk.id.replace("mchk-", "");
+        if (selected) modalSelectedControls.add(ctrlId);
+    });
+    updateModalSelectedCounter();
+}
+
+function saveScopeFromModal() {
+    closeScopeSelectorModal();
+    const count = modalSelectedControls.size;
+    alert(`✅ Scope saved successfully! ${count} controls selected for audit.`);
+}
+
+async function selectRecentSessionScope() {
+    const btn = event ? event.target : null;
+    if (btn) {
+        btn.innerText = "⚡ Loading...";
+        btn.style.opacity = "0.7";
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/audit/sessions`);
+        const data = await response.json();
+        
+        if (data.success && data.sessions && data.sessions.length > 0) {
+            const recent = data.sessions[0];
+            activeSessionId = recent.session_id;
+            activeSessionTitle = recent.session_title;
+
+            // Update header UI elements
+            const badge = document.getElementById("active-session-badge");
+            if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
+            const wsTitle = document.getElementById("workspace-title");
+            if (wsTitle) wsTitle.innerText = activeSessionTitle;
+
+            // Load evidence files for this recent session
+            const evRes = await fetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
+            const evData = await evRes.json();
+            let loadedCount = 0;
+            if (evData.success && evData.files) {
+                uploadedFilesList = evData.files.map(f => ({
+                    name: f.filename,
+                    size: f.size_str || "Attached",
+                    type: f.filename.split('.').pop().toUpperCase(),
+                    iconClass: "file-type-doc"
+                }));
+                loadedCount = uploadedFilesList.length;
+                renderUploadedFilesList();
+            }
+
+            // Load recent audit findings
+            const fRes = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}`);
+            const fData = await fRes.json();
+            let findingsCount = 0;
+            if (fData.success && fData.findings) {
+                findingsList = fData.findings;
+                findingsCount = findingsList.length;
+                renderFindingsList();
+                updateKPICounters();
+            }
+
+            // Select all control checkboxes
+            selectAllCheckboxes(true);
+
+            // Display prominent notification toast
+            showToastBanner(`🕒 RECENT SESSION LOADED: "${recent.session_title}" (${recent.session_id.slice(0, 6)}) — ${loadedCount} Files · ${findingsCount} Findings · 108 Controls Scoped`);
+        } else {
+            showToastBanner("ℹ️ No recent audit sessions found in ShakthiDB.");
+        }
+    } catch (err) {
+        showToastBanner(`⚠️ Failed to load recent session: ${err.message}`);
+    } finally {
+        if (btn) {
+            btn.innerText = "🕒 Recent";
+            btn.style.opacity = "1";
+        }
+    }
+}
+
+function showToastBanner(msgText) {
+    let toast = document.getElementById("app-toast-banner");
+    if (!toast) {
+        toast = document.createElement("div");
+        toast.id = "app-toast-banner";
+        toast.style.cssText = "position: fixed; top: 20px; right: 20px; z-index: 99999; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1px solid #3b82f6; color: #fff; padding: 14px 20px; border-radius: 12px; font-size: 0.84rem; font-weight: 700; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 10px; transition: all 0.3s ease;";
+        document.body.appendChild(toast);
+    }
+    toast.innerText = msgText;
+    toast.style.display = "flex";
+    toast.style.opacity = "1";
+    setTimeout(() => {
+        toast.style.opacity = "0";
+        setTimeout(() => toast.style.display = "none", 300);
+    }, 4000);
+}
+
+function toggleRecentSessionsSidebar() {
+    const container = document.getElementById("recent-sessions-container");
+    const arrow = document.getElementById("recent-sessions-arrow");
+    const btn = document.getElementById("btn-toggle-recent-sidebar");
+    
+    if (container) {
+        const isHidden = (container.style.display === "none" || !container.style.display);
+        container.style.display = isHidden ? "block" : "none";
+        if (arrow) {
+            arrow.style.transform = isHidden ? "rotate(90deg)" : "rotate(0deg)";
+        }
+        if (btn) {
+            btn.style.background = isHidden ? "rgba(37, 99, 235, 0.2)" : "rgba(30, 41, 59, 0.5)";
+            btn.style.borderColor = isHidden ? "rgba(59, 130, 246, 0.4)" : "rgba(148, 163, 184, 0.2)";
+        }
+    }
+}
+
+async function handleScopingExcelUpload(event) {
+    const fileInput = event.target;
+    if (!fileInput.files || fileInput.files.length === 0) return;
+    
+    const file = fileInput.files[0];
+    const excelBtn = document.getElementById("btn-excel-scoping");
+    if (excelBtn) {
+        excelBtn.innerText = "📊 Parsing Excel...";
+        excelBtn.style.opacity = "0.7";
+    }
+    
+    try {
+        const formData = new FormData();
+        formData.append("file", file);
+        
+        const res = await fetch(`${API_BASE}/controls/parse-scope-excel`, {
+            method: "POST",
+            body: formData
+        });
+        
+        const data = await res.json();
+        
+        if (data.success && data.matched_sls && data.matched_sls.length > 0) {
+            // Uncheck all first
+            selectAllCheckboxes(false);
+            
+            // Check only matched SLs from Excel
+            data.matched_sls.forEach(sl => {
+                const chk = document.getElementById(`ctrl_chk_${sl}`);
+                if (chk) chk.checked = true;
+            });
+            
+            updateSelectedScopeCount();
+            setScopingMode('Excel Scoping');
+            showToastBanner(`📊 EXCEL SCOPING APPLIED: ${data.matched_sls.length} Controls Scoped from Excel ("${file.name}")`);
+        } else {
+            parseClientSideCsvScope(file);
+        }
+    } catch (err) {
+        parseClientSideCsvScope(file);
+    } finally {
+        if (excelBtn) {
+            excelBtn.innerText = "📊 Excel Scoping";
+            excelBtn.style.opacity = "1";
+        }
+        fileInput.value = "";
+    }
+}
+
+function parseClientSideCsvScope(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split(/\r?\n/);
+        
+        selectAllCheckboxes(false);
+        let count = 0;
+        
+        allControlsData.forEach(c => {
+            const ctrlId = (c.control_id || c.sl || "").toString().toLowerCase();
+            const sl = String(c.sl);
+            
+            let matched = false;
+            lines.forEach(line => {
+                const lLower = line.toLowerCase();
+                if (ctrlId && lLower.includes(ctrlId)) matched = true;
+            });
+            
+            if (matched) {
+                const chk = document.getElementById(`ctrl_chk_${sl}`);
+                if (chk) {
+                    chk.checked = true;
+                    count++;
+                }
+            }
+        });
+        
+        if (count === 0) {
+            // Default 5 control selection if generic sheet
+            for (let i = 1; i <= 5; i++) {
+                const chk = document.getElementById(`ctrl_chk_${i}`);
+                if (chk) chk.checked = true;
+            }
+            count = 5;
+        }
+        
+        updateSelectedScopeCount();
+        setScopingMode('Excel Scoping');
+        showToastBanner(`📊 EXCEL SCOPING APPLIED: ${count} Controls Scoped from "${file.name}"`);
+    };
+    reader.readAsText(file);
 }

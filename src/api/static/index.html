@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AICyberAuditBox - Local Compliance Intelligence</title>
-    <link rel="stylesheet" href="/static/style.css?v=20260724_v17">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
+    <link rel="stylesheet" href="/static/style.css?v=20260725_v10000">
     <!-- Load custom fonts from web-safe fallback, no internet required -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
@@ -123,81 +124,42 @@
             </div>
 
             <!-- SESSION MANAGER (+ New Session & Recent Sessions) -->
-            <div class="sidebar-section" id="sidebar-session-manager">
-                <button class="btn-secondary" onclick="startNewAuditSession()" style="width: 100%; margin-bottom: 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.15); font-weight: 600; padding: 10px; border-radius: 10px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer; color: var(--text-main);">
-                    <span style="font-size: 1rem;">+</span> <span style="font-size: 0.85rem;">New audit session</span>
+            <div class="sidebar-section" id="sidebar-session-manager" style="margin-bottom: 16px;">
+                <button class="btn-primary" onclick="startNewAuditSession()" style="width: 100%; margin-bottom: 14px; background: linear-gradient(135deg, #2563eb, #1d4ed8); font-weight: 700; padding: 12px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; color: #fff; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);">
+                    <span style="font-size: 1.1rem;">+</span> <span style="font-size: 0.88rem;">New Audit Session</span>
                 </button>
-                <div class="collapsible">
-                    <button class="collapse-header" onclick="toggleCollapsible('recent-sessions-container')" title="View previous audit sessions stored in Shakthi DB" style="background: transparent; border: none; padding: 4px 0; color: var(--text-muted); font-size: 0.82rem; width: 100%; display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
-                        <span style="display: flex; align-items: center; gap: 8px;">🕒 Recent sessions</span>
-                        <span class="arrow">▼</span>
-                    </button>
-                    <div id="recent-sessions-container" class="collapse-content" style="display: none; max-height: 160px; overflow-y: auto; margin-top: 6px;">
-                        <div id="recent-sessions-list" style="display: flex; flex-direction: column; gap: 4px;">
-                            <div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">Loading sessions...</div>
-                        </div>
+                
+                <!-- Collapsible Recent Sessions Toggle Button -->
+                <button class="collapse-header" id="btn-toggle-recent-sidebar" onclick="toggleRecentSessionsSidebar()" title="Click to expand or hide recent audit sessions history" style="background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 10px 12px; color: var(--text-main); font-size: 0.8rem; width: 100%; display: flex; align-items: center; justify-content: space-between; cursor: pointer; margin-bottom: 8px;">
+                    <span style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #f1f5f9;">
+                        <span>🕒</span> <span>Recent Sessions</span> <span id="recent-sessions-count-badge" class="badge-pill" style="font-size: 0.7rem; padding: 1px 6px; background: rgba(59, 130, 246, 0.2); color: #60a5fa;">(3)</span>
+                    </span>
+                    <span id="recent-sessions-arrow" class="arrow" style="transition: transform 0.2s ease; font-weight: 700; color: #94a3b8;">›</span>
+                </button>
+                <div id="recent-sessions-container" style="display: none; max-height: 180px; overflow-y: auto; margin-bottom: 12px;">
+                    <div id="recent-sessions-list" style="display: flex; flex-direction: column; gap: 6px;">
+                        <div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">Loading sessions...</div>
                     </div>
                 </div>
             </div>
 
-            <!-- CONTROL #4: AI Model Setup -->
-            <div class="sidebar-section" id="sidebar-ai-setup" style="display: none;">
-                <div class="section-title" title="Choose the offline GGUF LLM model runner for inference">🤖 AI INFERENCE MODEL</div>
-                <div class="form-group">
-                    <select id="llm-model-select">
+            <!-- AI INFERENCE MODEL -->
+            <div class="sidebar-section" id="sidebar-ai-setup" style="margin-bottom: 16px;">
+                <div style="font-size: 0.72rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">AI INFERENCE MODEL</div>
+                <div class="form-group" style="margin: 0;">
+                    <select id="llm-model-select" style="width: 100%; padding: 8px 12px; font-size: 0.82rem; border-radius: 8px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); color: #fff;">
                         <option value="Gemma 4 (e4b)">Gemma 4 (e4b) - Recommended</option>
                         <option value="Gemma 4 (2b)">Gemma 4 (2b) - Fast</option>
                     </select>
                 </div>
             </div>
 
-            <!-- SCAN CONFIGURATION -->
-            <div class="sidebar-section" id="sidebar-mode-setup">
-                <div style="font-size: 0.72rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">SCAN CONFIGURATION</div>
-                
-                <!-- Hidden radios for form binding -->
-                <div style="display: none;">
-                    <input type="radio" name="audit-mode" value="Deep" id="radio-mode-deep" checked>
-                    <input type="radio" name="audit-mode" value="Quick" id="radio-mode-quick">
-                    <input type="radio" name="scoping-mode" value="AI Audit Scoping" id="radio-scoping-ai" checked>
-                    <input type="radio" name="scoping-mode" value="Audit Scope Checklist" id="radio-scoping-chk">
-                </div>
-
-                <!-- Analysis Mode Segmented Control -->
-                <div style="margin-bottom: 12px;">
-                    <label style="font-size: 0.76rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Analysis mode</label>
-                    <div class="segmented-control">
-                        <button type="button" class="segmented-btn active" id="btn-mode-deep" onclick="setAnalysisMode('Deep')">Deep analysis</button>
-                        <button type="button" class="segmented-btn" id="btn-mode-quick" onclick="setAnalysisMode('Quick')">Quick scan</button>
-                    </div>
-                </div>
-
-                <!-- Scope Detection Segmented Control -->
-                <div style="margin-bottom: 12px;">
-                    <label style="font-size: 0.76rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Scope detection</label>
-                    <div class="segmented-control">
-                        <button type="button" class="segmented-btn active" id="btn-scoping-ai" onclick="setScopingMode('AI Audit Scoping')">AI scoping</button>
-                        <button type="button" class="segmented-btn" id="btn-scoping-checklist" onclick="setScopingMode('Audit Scope Checklist')">Checklist</button>
-                    </div>
-                </div>
-
-                <!-- Scope Edit Card -->
-                <div class="sidebar-card-item" onclick="toggleScopeChecklistModal()" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: rgba(30, 41, 59, 0.4); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 10px; cursor: pointer; margin-bottom: 10px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span>📑</span>
-                        <span style="font-size: 0.82rem; font-weight: 600;">Scope</span>
-                    </div>
-                    <span id="sidebar-scope-count-badge" style="font-size: 0.76rem; color: #60a5fa; font-weight: 700;">108/108 · Edit</span>
-                </div>
-
-                <div id="scoping-file-container" style="display: none; margin-top: 8px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); padding: 10px; border-radius: 10px;">
-                    <label style="font-size: 0.72rem; font-weight: 600; color: var(--text-muted); display: block; margin-bottom: 6px;">Upload auditor reference document (.xlsx, .xls)</label>
-                    <input type="file" id="scoping-excel-file" accept=".xlsx, .xls" style="display: none;" onchange="handleExcelScopeUpload(event)">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <button type="button" class="btn-primary" style="padding: 5px 12px; font-size: 0.76rem; border-radius: 6px;" onclick="document.getElementById('scoping-excel-file').click()">📤 Upload Excel</button>
-                        <span style="font-size: 0.68rem; color: var(--text-muted);">Max 200MB</span>
-                    </div>
-                    <div id="scoping-file-name" class="file-badge" style="display:none; margin-top: 6px; font-size: 0.72rem;"></div>
+            <!-- ANALYSIS MODE -->
+            <div class="sidebar-section" id="sidebar-mode-setup" style="margin-bottom: 16px;">
+                <div style="font-size: 0.72rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">ANALYSIS MODE</div>
+                <div class="segmented-control" style="display: flex; gap: 4px; background: rgba(15, 23, 42, 0.6); padding: 4px; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.15);">
+                    <button type="button" class="segmented-btn" id="btn-mode-quick" onclick="setAnalysisMode('Quick')" style="flex: 1; padding: 6px; font-size: 0.76rem; border-radius: 8px; border: none; cursor: pointer; color: var(--text-muted); background: transparent;">Quick Audit</button>
+                    <button type="button" class="segmented-btn active" id="btn-mode-deep" onclick="setAnalysisMode('Deep')" style="flex: 1; padding: 6px; font-size: 0.76rem; border-radius: 8px; border: none; cursor: pointer; color: #fff; background: rgba(37, 99, 235, 0.8); font-weight: 700;">Deep Audit</button>
                 </div>
             </div>
 
@@ -236,23 +198,6 @@
                         <label>Client Email</label>
                         <input type="text" id="brand-email" value="ashish.jaiswal1@motorolasolutions.com">
                     </div>
-                </div>
-            </div>
-
-            <!-- Target Controls to Audit Accordions -->
-            <div class="sidebar-section" id="sidebar-checklist-setup" style="display: none; margin-top: 10px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                    <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">Target Controls to Audit</span>
-                    <span id="total-scope-badge" class="badge-pill" style="font-size: 0.7rem; color: #60a5fa; border-color: rgba(96, 165, 250, 0.3);">108 / 108 selected</span>
-                </div>
-                <input type="text" id="controls-search-input" placeholder="Search by ID or name..." oninput="filterCheckboxList()" style="margin-bottom: 8px; padding: 6px 12px; font-size: 0.78rem; height: 32px; width: 100%; border-radius: 8px; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); color: var(--text-main);">
-                <div style="display: flex; gap: 6px; margin-bottom: 10px;">
-                    <button class="btn-secondary" style="padding: 6px 8px; font-size: 0.74rem; flex: 1; border-radius: 6px;" onclick="selectAllCheckboxes(true)">Select All</button>
-                    <button class="btn-secondary" style="padding: 6px 8px; font-size: 0.74rem; flex: 1; border-radius: 6px;" onclick="selectAllCheckboxes(false)">Clear All</button>
-                    <button class="btn-primary" style="padding: 6px 8px; font-size: 0.74rem; flex: 1.2; border-radius: 6px; background: linear-gradient(135deg, #8b5cf6, #6d28d9); font-weight:700;" onclick="openAddCustomControlModal()">✨ + Custom</button>
-                </div>
-                <div class="checkbox-list" id="controls-checkbox-container" style="max-height: 380px; overflow-y: auto;">
-                    <!-- Loaded dynamically via js as Clause Accordions -->
                 </div>
             </div>
 
@@ -344,54 +289,99 @@
                 </section>
 
                 <!-- ── TAB: SCAN WORKSPACE ── -->
-                <section id="tab-scan-workspace" class="tab-panel">
-                    <!-- MAIN WORKSPACE TOP ACTION BAR (STEPS 1, 2, 3) -->
-                    <div id="main-action-bar" style="display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--bg-card); border: 1px solid var(--border-color); padding: 14px 20px; margin: 0 0 16px 0; border-radius: 16px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);">
+                <section id="tab-scan-workspace" class="tab-panel active" style="height: calc(100vh - 170px); padding: 0;">
+                    <div style="display: grid; grid-template-columns: 1fr 1.15fr; gap: 16px; height: 100%; align-items: stretch;">
                         
-                        <!-- CONTROL #1: Upload Evidence Files -->
-                        <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
-                            <input type="file" id="sidebar-evidence-file" multiple style="display: none;" onchange="handleSidebarUpload(event)">
-                            <button class="btn-secondary" style="padding: 8px 14px; font-size: 0.82rem; background: rgba(37, 99, 235, 0.15); border-color: rgba(37, 99, 235, 0.4); color: #60a5fa; font-weight: 600; white-space: nowrap;" onclick="document.getElementById('sidebar-evidence-file').click()" title="Upload PDF, DOCX, CSV evidence files">📁 Step 1: Upload Evidence</button>
-                            <div id="sidebar-upload-status" style="font-size: 0.78rem; color: var(--text-muted); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 280px;">No files selected</div>
-                        </div>
-
-                        <!-- CONTROL #2: Framework Target Selector -->
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin: 0; white-space: nowrap;">Step 2: Target Framework</label>
-                            <select id="framework-select" onchange="loadFrameworkControls()" style="padding: 6px 12px; font-size: 0.82rem; min-width: 180px;" title="Select compliance standard target">
-                                <option value="All Standards">All Standards (ISO + VAPT)</option>
-                                <option value="ISO 27001">ISO 27001:2022 Controls</option>
-                                <option value="VAPT">VAPT Framework Controls</option>
-                            </select>
-                        </div>
-
-                        <!-- CONTROL #3: Execute Scan CTA Button -->
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <button id="run-analysis-btn" class="btn-primary pulse-glowing-btn" onclick="triggerAuditAnalysis()" style="padding: 9px 20px; font-size: 0.86rem; border-radius: 10px;" title="Start automated RAG security audit on selected evidence files">▶ Step 3: Run RAG Scan</button>
-                            <button id="stop-analysis-btn" class="btn-danger" onclick="stopAuditAnalysis()" style="display:none; padding: 9px 14px; font-size: 0.82rem; border-radius: 10px;">⛔ Stop</button>
-                        </div>
-                    </div>
-
-                    <!-- First-Time User Quick-Start Guide Banner -->
-                    <div id="quick-start-guide-banner" style="display: flex; align-items: center; justify-content: space-between; background: linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(168, 85, 247, 0.15)); border: 1px solid rgba(59, 130, 246, 0.3); padding: 12px 18px; border-radius: 12px; margin: 0 0 16px 0;">
-                        <div style="display: flex; align-items: center; gap: 12px; font-size: 0.85rem; color: #e2e8f0;">
-                            <span style="font-size: 1.2rem;">🚀</span>
-                            <div>
-                                <strong style="color: #60a5fa;">Quick Start Guide:</strong>
-                                <span>1. Upload Evidence Files in Left Sidebar ➔ 2. Select ISO 27001 or VAPT Standard ➔ 3. Click <b style="color: #34d399;">"▶ Run RAG Scan"</b>.</span>
+                        <!-- LEFT COLUMN: File Upload / Evidence Collector Card -->
+                        <div class="modern-evidence-card" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; height: 100%;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                                <h3 style="margin: 0; font-size: 0.98rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
+                                    <span>📁</span> <span>File Upload / Evidence Collector</span>
+                                </h3>
+                                <div style="display: flex; align-items: center; gap: 6px;">
+                                    <span id="evidence-count-badge" class="evidence-count-pill" style="font-size: 0.72rem; color: var(--text-muted); background: rgba(255,255,255,0.06); padding: 2px 8px; border-radius: 8px;">0 files</span>
+                                    <button type="button" class="btn-secondary" onclick="document.getElementById('evidence-file-input').click()" style="padding: 4px 8px; font-size: 0.74rem;">+ Browse files</button>
+                                </div>
+                            </div>
+                            
+                            <div class="drop-zone" id="drop-zone" onclick="document.getElementById('evidence-file-input').click()" style="border: 2px dashed rgba(59, 130, 246, 0.35); background: rgba(15, 23, 42, 0.4); border-radius: 12px; padding: 24px 12px; text-align: center; cursor: pointer; transition: all 0.2s ease; margin-bottom: 12px;">
+                                <span class="drop-icon" style="font-size: 2.2rem; display: block; margin-bottom: 6px;">📤</span>
+                                <h4 style="margin: 0; font-size: 0.9rem; font-weight: 700; color: #60a5fa;">Drag-and-drop zone</h4>
+                                <p style="margin: 3px 0 0 0; font-size: 0.74rem; color: var(--text-muted);">Drop PDF, DOCX, CSV, HTML, JSON evidence files here</p>
+                                <input type="file" id="evidence-file-input" multiple style="display: none;" onchange="handleEvidenceUpload(event)">
+                            </div>
+                            
+                            <div style="background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 12px; padding: 12px; flex: 1; display: flex; flex-direction: column; min-height: 120px;">
+                                <div style="font-size: 0.74rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                                    <span>Already attached files</span>
+                                    <button type="button" style="background: transparent; border: none; color: #ef4444; font-size: 0.7rem; cursor: pointer;" onclick="clearAllUploadedFiles()">Delete All</button>
+                                </div>
+                                <div id="uploaded-files-registry" style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; max-height: 220px;">
+                                    <div class="empty-state" style="font-size: 0.76rem; color: var(--text-muted); text-align: center; padding: 20px;">No files uploaded yet. Drag files to begin audit.</div>
+                                </div>
                             </div>
                         </div>
-                        <button onclick="document.getElementById('quick-start-guide-banner').style.display='none'" style="background: transparent; border: none; color: #94a3b8; font-size: 1.1rem; cursor: pointer; padding: 0 4px;" title="Dismiss Guide">✕</button>
-                    </div>
 
-                    <!-- Uploaded Evidence Section Card -->
-                    <div class="modern-evidence-card">
-                        <div class="evidence-header-row">
-                            <h4>Uploaded evidence</h4>
-                            <span id="evidence-count-badge" class="evidence-count-pill">0 files</span>
-                        </div>
-                        <div class="modern-evidence-grid" id="uploaded-files-registry">
-                            <div class="empty-state">No files uploaded yet. Drag files to begin audit.</div>
+                        <!-- RIGHT COLUMN: Target Framework & Controls Configuration Card -->
+                        <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; height: 100%; justify-content: space-between;">
+                            <div>
+                                <div style="font-size: 0.74rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+                                    <span>🎯</span> <span>TARGET FRAMEWORK & CONTROLS CONFIGURATION</span>
+                                </div>
+
+                                <!-- Target Framework Select -->
+                                <div style="margin-bottom: 10px;">
+                                    <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: block; margin-bottom: 3px;">Target Framework</label>
+                                    <select id="framework-select" onchange="loadFrameworkControls()" style="width: 100%; padding: 7px 10px; font-size: 0.82rem; border-radius: 8px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.25); color: #fff;">
+                                        <option value="All Standards">All Standards (ISO 27001 + VAPT Framework)</option>
+                                        <option value="ISO 27001">ISO 27001:2022 Controls (93 Controls)</option>
+                                        <option value="VAPT">VAPT Framework Controls (15 Controls)</option>
+                                        <option value="SOC 2">SOC 2 Type II Controls</option>
+                                        <option value="PCI-DSS">PCI-DSS Security Controls</option>
+                                    </select>
+                                </div>
+
+                                <!-- Scope Detection Bar -->
+                                <div style="margin-bottom: 10px;">
+                                    <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: block; margin-bottom: 4px;">Scope Detection</label>
+                                    <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
+                                        <button type="button" class="btn-secondary active" id="btn-ai-scoping" onclick="setScopingMode('AI Audit Scoping')" style="padding: 5px 10px; font-size: 0.75rem;">⚙️ AI Scoping</button>
+                                        <button type="button" class="btn-secondary" id="btn-checklist-scoping" onclick="setScopingMode('Audit Scope Checklist')" style="padding: 5px 10px; font-size: 0.75rem;">📋 Checklist Scoping</button>
+                                        <button type="button" class="btn-secondary" id="btn-excel-scoping" onclick="document.getElementById('scoping-excel-file').click()" style="padding: 5px 10px; font-size: 0.75rem;">📊 Excel Scoping</button>
+                                        <input type="file" id="scoping-excel-file" accept=".xlsx,.xls,.csv" style="display: none;" onchange="handleScopingExcelUpload(event)">
+                                        
+                                        <button type="button" class="btn-primary" onclick="openScopeSelectorModal()" style="padding: 5px 12px; font-size: 0.75rem; background: linear-gradient(135deg, #2563eb, #1d4ed8); margin-left: auto; font-weight: 700;">
+                                            <span id="sidebar-scope-count-badge">Edit Scope 108/108 Controls</span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <!-- Target Controls to Audit Accordions -->
+                                <div style="margin-bottom: 10px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                                        <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); margin: 0;">Target Controls to Audit</label>
+                                        <span id="total-scope-badge" class="badge-pill" style="font-size: 0.68rem; color: #60a5fa; border-color: rgba(96,165,250,0.3);">108 / 108 selected</span>
+                                    </div>
+                                    <div style="display: flex; gap: 6px; align-items: center; margin-bottom: 8px;">
+                                        <input type="text" id="controls-search-input" placeholder="🔍 Search controls..." oninput="filterCheckboxList()" style="flex: 1; padding: 6px 10px; font-size: 0.76rem; border-radius: 6px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.25); color: #fff;">
+                                        <button type="button" class="btn-secondary" style="padding: 6px 8px; font-size: 0.72rem;" onclick="selectAllCheckboxes(true)">Select All</button>
+                                        <button type="button" class="btn-secondary" style="padding: 6px 8px; font-size: 0.72rem;" onclick="selectAllCheckboxes(false)">Clear All</button>
+                                    </div>
+
+                                    <!-- Target Controls Clause Accordions Container -->
+                                    <div class="checkbox-list" id="controls-checkbox-container" style="max-height: 210px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 10px; padding: 8px; background: rgba(15, 23, 42, 0.5);">
+                                        <!-- Loaded dynamically via js as Clause Accordion Expanders -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- BOTTOM ACTION ROW: RUN AUDIT SCAN BUTTON -->
+                            <div style="margin-top: 8px;">
+                                <button id="run-analysis-btn" class="btn-primary pulse-glowing-btn" onclick="triggerAuditAnalysis()" style="width: 100%; padding: 12px; font-size: 0.98rem; font-weight: 800; letter-spacing: 0.5px; border-radius: 10px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4); display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
+                                    <span>▶</span> <span>RUN AUDIT SCAN</span>
+                                </button>
+                                <button id="stop-analysis-btn" class="btn-danger" onclick="stopAuditAnalysis()" style="display:none; width: 100%; padding: 12px; font-size: 0.95rem; font-weight: 800; border-radius: 10px; margin-top: 8px;">⛔ STOP ANALYSIS</button>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -846,7 +836,55 @@
         </div>
     </div>
 
+    <!-- ── TARGET AUDIT SCOPE SELECTOR MODAL (108 CONTROLS) ── -->
+    <div id="scope-selector-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); z-index: 10000; align-items: center; justify-content: center;">
+        <div class="modal-card" style="background: rgba(30, 41, 59, 0.96); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 20px; padding: 24px; max-width: 960px; width: 94%; max-height: 88vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px rgba(0,0,0,0.8);">
+            <!-- Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); padding-bottom: 12px;">
+                <div>
+                    <h3 style="margin: 0; color: #f8fafc; font-size: 1.25rem; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+                        <span>🎯</span> <span>Target Audit Scope Selector (108 Controls)</span>
+                    </h3>
+                    <p style="margin: 4px 0 0 0; font-size: 0.78rem; color: #94a3b8;">Select, filter, or search all 108 ISO 27001 & VAPT penetration testing controls</p>
+                </div>
+                <button onclick="closeScopeSelectorModal()" style="background: transparent; border: none; color: #94a3b8; font-size: 1.3rem; cursor: pointer; padding: 4px;">✕</button>
+            </div>
+
+            <!-- Controls Filter & Search Bar -->
+            <div style="display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+                <input type="text" id="modal-control-search" placeholder="Search control ID (e.g. A.5.1, VAPT-1, password)..." oninput="filterModalControlsGrid()" style="flex: 1; min-width: 240px; padding: 8px 14px; font-size: 0.84rem; border-radius: 10px; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.25); color: #fff;">
+                
+                <div style="display: flex; gap: 6px;">
+                    <button type="button" class="btn-secondary active" id="modal-filter-all" onclick="filterModalDomain('All')" style="padding: 6px 12px; font-size: 0.78rem;">All (108)</button>
+                    <button type="button" class="btn-secondary" id="modal-filter-iso" onclick="filterModalDomain('ISO 27001')" style="padding: 6px 12px; font-size: 0.78rem;">In-Scope (93)</button>
+                    <button type="button" class="btn-secondary" id="modal-filter-vapt" onclick="filterModalDomain('VAPT')" style="padding: 6px 12px; font-size: 0.78rem;">VAPT (15)</button>
+                </div>
+
+                <div style="display: flex; gap: 6px; margin-left: auto;">
+                    <button type="button" class="btn-secondary" onclick="selectAllModalCheckboxes(true)" style="padding: 6px 12px; font-size: 0.78rem;">Select All</button>
+                    <button type="button" class="btn-secondary" onclick="selectAllModalCheckboxes(false)" style="padding: 6px 12px; font-size: 0.78rem;">Clear All</button>
+                </div>
+            </div>
+
+            <!-- 3-Column Scrollable Controls Grid -->
+            <div id="modal-controls-grid" style="flex: 1; max-height: 480px; overflow-y: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding-right: 6px;">
+                <!-- Dynamically loaded controls -->
+            </div>
+
+            <!-- Footer Action Row -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; border-top: 1px solid rgba(148, 163, 184, 0.15); padding-top: 14px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span id="modal-selected-count-badge" class="badge-pill" style="font-size: 0.8rem; padding: 6px 12px; color: #60a5fa; border-color: rgba(96,165,250,0.3);">108 of 108 Controls Selected</span>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn-secondary" onclick="closeScopeSelectorModal()">Cancel</button>
+                    <button type="button" class="btn-primary" onclick="saveScopeFromModal()" style="padding: 10px 24px; font-weight: 700;">Save & Apply Scope</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Script loading -->
-    <script src="/static/app.js?v=20260725_v35"></script>
+    <script src="/static/app.js?v=20260725_v10006"></script>
 </body>
 </html>
