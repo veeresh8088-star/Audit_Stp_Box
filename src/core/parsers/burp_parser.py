@@ -222,6 +222,7 @@ class BurpParser(BaseParser):
         return actionable_findings, info_findings
 
     def _parse_xml(self, content: str) -> Tuple[List[Finding], List[Finding]]:
+        import base64
         soup = BeautifulSoup(content, 'html.parser')
         actionable_findings: List[Finding] = []
         info_findings: List[Finding] = []
@@ -246,7 +247,7 @@ class BurpParser(BaseParser):
             else:
                 severity = "INFO"
 
-            score = self._calculate_score(severity, raw_conf)
+            score, cvss_vector = self._calculate_score_and_vector(title, raw_sev, raw_conf)
 
             host = issue.find('host')
             path = issue.find('path')
@@ -254,21 +255,70 @@ class BurpParser(BaseParser):
             h_str = host.get_text().strip() if host else ""
             p_str = path.get_text().strip() if path else ""
             loc_str = location.get_text().strip() if location else ""
-            target_str = f"{h_str}{p_str} ({loc_str})".strip()
+            target_str = f"{h_str}{p_str} ({loc_str})".strip() if loc_str else f"{h_str}{p_str}".strip()
 
             detail = issue.find('issuedetail')
-            desc = detail.get_text().strip() if detail else ""
+            bg = issue.find('issuebackground')
+            desc_detail = detail.get_text().strip() if detail else ""
+            desc_bg = bg.get_text().strip() if bg else ""
+            
+            if desc_detail and desc_bg:
+                full_desc = f"{desc_detail}\n\n[Issue Background]\n{desc_bg}"
+            else:
+                full_desc = desc_detail or desc_bg
 
-            remed = issue.find('remediationbackground')
-            remed_str = remed.get_text().strip() if remed else ""
+            remed_bg = issue.find('remediationbackground')
+            remed_dt = issue.find('remediationdetail')
+            r_bg_str = remed_bg.get_text().strip() if remed_bg else ""
+            r_dt_str = remed_dt.get_text().strip() if remed_dt else ""
+            if r_dt_str and r_bg_str:
+                full_remed = f"{r_dt_str}\n\n[Remediation Background]\n{r_bg_str}"
+            else:
+                full_remed = r_dt_str or r_bg_str
+
+            # Parse HTTP Request / Response evidence proof
+            evidence = ""
+            for rr in issue.find_all(['requestresponse', 'request', 'response']):
+                req = rr.find('request') if rr.name == 'requestresponse' else (rr if rr.name == 'request' else None)
+                resp = rr.find('response') if rr.name == 'requestresponse' else (rr if rr.name == 'response' else None)
+                
+                if req:
+                    req_text = req.get_text().strip()
+                    if req.get('base64') == 'true':
+                        try:
+                            req_text = base64.b64decode(req_text).decode('utf-8', errors='ignore')
+                        except Exception:
+                            pass
+                    if req_text and "[HTTP Request]" not in evidence:
+                        evidence += f"[HTTP Request]\n{req_text[:1200]}\n\n"
+                
+                if resp:
+                    resp_text = resp.get_text().strip()
+                    if resp.get('base64') == 'true':
+                        try:
+                            resp_text = base64.b64decode(resp_text).decode('utf-8', errors='ignore')
+                        except Exception:
+                            pass
+                    if resp_text and "[HTTP Response]" not in evidence:
+                        evidence += f"[HTTP Response Snippet]\n{resp_text[:1200]}\n\n"
+
+            cves = sorted(list(set(re.findall(r'CVE-\d{4}-\d{4,7}', full_desc + evidence, re.IGNORECASE))))
+
+            type_elem = issue.find('type')
+            plugin_id = type_elem.get_text().strip() if type_elem else "burp-issue"
 
             finding = Finding(
                 title=title,
                 severity=severity,
                 severity_score=score,
-                target=target_str,
-                description=desc,
-                remediation=remed_str,
+                cvss_vector=cvss_vector,
+                confidence=raw_conf,
+                cve_list=cves,
+                target=target_str or "Web Application Endpoint",
+                description=full_desc,
+                remediation=full_remed,
+                evidence=evidence.strip() or desc_detail[:500],
+                plugin_id=plugin_id,
                 source_tool="Burp Suite"
             )
 
