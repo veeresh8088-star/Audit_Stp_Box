@@ -74,25 +74,38 @@ function selectRole(role) {
     
     // Update button visual styles
     document.querySelectorAll(".role-btn").forEach(btn => btn.classList.remove("active"));
-    document.getElementById(`role-${role}-btn`).classList.add("active");
+    const targetBtn = document.getElementById(`role-${role}-btn`);
+    if (targetBtn) targetBtn.classList.add("active");
     
+    // Auto-fill default credentials for instant frictionless testing
+    const usernameInput = document.getElementById("username-input");
+    const passwordInput = document.getElementById("password-input");
+    if (usernameInput && passwordInput) {
+        usernameInput.value = role;
+        passwordInput.value = role === "admin" ? "admin123" : `${role}123`;
+    }
+
     // Update descriptions
     const descEl = document.getElementById("role-desc");
-    if (role === "admin") {
-        descEl.innerText = "SYSTEM ADMINISTRATOR • Full access to settings, analyses, and records";
-    } else if (role === "auditor") {
-        descEl.innerText = "COMPLIANCE AUDITOR • Upload compliance documents and run guided audits";
-    } else {
-        descEl.innerText = "AUDITEE • Upload audit evidence documents for the auditor to review";
+    if (descEl) {
+        if (role === "admin") {
+            descEl.innerText = "SYSTEM ADMINISTRATOR • Full access to settings, analyses, and records";
+        } else if (role === "auditor") {
+            descEl.innerText = "COMPLIANCE AUDITOR • Upload compliance documents and run guided audits";
+        } else {
+            descEl.innerText = "AUDITEE • Upload audit evidence documents for the auditor to review";
+        }
     }
     
     // Hide register option for Admin (seeded default is login only)
     const toggleRow = document.getElementById("toggle-auth-row");
-    if (role === "admin") {
-        toggleRow.style.display = "none";
-        resetAuthActionToLogin();
-    } else {
-        toggleRow.style.display = "flex";
+    if (toggleRow) {
+        if (role === "admin") {
+            toggleRow.style.display = "none";
+            resetAuthActionToLogin();
+        } else {
+            toggleRow.style.display = "flex";
+        }
     }
     showError("");
 }
