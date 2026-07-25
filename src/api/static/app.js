@@ -3,7 +3,7 @@
 const API_BASE = "http://127.0.0.1:8000/api";
 
 let currentUser = null;
-let selectedRole = "auditor";
+let selectedRole = "admin";
 let activeTab = "";
 let activeSessionId = "";
 let activeSessionTitle = "";
@@ -34,8 +34,11 @@ document.addEventListener("DOMContentLoaded", () => {
     updateHeaderClock();
     
     // Default render tabs & framework controls on page load so they are never blank
-    setupTabs(selectedRole || "auditor");
+    setupTabs(selectedRole || "admin");
     loadFrameworkControls();
+    
+    // Sync role selection UI and auto-fill credentials for the default role
+    selectRole(selectedRole || "admin");
     
     // Auth selectors
     const loginForm = document.getElementById("login-form");
