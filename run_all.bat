@@ -12,6 +12,8 @@ taskkill /F /IM ollama* /T >nul 2>&1
 taskkill /F /IM llama-server* /T >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11434 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11435 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
+echo [v] Port 8000 cleared.
 
 :: Locate llama-server.exe
 set "LLAMA_SERVER_EXE="
