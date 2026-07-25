@@ -2968,9 +2968,80 @@ function switchActiveAuditSession(sessionId) {
 }
 
 // Load recent sessions on page load
-window.addEventListener("DOMContentLoaded", () => {
-    setTimeout(loadRecentSessionsList, 1500);
+document.addEventListener("DOMContentLoaded", () => {
+    loadRecentSessionsList();
+    fetchLicenseStatus();
 });
 
+// ── LICENSE & TOKEN BILLING ENGINE ──
+async function fetchLicenseStatus() {
+    try {
+        const res = await fetch(`${API_BASE}/license/wallet`);
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        const widgetText = document.getElementById("license-widget-text");
+        const widgetBtn = document.getElementById("license-widget-btn");
+        
+        if (widgetText && widgetBtn) {
+            if (data.is_expired) {
+                widgetText.innerText = "Trial Expired [Renew]";
+                widgetBtn.style.background = "rgba(239,68,68,0.15)";
+                widgetBtn.style.borderColor = "rgba(239,68,68,0.4)";
+                widgetBtn.style.color = "#ef4444";
+            } else {
+                widgetText.innerText = `Free Trial: ${data.days_remaining}d [₹${data.balance_rupees}]`;
+                widgetBtn.style.background = "rgba(16,185,129,0.15)";
+                widgetBtn.style.borderColor = "rgba(16,185,129,0.4)";
+                widgetBtn.style.color = "#10b981";
+            }
+        }
+        
+        if (document.getElementById("lic-group")) document.getElementById("lic-group").innerText = data.auditor_group;
+        if (document.getElementById("lic-status-badge")) {
+            document.getElementById("lic-status-badge").innerText = data.status;
+            document.getElementById("lic-status-badge").style.color = data.is_expired ? "#ef4444" : "#10b981";
+        }
+        if (document.getElementById("lic-balance")) document.getElementById("lic-balance").innerText = `₹${data.balance_rupees.toFixed(2)}`;
+        if (document.getElementById("lic-audits-remaining")) document.getElementById("lic-audits-remaining").innerText = `${data.audits_remaining} Audits Left`;
+        if (document.getElementById("lic-expiry-date")) document.getElementById("lic-expiry-date").innerText = `${data.days_remaining} Days Remaining`;
+    } catch (e) {
+        console.warn("Failed to fetch license status", e);
+    }
+}
 
+function openLicenseModal() {
+    fetchLicenseStatus();
+    const modal = document.getElementById("license-modal");
+    if (modal) modal.style.display = "flex";
+}
 
+function closeLicenseModal() {
+    const modal = document.getElementById("license-modal");
+    if (modal) modal.style.display = "none";
+}
+
+async function handleActivateLicenseSubmit(e) {
+    e.preventDefault();
+    const key = document.getElementById("lic-key-input").value.trim();
+    if (!key) return;
+    
+    try {
+        const res = await fetch(`${API_BASE}/license/activate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ license_key: key })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            alert(`🎉 ${data.message}`);
+            document.getElementById("lic-key-input").value = "";
+            closeLicenseModal();
+            fetchLicenseStatus();
+        } else {
+            alert(`❌ Activation Failed: ${data.detail || 'Invalid key'}`);
+        }
+    } catch (err) {
+        alert(`❌ Error activating license: ${err.message}`);
+    }
+}

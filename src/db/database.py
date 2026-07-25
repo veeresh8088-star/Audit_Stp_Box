@@ -243,6 +243,41 @@ class CustomControl(Base):
                             onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 
+class LicenseWallet(Base):
+    """
+    Time-Bound & Token-Metered License Wallet engine for STPI Auditors and VAPT Teams.
+    Supports Trial Mode (Time-Bound + Audit Count limits) and Paid Enterprise Licenses.
+    """
+    __tablename__ = "license_wallets"
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    license_key      = Column(String(100), unique=True, nullable=False)
+    license_type     = Column(String(50), default="TRIAL")  # TRIAL | ENTERPRISE | UNLIMITED
+    auditor_group    = Column(String(100), default="STPI / VAPT Auditor")
+    balance_rupees   = Column(Float, default=500.0)         # ₹500.00 default trial balance
+    rate_per_m_tokens= Column(Float, default=10.0)          # ₹10 per 1,000,000 tokens
+    allocated_tokens = Column(Integer, default=50000000)   # 50M tokens
+    used_tokens      = Column(Integer, default=0)
+    audits_allowed   = Column(Integer, default=5)          # 5 Full Audits allowed in Trial
+    audits_completed = Column(Integer, default=0)
+    expiry_days      = Column(Integer, default=14)         # 14-day Free Trial
+    created_at       = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    expiry_date      = Column(DateTime, nullable=True)
+    is_active        = Column(Boolean, default=True)
+
+
+class TokenUsageLog(Base):
+    """Logs token usage and rupee cost per audit session."""
+    __tablename__ = "token_usage_logs"
+    id               = Column(Integer, primary_key=True, autoincrement=True)
+    session_id       = Column(String(100), index=True)
+    control_id       = Column(String(100), nullable=True)
+    prompt_tokens    = Column(Integer, default=0)
+    completion_tokens= Column(Integer, default=0)
+    total_tokens     = Column(Integer, default=0)
+    cost_rupees      = Column(Float, default=0.0)
+    created_at       = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+
+
 def _log_db_event(event_type: str, meta: dict = None, severity: str = "ERROR"):
     """
     Write a SystemEvent directly using the master engine.

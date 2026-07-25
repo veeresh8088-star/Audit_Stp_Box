@@ -7,6 +7,7 @@ from src.api.endpoints.auth import router as auth_router
 from src.api.endpoints.controls import router as controls_router
 from src.api.endpoints.logs import router as logs_router
 from src.api.endpoints.audit import router as audit_router
+from src.api.endpoints.license import router as license_router
 
 app = FastAPI(
     title="AICyberAuditBox - Local API Server",
@@ -44,6 +45,7 @@ app.include_router(auth_router, prefix="/api")
 app.include_router(controls_router, prefix="/api")
 app.include_router(logs_router, prefix="/api")
 app.include_router(audit_router, prefix="/api")
+app.include_router(license_router)
 
 # Mount static files folder
 app.mount("/static", StaticFiles(directory="src/api/static"), name="static")
