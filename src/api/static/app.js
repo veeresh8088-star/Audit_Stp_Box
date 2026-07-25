@@ -1464,6 +1464,7 @@ function renderFindingsList() {
         
         const ctrlTitle = (f.control_name && f.control_name !== "null") ? f.control_name : ((f.control && f.control !== "null") ? f.control : "");
         const displayTitle = ctrlTitle ? `${f.control_id} - ${ctrlTitle}` : f.control_id;
+        const findingJsonStr = JSON.stringify(f).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
         const polBadge = f.policy_present ? `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); font-weight: 600;">📜 Policy: ${f.policy_present}</span>` : '';
         const evBadge = f.evidence_present ? `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; background: rgba(168,85,247,0.15); color: #c084fc; border: 1px solid rgba(168,85,247,0.3); font-weight: 600;">🔍 Evidence: ${f.evidence_present}</span>` : '';
 
