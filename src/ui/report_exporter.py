@@ -1025,40 +1025,81 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         main_img = f.get("poc_image") or f.get("image_path")
         extra_img = f.get("extra_image")
 
-        pdf.set_font("Helvetica", "B", 9.5)
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.cell(0, 5, clean_text(f"3.3.{idx} {vuln_title}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        # Severity heading color
+        if sev_val == "CRITICAL":
+            sev_rgb = (220, 38, 38)     # Red
+        elif sev_val == "HIGH":
+            sev_rgb = (225, 29, 72)     # Crimson
+        elif sev_val == "MEDIUM":
+            sev_rgb = (217, 119, 6)     # Amber/Orange
+        elif sev_val == "LOW":
+            sev_rgb = (37, 99, 235)     # Blue
+        else:
+            sev_rgb = (100, 116, 139)   # Slate gray
+
+        pdf.set_font("Helvetica", "B", 11)
+        pdf.set_text_color(*sev_rgb)
+        pdf.cell(0, 6, clean_text(f"FN-{idx:02d} {vuln_title}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(1)
 
-        with pdf.table(col_widths=(45, 135), text_align="L") as table:
-            r = table.row()
-            r.cell("Vulnerability Description", style=lbl_style)
-            r.cell(clean_text(desc[:2500]), style=body_style)
+        # Meta summary bar
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.write(4.5, "Severity: ")
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.set_text_color(*sev_rgb)
+        pdf.write(4.5, f"{sev_val} ({score_val:.1f})")
+        pdf.set_font("Helvetica", "B", 8.5)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.write(4.5, "   |   Location / Target: ")
+        pdf.set_font("Helvetica", "", 8.5)
+        pdf.set_text_color(*BODY_TEXT)
+        pdf.write(4.5, clean_text(target[:120]))
+        if f.get("source_tool"):
+            pdf.set_font("Helvetica", "B", 8.5)
+            pdf.set_text_color(*DARK_TEXT)
+            pdf.write(4.5, "   |   Tool: ")
+            pdf.set_font("Helvetica", "", 8.5)
+            pdf.set_text_color(*BODY_TEXT)
+            pdf.write(4.5, clean_text(str(f.get("source_tool"))))
+        pdf.ln(6)
 
-            r = table.row()
-            r.cell("Target(s)", style=lbl_style)
-            r.cell(clean_text(target[:1000]), style=body_style)
+        # Issue Description
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(217, 119, 6)
+        pdf.cell(0, 5, "Issue Description:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 8.5)
+        pdf.set_text_color(*BODY_TEXT)
+        pdf.multi_cell(0, 4.2, clean_text(desc), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
 
-            r = table.row()
-            r.cell("Status", style=lbl_style)
-            r.cell(clean_text(status_str), style=body_style)
+        # Proof of Vulnerability / Proof of Concept
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(217, 119, 6)
+        pdf.cell(0, 5, "Proof of Vulnerability:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(1)
 
-            cvss_lbl_title = f.get("cvss_version") or ("CVSSv3.0 Base Metrics" if "3.0" in str(f.get("cvss_vector", "")) else "CVSS Base Metrics")
-            r = table.row()
-            r.cell(cvss_lbl_title, style=lbl_style)
-            r.cell(clean_text(metrics[:800]), style=body_style)
+        # Render Proof of Concept as code snippet callout box if HTTP/Console evidence present
+        if any(k in poc_text for k in ("HTTP/", "GET ", "POST ", "Host:", "CVE", "tcp/", "Path", "nmap", "Installed version")):
+            pdf.set_font("Courier", "", 8)
+            pdf.set_fill_color(248, 250, 252)
+            pdf.set_draw_color(203, 213, 225)
+            pdf.set_text_color(30, 41, 59)
+            pdf.multi_cell(0, 4.2, clean_text(poc_text), border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        else:
+            pdf.set_font("Helvetica", "", 8.5)
+            pdf.set_text_color(*BODY_TEXT)
+            pdf.multi_cell(0, 4.2, clean_text(poc_text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
 
-            r = table.row()
-            r.cell("Proof of Concept", style=lbl_style)
-            r.cell(clean_text(poc_text[:2500]), style=body_style)
-
-            r = table.row()
-            r.cell("Remediation", style=lbl_style)
-            r.cell(clean_text(remed[:2500]), style=body_style)
-
-            r = table.row()
-            r.cell("References", style=lbl_style)
-            r.cell(clean_text(ref[:1000]), style=body_style)
+        # Recommendation
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(217, 119, 6)
+        pdf.cell(0, 5, "Recommendation:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 8.5)
+        pdf.set_text_color(*BODY_TEXT)
+        pdf.multi_cell(0, 4.2, clean_text(remed), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(6)
 
         if main_img and os.path.exists(main_img):
             pdf.ln(2)
@@ -1569,76 +1610,76 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
     p.paragraph_format.space_before = Pt(12)
     
     for idx, f in enumerate(active_findings, 1):
-        vuln_title = f.get("control", "") or f.get("finding", "Vulnerability")
-        
-        fp = doc.add_paragraph()
-        run_f = fp.add_run(f"3.3.{idx} {vuln_title}")
-        run_f.bold = True
-        run_f.font.size = Pt(12)
-        run_f.font.color.rgb = _rgb(220, 38, 38)
-        
-        # Table Detail Grid
-        tbl_meta = doc.add_table(rows=7, cols=2)
-        tbl_meta.style = 'Table Grid'
-        
+        vuln_title = f.get("title") or f.get("control") or f.get("finding") or f"Finding {idx}"
         score = float(f.get("severity_score", 0.0) or 0.0)
         sev_label = str(f.get("severity", "Low")).split()[-1].upper()
-        
-        status_val = html.unescape(str(f.get("status") or "Detected"))
-        desc_val = html.unescape(str(f.get("description", "") or f.get("gap_description", "") or f.get("finding", "") or ""))
         target_val = html.unescape(str(f.get("target") or f.get("control_id", "") or "Web / Network infrastructure"))
-        poc_val = html.unescape(str(f.get("evidence") or f.get("evidence_snippet") or f.get("evidence_quote") or f.get("poc") or "N/A"))
+        desc_val = html.unescape(str(f.get("description") or f.get("gap_description") or f.get("finding") or "-"))
+        poc_val = html.unescape(str(f.get("evidence") or f.get("evidence_snippet") or f.get("evidence_quote") or f.get("poc") or "Console / Log Audit Verification"))
         remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
-        if not remed_raw or (status_val.lower() in ("detected", "non-compliant") and ("no action" in remed_raw.lower() or remed_raw == "NIL")):
-            remed_val = "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
-        else:
-            remed_val = html.unescape(remed_raw)
+        remed_val = html.unescape(remed_raw) if remed_raw else "Immediately apply vendor security patches or software updates."
 
-        if f.get("metrics_text"):
-            metrics_text = f.get("metrics_text")
-        else:
-            is_high_impact = score >= 7.0 or any(k in vuln_title.lower() or k in desc_val.lower() for k in ("rce", "execution", "traversal", "critical", "high"))
-            av = "Network"
-            ac = "High" if "cbc" in vuln_title.lower() else "Low"
-            at = "None"
-            pr = "None"
-            ui = "Required" if "hsts" in vuln_title.lower() else "None"
-            vc = "High" if is_high_impact else ("Low" if "cbc" in vuln_title.lower() or "hsts" in vuln_title.lower() else "High")
-            vi = "High" if is_high_impact else "None"
-            va = "High" if is_high_impact else "None"
-            
-            metrics_text = (
-                f"Exploitability Metrics:\n"
-                f"- Attack Vector (AV): {av}\n"
-                f"- Attack Complexity (AC): {ac}\n"
-                f"- Attack Requirements (AT): {at}\n"
-                f"- Privileges Required (PR): {pr}\n"
-                f"- User Interaction (UI): {ui}\n\n"
-                f"System Impact Metrics:\n"
-                f"- Confidentiality (VC): {vc}\n"
-                f"- Integrity (VI): {vi}\n"
-                f"- Availability (VA): {va}"
-            )
-        
-        meta_rows = [
-            ("Vulnerability Description", desc_val),
-            ("Target(s)", target_val),
-            ("Status", status_val),
-            ("CVSSv4.0 Base Metrics", f"{score:.1f} {sev_label}"),
-            ("CVSSv4.0 Base Metrics Detail", metrics_text),
-            ("Proof of Concept", poc_val),
-            ("Remediation", remed_val)
-        ]
-        for mr_idx, (m_lbl, m_val) in enumerate(meta_rows):
-            c1, c2 = tbl_meta.rows[mr_idx].cells
-            _set_cell_bg(c1, "F1F5F9")
-            _set_cell_borders(c1)
-            _set_cell_borders(c2)
-            c1.paragraphs[0].add_run(m_lbl).bold = True
-            c2.paragraphs[0].add_run(str(m_val))
+        # Heading
+        fp = doc.add_paragraph()
+        fp.paragraph_format.space_before = Pt(14)
+        run_f = fp.add_run(f"FN-{idx:02d} {vuln_title}")
+        run_f.bold = True
+        run_f.font.size = Pt(12)
+        if sev_label == "CRITICAL": run_f.font.color.rgb = _rgb(220, 38, 38)
+        elif sev_label == "HIGH": run_f.font.color.rgb = _rgb(225, 29, 72)
+        elif sev_label == "MEDIUM": run_f.font.color.rgb = _rgb(217, 119, 6)
+        else: run_f.font.color.rgb = _rgb(37, 99, 235)
+
+        # Meta line
+        pm = doc.add_paragraph()
+        r_m1 = pm.add_run("Severity: ")
+        r_m1.bold = True
+        r_m2 = pm.add_run(f"{sev_label} ({score:.1f})")
+        r_m2.bold = True
+        r_m2.font.color.rgb = run_f.font.color.rgb
+        r_m3 = pm.add_run(f"   |   Location / Target: {target_val}")
+        if f.get("source_tool"):
+            pm.add_run(f"   |   Tool: {f.get('source_tool')}")
+
+        # Issue Description
+        p_desc_hdr = doc.add_paragraph()
+        p_desc_hdr.paragraph_format.space_before = Pt(6)
+        r_dh = p_desc_hdr.add_run("Issue Description:")
+        r_dh.bold = True
+        r_dh.font.color.rgb = _rgb(217, 119, 6)
+        doc.add_paragraph(desc_val)
+
+        # Proof of Vulnerability
+        p_poc_hdr = doc.add_paragraph()
+        p_poc_hdr.paragraph_format.space_before = Pt(6)
+        r_ph = p_poc_hdr.add_run("Proof of Vulnerability:")
+        r_ph.bold = True
+        r_ph.font.color.rgb = _rgb(217, 119, 6)
+
+        # Code block container for Proof of Concept
+        tbl_poc = doc.add_table(rows=1, cols=1)
+        tbl_poc.style = 'Table Grid'
+        c_poc = tbl_poc.rows[0].cells[0]
+        _set_cell_bg(c_poc, "F8FAFC")
+        _set_cell_borders(c_poc)
+        p_code = c_poc.paragraphs[0]
+        r_code = p_code.add_run(poc_val)
+        r_code.font.name = "Consolas"
+        r_code.font.size = Pt(8.5)
+
+        # Recommendation
+        p_rec_hdr = doc.add_paragraph()
+        p_rec_hdr.paragraph_format.space_before = Pt(6)
+        r_rh = p_rec_hdr.add_run("Recommendation:")
+        r_rh.bold = True
+        r_rh.font.color.rgb = _rgb(217, 119, 6)
+        doc.add_paragraph(remed_val)
 
         main_img = f.get("poc_image") or f.get("image_path")
         extra_img = f.get("extra_image")
+        if main_img and os.path.exists(main_img):
+            p_img = doc.add_paragraph()
+            p_img.add_run().add_picture(main_img, width=Cm(15))
 
         if main_img and os.path.exists(main_img):
             img_p = doc.add_paragraph()
