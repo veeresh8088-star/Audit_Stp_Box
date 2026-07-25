@@ -1275,14 +1275,25 @@ async function renderAuditReportPreview() {
                 const badgeColor = isComp ? "#10b981" : "#ef4444";
                 const badgeBg = isComp ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)";
                 const ctrlTitle = (f.control_name && f.control_name !== "null") ? f.control_name : (f.control || f.control_id);
+                
+                const polSub = f.policy_present ? `<div style="font-size:0.68rem; color:#60a5fa; margin-top:2px;">📜 Policy: ${f.policy_present}</div>` : '';
+                const evSub = f.evidence_present ? `<div style="font-size:0.68rem; color:#c084fc; margin-top:1px;">🔍 Evidence: ${f.evidence_present}</div>` : '';
+
+                const evSnippet = f.evidence_snippet ? `<div style="margin-bottom:4px; color:#e2e8f0; font-family:var(--font-mono); font-size:0.74rem;"><b>Exact Evidence:</b> "${f.evidence_snippet}"</div>` : '';
+                const evDesc = f.description ? `<div style="color:#94a3b8; font-size:0.74rem;">${f.description}</div>` : '';
+                const srcFile = f.source_files ? `<div style="font-size:0.7rem; color:#60a5fa; margin-top:2px;">📁 ${f.source_files}</div>` : '';
 
                 rowsHtml += `
                     <tr style="border-bottom: 1px solid rgba(148,163,184,0.15);">
                         <td style="padding: 10px; font-weight:700; color:#60a5fa;">${f.control_id}</td>
                         <td style="padding: 10px; color:#e2e8f0; font-weight:600;">${ctrlTitle}</td>
-                        <td style="padding: 10px;"><span style="padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight:700; color:${badgeColor}; background:${badgeBg};">${f.status}</span></td>
+                        <td style="padding: 10px;">
+                            <span style="padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight:700; color:${badgeColor}; background:${badgeBg};">${f.status}</span>
+                            ${polSub}
+                            ${evSub}
+                        </td>
                         <td style="padding: 10px; color:#cbd5e1;">${f.severity || 'P3 Medium'}</td>
-                        <td style="padding: 10px; color:#94a3b8; font-size:0.76rem;">${(f.evidence_snippet || f.description || f.reasoning || '').slice(0, 140)}</td>
+                        <td style="padding: 10px; max-width: 360px;">${evSnippet}${evDesc}${srcFile}</td>
                     </tr>
                 `;
             });
@@ -1453,14 +1464,17 @@ function renderFindingsList() {
         
         const ctrlTitle = (f.control_name && f.control_name !== "null") ? f.control_name : ((f.control && f.control !== "null") ? f.control : "");
         const displayTitle = ctrlTitle ? `${f.control_id} - ${ctrlTitle}` : f.control_id;
-        const findingJsonStr = JSON.stringify(f).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+        const polBadge = f.policy_present ? `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); font-weight: 600;">📜 Policy: ${f.policy_present}</span>` : '';
+        const evBadge = f.evidence_present ? `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; background: rgba(168,85,247,0.15); color: #c084fc; border: 1px solid rgba(168,85,247,0.3); font-weight: 600;">🔍 Evidence: ${f.evidence_present}</span>` : '';
 
         card.innerHTML = `
             <div class="finding-card-header">
                 <div class="finding-card-title">
                     <h3>${displayTitle}</h3>
                 </div>
-                <div class="finding-badges">
+                <div class="finding-badges" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                    ${polBadge}
+                    ${evBadge}
                     <span class="badge-status ${statusBadgeClass}">${f.status}</span>
                     <span class="badge-pill">${f.severity || 'P3 Medium'}</span>
                 </div>
@@ -1967,13 +1981,17 @@ async function exportFindingsDOCX() {
         findings.forEach(f => {
             const isComp = isFindingCompliant(f);
             const statusColor = isComp ? '#10b981' : '#ef4444';
+            const docxEv = f.evidence_snippet ? `<p style='margin:0 0 4px 0;'><b>Exact Sentence Evidence:</b> "${f.evidence_snippet}"</p>` : '';
+            const docxDesc = f.description ? `<p style='margin:0 0 4px 0; color:#475569;'>${f.description}</p>` : '';
+            const docxSrc = f.source_files ? `<p style='margin:0; font-size:11px; color:#2563eb;'>Source Doc: ${f.source_files}</p>` : '';
+
             html += `
                 <tr>
                     <td><b>${f.control_id}</b></td>
                     <td>${f.control_name || f.control}</td>
                     <td><b style='color:${statusColor};'>${f.status}</b></td>
                     <td>${f.severity || 'P3 Medium'}</td>
-                    <td>${f.evidence_snippet || f.description || ''}</td>
+                    <td>${docxEv}${docxDesc}${docxSrc}</td>
                     <td>${f.recommendation || ''}</td>
                 </tr>
             `;
