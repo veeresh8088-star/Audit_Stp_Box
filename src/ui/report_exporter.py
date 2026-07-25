@@ -965,7 +965,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         }
     ]
 
-    # ── Smart rendering: ALL web pentest (Burp) findings first, then top network findings ──
+    # ── ALL findings: Burp Suite (web pentest) first, then Nessus network findings ──
     if active_findings:
         def _sev_order(f):
             s = str(f.get("severity", "LOW")).upper()
@@ -974,23 +974,18 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             if "MEDIUM" in s: return 2
             return 3
 
-        # Separate Burp Suite web pentest findings from network/other findings
-        burp_findings = [f for f in active_findings
-                         if "burp" in str(f.get("source_tool", "")).lower()]
-        network_findings = [f for f in active_findings
-                            if "burp" not in str(f.get("source_tool", "")).lower()]
+        # Burp Suite web pentest findings first, then all Nessus/network findings
+        burp_findings    = [f for f in active_findings if "burp" in str(f.get("source_tool", "")).lower()]
+        network_findings = [f for f in active_findings if "burp" not in str(f.get("source_tool", "")).lower()]
 
-        # Sort each group by severity independently
-        burp_sorted = sorted(burp_findings, key=_sev_order)
+        burp_sorted    = sorted(burp_findings,    key=_sev_order)
         network_sorted = sorted(network_findings, key=_sev_order)
 
-        # ALL Burp findings get detail cards; fill remaining slots (up to 45 total) with network
-        max_detail = max(45, len(burp_sorted) + 10)
-        network_detail_slots = max_detail - len(burp_sorted)
-        detail_findings = burp_sorted + network_sorted[:network_detail_slots]
-        summary_findings = network_sorted[network_detail_slots:]
+        # NO CAP — every single vulnerability gets a full detail card
+        detail_findings  = burp_sorted + network_sorted
+        summary_findings = []
     else:
-        detail_findings = default_findings_detail
+        detail_findings  = default_findings_detail
         summary_findings = []
 
     list_to_render = detail_findings
