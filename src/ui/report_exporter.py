@@ -965,19 +965,20 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         }
     ]
 
-    # ── Smart rendering: Top 30 critical/high get full detail cards, rest in summary table ──
+    # ── Smart rendering: Top 45 critical/high get full detail cards, rest in summary table ──
     if active_findings:
-        # Sort: Critical first, then High, Medium, Low
         def _sev_order(f):
             s = str(f.get("severity", "LOW")).upper()
-            if "CRITICAL" in s: return 0
-            if "HIGH" in s: return 1
-            if "MEDIUM" in s: return 2
-            return 3
+            tool = str(f.get("source_tool", "")).lower()
+            is_web = 0 if ("burp" in tool or "http" in str(f.get("target", "")).lower()) else 1
+            if "CRITICAL" in s: return (0, is_web)
+            if "HIGH" in s: return (1, is_web)
+            if "MEDIUM" in s: return (2, is_web)
+            return (3, is_web)
         
         sorted_findings = sorted(active_findings, key=_sev_order)
-        detail_findings = sorted_findings[:30]          # Full detail cards for top 30
-        summary_findings = sorted_findings[30:]         # Remaining in compact table
+        detail_findings = sorted_findings[:45]          # Full detail cards for top 45
+        summary_findings = sorted_findings[45:]         # Remaining in compact table
     else:
         detail_findings = default_findings_detail
         summary_findings = []
@@ -985,121 +986,103 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     list_to_render = detail_findings
 
     for idx, f in enumerate(list_to_render, 1):
-        # Start new page if less than 60mm remains (not enough for a full card)
-        if pdf.get_y() > 220:
+        # Start new page if less than 75mm remains for a clean spacious presentation
+        if pdf.get_y() > 200:
             pdf.add_page()
+        else:
+            pdf.ln(6)
+            pdf.set_draw_color(226, 232, 240)
+            pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+            pdf.ln(5)
             
         vuln_title = html.unescape(str(f.get("title") or f.get("finding") or f.get("control") or f"Finding 3.3.{idx}"))
         desc = html.unescape(str(f.get("description") or f.get("gap_description") or f.get("finding") or "-"))
         target = html.unescape(str(f.get("target") or f.get("control_id") or "Scoped Network Endpoints / Systems"))
         conf_val = str(f.get("confidence") or "").strip()
-        if conf_val and conf_val.lower() in ("certain", "firm", "tentative"):
-            status_str = f"Detected ({conf_val.capitalize()})"
-        else:
-            status_str = "Detected"
+        status_str = f"Detected ({conf_val.capitalize()})" if conf_val and conf_val.lower() in ("certain", "firm", "tentative") else "Detected"
 
         score_val = float(f.get("severity_score", f.get("score", 2.3)) or 2.3)
         sev_val = str(f.get("severity", f.get("sev", "LOW"))).split()[-1].upper()
         
         if f.get("cvss_vector"):
-            metrics = f"{score_val:.1f} {sev_val}\nVector: {f.get('cvss_vector')}"
+            metrics = f"{score_val:.1f} {sev_val}  |  Vector: {f.get('cvss_vector')}"
         elif f.get("metrics_text"):
             metrics = f.get("metrics_text")
         else:
-            is_high_impact = score_val >= 7.0 or any(k in vuln_title.lower() or k in desc.lower() for k in ("rce", "execution", "traversal", "critical", "high"))
-            vi_val = "High" if is_high_impact else "None"
-            va_val = "High" if is_high_impact else "None"
-            vc_val = "High" if is_high_impact else "Low"
-            ac_val = "High" if "cbc" in vuln_title.lower() else "Low"
-            ui_val = "Required" if "hsts" in vuln_title.lower() else "None"
-            metrics = f"{score_val:.1f} {sev_val}\nExploitability Metrics: AV: Network, AC: {ac_val}, AT: None, PR: None, UI: {ui_val}\nSystem Impact Metrics: VC: {vc_val}, VI: {vi_val}, VA: {va_val}, SC: None, SI: None, SA: None"
+            metrics = f"{score_val:.1f} {sev_val}"
 
         poc_text = html.unescape(str(f.get("evidence") or f.get("evidence_quote") or f.get("evidence_snippet") or f.get("poc") or "Console / Log Audit Verification"))
         remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
-        if not remed_raw or (status_str.lower() in ("detected", "non-compliant") and ("no action" in remed_raw.lower() or remed_raw == "NIL")):
-            remed = "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
-        else:
-            remed = html.unescape(remed_raw)
-            
+        remed = html.unescape(remed_raw) if remed_raw and ("no action" not in remed_raw.lower() and remed_raw != "NIL") else "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
         ref = html.unescape(str(f.get("references") or f.get("reference") or "OWASP / OSSTMM / NIST Security Recommendations"))
         main_img = f.get("poc_image") or f.get("image_path")
         extra_img = f.get("extra_image")
 
-        # Severity heading color
+        # Severity color palette
         if sev_val == "CRITICAL":
-            sev_rgb = (220, 38, 38)     # Red
+            sev_rgb = (220, 38, 38)     # Red #DC2626
         elif sev_val == "HIGH":
-            sev_rgb = (225, 29, 72)     # Crimson
+            sev_rgb = (225, 29, 72)     # Crimson #E11D48
         elif sev_val == "MEDIUM":
-            sev_rgb = (217, 119, 6)     # Amber/Orange
+            sev_rgb = (217, 119, 6)     # Amber #D97706
         elif sev_val == "LOW":
-            sev_rgb = (37, 99, 235)     # Blue
+            sev_rgb = (37, 99, 235)     # Blue #2563EB
         else:
-            sev_rgb = (100, 116, 139)   # Slate gray
+            sev_rgb = (100, 116, 139)   # Slate #64748B
 
+        # Heading Title
         pdf.set_font("Helvetica", "B", 11)
         pdf.set_text_color(*sev_rgb)
-        pdf.cell(0, 6, clean_text(f"FN-{idx:02d} {vuln_title}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(1)
-
-        # Meta summary bar
-        pdf.set_font("Helvetica", "B", 8.5)
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.write(4.5, "Severity: ")
-        pdf.set_font("Helvetica", "B", 8.5)
-        pdf.set_text_color(*sev_rgb)
-        pdf.write(4.5, f"{sev_val} ({score_val:.1f})")
-        pdf.set_font("Helvetica", "B", 8.5)
-        pdf.set_text_color(*DARK_TEXT)
-        pdf.write(4.5, "   |   Location / Target: ")
-        pdf.set_font("Helvetica", "", 8.5)
-        pdf.set_text_color(*BODY_TEXT)
-        pdf.write(4.5, clean_text(target[:120]))
-        if f.get("source_tool"):
-            pdf.set_font("Helvetica", "B", 8.5)
-            pdf.set_text_color(*DARK_TEXT)
-            pdf.write(4.5, "   |   Tool: ")
-            pdf.set_font("Helvetica", "", 8.5)
-            pdf.set_text_color(*BODY_TEXT)
-            pdf.write(4.5, clean_text(str(f.get("source_tool"))))
-        pdf.ln(6)
-
-        # Issue Description
-        pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(217, 119, 6)
-        pdf.cell(0, 5, "Issue Description:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 8.5)
-        pdf.set_text_color(*BODY_TEXT)
-        pdf.multi_cell(0, 4.2, clean_text(desc), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(0, 6, clean_text(f"FN-{idx:02d}  {vuln_title}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
-        # Proof of Vulnerability / Proof of Concept
+        # Meta Summary Table Grid
+        with pdf.table(col_widths=(40, 140), text_align="L") as table:
+            r = table.row()
+            r.cell("Severity / Score", style=lbl_style)
+            r.cell(clean_text(f"{sev_val} ({score_val:.1f})  —  {metrics}"), style=body_style)
+
+            r = table.row()
+            r.cell("Location / Target", style=lbl_style)
+            r.cell(clean_text(target[:400]), style=body_style)
+
+            r = table.row()
+            r.cell("Status / Scanner", style=lbl_style)
+            r.cell(clean_text(f"{status_str}  |  Tool: {f.get('source_tool') or 'VAPT Engine'}"), style=body_style)
+
+        pdf.ln(3)
+
+        # Issue Description Section
         pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(217, 119, 6)
+        pdf.set_text_color(15, 23, 42)
+        pdf.cell(0, 5, "Issue Description:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_font("Helvetica", "", 8.5)
+        pdf.set_text_color(51, 65, 85)
+        pdf.multi_cell(0, 4.5, clean_text(desc), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(3)
+
+        # Proof of Vulnerability Section
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(15, 23, 42)
         pdf.cell(0, 5, "Proof of Vulnerability:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(1)
 
-        # Render Proof of Concept as code snippet callout box if HTTP/Console evidence present
-        if any(k in poc_text for k in ("HTTP/", "GET ", "POST ", "Host:", "CVE", "tcp/", "Path", "nmap", "Installed version")):
-            pdf.set_font("Courier", "", 8)
-            pdf.set_fill_color(248, 250, 252)
-            pdf.set_draw_color(203, 213, 225)
-            pdf.set_text_color(30, 41, 59)
-            pdf.multi_cell(0, 4.2, clean_text(poc_text), border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        else:
-            pdf.set_font("Helvetica", "", 8.5)
-            pdf.set_text_color(*BODY_TEXT)
-            pdf.multi_cell(0, 4.2, clean_text(poc_text), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(2)
+        # Styled Monospace Box for HTTP Request/Response Evidence or Console Logs
+        pdf.set_font("Courier", "", 7.5)
+        pdf.set_fill_color(248, 250, 252)
+        pdf.set_draw_color(203, 213, 225)
+        pdf.set_text_color(30, 41, 59)
+        pdf.multi_cell(0, 4.2, clean_text(poc_text[:2500]), border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(3)
 
-        # Recommendation
+        # Recommendation Section
         pdf.set_font("Helvetica", "B", 9)
-        pdf.set_text_color(217, 119, 6)
+        pdf.set_text_color(15, 23, 42)
         pdf.cell(0, 5, "Recommendation:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font("Helvetica", "", 8.5)
-        pdf.set_text_color(*BODY_TEXT)
-        pdf.multi_cell(0, 4.2, clean_text(remed), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(6)
+        pdf.set_text_color(51, 65, 85)
+        pdf.multi_cell(0, 4.5, clean_text(remed), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(4)
 
         if main_img and os.path.exists(main_img):
             pdf.ln(2)
