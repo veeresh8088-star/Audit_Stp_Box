@@ -518,4 +518,14 @@ The following core optimizations were implemented to improve CPU performance, UI
 * **Files changed:** `src/api/main.py`
 * **Fix:** Added `NoCacheMiddleware` sending `Cache-Control: no-cache, no-store, must-revalidate, max-age=0` HTTP headers for `/` and `/static/*` assets. Prevents browser disk caching of `app.js` and guarantees instant UI updates upon refresh.
 
+---
+
+### 6. Simultaneous Hybrid Risk Classification (NIST SP 800-30 & CVSS v3.1)
+
+* **Files involved:** `src/ai/audit_chains.py`, `src/core/validator.py`, `src/core/parsers/control_mapper.py`
+* **Architecture:**
+  * **Policy & Organizational Controls (NIST SP 800-30)**: ISO 27001 Clause 5..8 and Custom Controls evaluate Business Impact $\times$ Threat Likelihood to determine risk severity (`P1 Critical`, `P2 High`, `P3 Medium`, `P4 Low`, `N/A`).
+  * **Technical Scanner Vulnerabilities (CVSS v3.1)**: Scanner outputs (Nessus, Nmap, Burp, Trivy, Qualys) parse raw CVSS numerical scores (e.g. `CVSS 9.8`).
+  * **Unified Severity Mapping**: Converts CVSS scores into the unified P1–P4 NIST scale (`9.0–10.0` $\rightarrow$ P1 Critical; `7.0–8.9` $\rightarrow$ P2 High; `4.0–6.9` $\rightarrow$ P3 Medium; `0.1–3.9` $\rightarrow$ P4 Low) to provide executive management with a single, consolidated risk view across both technical scans and policy evaluations.
+
 
