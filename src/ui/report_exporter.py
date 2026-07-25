@@ -965,20 +965,30 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         }
     ]
 
-    # ── Smart rendering: Top 45 critical/high get full detail cards, rest in summary table ──
+    # ── Smart rendering: ALL web pentest (Burp) findings first, then top network findings ──
     if active_findings:
         def _sev_order(f):
             s = str(f.get("severity", "LOW")).upper()
-            tool = str(f.get("source_tool", "")).lower()
-            is_web = 0 if ("burp" in tool or "http" in str(f.get("target", "")).lower()) else 1
-            if "CRITICAL" in s: return (0, is_web)
-            if "HIGH" in s: return (1, is_web)
-            if "MEDIUM" in s: return (2, is_web)
-            return (3, is_web)
-        
-        sorted_findings = sorted(active_findings, key=_sev_order)
-        detail_findings = sorted_findings[:45]          # Full detail cards for top 45
-        summary_findings = sorted_findings[45:]         # Remaining in compact table
+            if "CRITICAL" in s: return 0
+            if "HIGH" in s: return 1
+            if "MEDIUM" in s: return 2
+            return 3
+
+        # Separate Burp Suite web pentest findings from network/other findings
+        burp_findings = [f for f in active_findings
+                         if "burp" in str(f.get("source_tool", "")).lower()]
+        network_findings = [f for f in active_findings
+                            if "burp" not in str(f.get("source_tool", "")).lower()]
+
+        # Sort each group by severity independently
+        burp_sorted = sorted(burp_findings, key=_sev_order)
+        network_sorted = sorted(network_findings, key=_sev_order)
+
+        # ALL Burp findings get detail cards; fill remaining slots (up to 45 total) with network
+        max_detail = max(45, len(burp_sorted) + 10)
+        network_detail_slots = max_detail - len(burp_sorted)
+        detail_findings = burp_sorted + network_sorted[:network_detail_slots]
+        summary_findings = network_sorted[network_detail_slots:]
     else:
         detail_findings = default_findings_detail
         summary_findings = []
