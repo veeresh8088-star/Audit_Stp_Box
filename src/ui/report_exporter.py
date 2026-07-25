@@ -466,7 +466,8 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.ln(2)
 
     if findings:
-        active_findings = [f.to_dict() if hasattr(f, "to_dict") else dict(f) for f in findings if (isinstance(f, dict) and f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")) or (hasattr(f, "status") and f.status not in ("Out of Scope", "False Positive", "FALSE_POSITIVE"))]
+        dict_findings = [f.to_dict() if hasattr(f, "to_dict") else (f if isinstance(f, dict) else getattr(f, "__dict__", {})) for f in findings]
+        active_findings = [f for f in dict_findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
     else:
         active_findings = _get_all_parsed_findings_from_registry()
 
@@ -508,7 +509,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         active_findings = sorted(active_findings, key=sort_key, reverse=True)
 
     import math
-    list_to_show = active_findings if active_findings else default_findings
+    list_to_show = active_findings if active_findings else []
     total_cnt = len(list_to_show)
     detail_findings = list_to_show[:40]
     summary_findings = list_to_show[40:]
@@ -719,7 +720,8 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.cell(0, 5.5, "2.3 Summary of Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
     if findings:
-        active_findings = [f.to_dict() if hasattr(f, "to_dict") else dict(f) for f in findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
+        dict_findings = [f.to_dict() if hasattr(f, "to_dict") else (f if isinstance(f, dict) else getattr(f, "__dict__", {})) for f in findings]
+        active_findings = [f for f in dict_findings if f.get("status") not in ("Out of Scope", "False Positive", "FALSE_POSITIVE")]
     else:
         active_findings = _get_all_parsed_findings_from_registry()
 
@@ -1010,7 +1012,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             ui_val = "Required" if "hsts" in vuln_title.lower() else "None"
             metrics = f"{score_val:.1f} {sev_val}\nExploitability Metrics: AV: Network, AC: {ac_val}, AT: None, PR: None, UI: {ui_val}\nSystem Impact Metrics: VC: {vc_val}, VI: {vi_val}, VA: {va_val}, SC: None, SI: None, SA: None"
 
-        poc_text = html.unescape(str(f.get("evidence_quote") or f.get("evidence_snippet") or f.get("poc") or "Console / Log Audit Verification"))
+        poc_text = html.unescape(str(f.get("evidence") or f.get("evidence_quote") or f.get("evidence_snippet") or f.get("poc") or "Console / Log Audit Verification"))
         remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
         if not remed_raw or (status_str.lower() in ("detected", "non-compliant") and ("no action" in remed_raw.lower() or remed_raw == "NIL")):
             remed = "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
@@ -1029,11 +1031,11 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         with pdf.table(col_widths=(45, 135), text_align="L") as table:
             r = table.row()
             r.cell("Vulnerability Description", style=lbl_style)
-            r.cell(clean_text(desc[:600]), style=body_style)
+            r.cell(clean_text(desc[:2500]), style=body_style)
 
             r = table.row()
             r.cell("Target(s)", style=lbl_style)
-            r.cell(clean_text(target[:300]), style=body_style)
+            r.cell(clean_text(target[:1000]), style=body_style)
 
             r = table.row()
             r.cell("Status", style=lbl_style)
@@ -1042,19 +1044,19 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             cvss_lbl_title = f.get("cvss_version") or ("CVSSv3.0 Base Metrics" if "3.0" in str(f.get("cvss_vector", "")) else "CVSS Base Metrics")
             r = table.row()
             r.cell(cvss_lbl_title, style=lbl_style)
-            r.cell(clean_text(metrics[:400]), style=body_style)
+            r.cell(clean_text(metrics[:800]), style=body_style)
 
             r = table.row()
             r.cell("Proof of Concept", style=lbl_style)
-            r.cell(clean_text(poc_text[:600]), style=body_style)
+            r.cell(clean_text(poc_text[:2500]), style=body_style)
 
             r = table.row()
             r.cell("Remediation", style=lbl_style)
-            r.cell(clean_text(remed[:600]), style=body_style)
+            r.cell(clean_text(remed[:2500]), style=body_style)
 
             r = table.row()
             r.cell("References", style=lbl_style)
-            r.cell(clean_text(ref[:400]), style=body_style)
+            r.cell(clean_text(ref[:1000]), style=body_style)
 
         if main_img and os.path.exists(main_img):
             pdf.ln(2)
@@ -1583,7 +1585,7 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         status_val = html.unescape(str(f.get("status") or "Detected"))
         desc_val = html.unescape(str(f.get("finding", "") or f.get("gap_description", "") or ""))
         target_val = html.unescape(str(f.get("target") or f.get("control_id", "") or "Web / Network infrastructure"))
-        poc_val = html.unescape(str(f.get("evidence_snippet") or f.get("evidence_quote") or f.get("poc") or "N/A"))
+        poc_val = html.unescape(str(f.get("evidence") or f.get("evidence_snippet") or f.get("evidence_quote") or f.get("poc") or "N/A"))
         remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
         if not remed_raw or (status_val.lower() in ("detected", "non-compliant") and ("no action" in remed_raw.lower() or remed_raw == "NIL")):
             remed_val = "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."

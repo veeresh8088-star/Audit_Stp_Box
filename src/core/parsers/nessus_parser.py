@@ -98,6 +98,14 @@ class NessusParser(BaseParser):
 
                 t_host = ", ".join(sorted(list(set(targets)))) if targets else "Scoped Host Targets"
 
+                # Extract Plugin Output for evidence
+                evidence = ""
+                m_out = re.search(r'Plugin Output\s*\n\s*(.*?)(?=\n\s*(?:Algorithm|Risk Factor|Plugin Information|CVSS|\Z))', txt, re.DOTALL)
+                if m_out:
+                    evidence = m_out.group(1).strip()
+                else:
+                    evidence = txt[:500]
+
                 finding = Finding(
                     plugin_id=plugin_id,
                     title=title,
@@ -108,7 +116,7 @@ class NessusParser(BaseParser):
                     description=desc,
                     remediation=remed,
                     target=t_host,
-                    evidence=txt[:300],
+                    evidence=evidence,
                     source_tool="Nessus"
                 )
 
