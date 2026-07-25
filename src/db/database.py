@@ -458,7 +458,12 @@ def reconcile_schemas(engine):
     """
     from sqlalchemy import inspect
     inspector = inspect(engine)
-    tables_to_check = ["users", "audit_reports", "findings", "evidence_files", "audit_records", "compliance_scores", "document_chunks", "auditor_feedback", "audit_trail", "system_events"]
+    tables_to_check = [
+        "users", "audit_reports", "findings", "evidence_files", 
+        "audit_records", "compliance_scores", "document_chunks", 
+        "auditor_feedback", "audit_trail", "system_events", 
+        "chat_messages", "custom_controls", "license_wallets", "token_usage_logs"
+    ]
     
     # We want to check columns for each table
     for table_name in tables_to_check:
