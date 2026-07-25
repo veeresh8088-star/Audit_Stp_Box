@@ -137,6 +137,9 @@ def get_num_ctx(model_name: str) -> int:
     return 4096
 
 def _generate_context_summary(context, ollama_model):
+    """Generates a brief document scope summary using the configured LLM backend.
+    Routes through query_llm() so it correctly uses llama.cpp or Ollama.
+    Hard timeout of 15s — skips gracefully if LLM is unresponsive."""
     import re
     files = re.split(r'--- FILE: (.*?) ---', context)
     sample_text = ""
@@ -148,35 +151,36 @@ def _generate_context_summary(context, ollama_model):
     else:
         sample_text = context[:8000]
 
-    sample_text = sample_text[:12000]
+    sample_text = sample_text[:8000]   # Keep prompt short for fast response
 
-    # Quick prompt for context summary using requests to Ollama API
-    import requests
-    payload = {
-        "model": ollama_model,
-        "prompt": f"""You are a forensic compliance auditor assistant.
-Analyze the following document beginning text and extract its overall scope and exclusions:
+    summary_prompt = f"""You are a forensic compliance auditor assistant.
+Analyze the following document beginning text and extract its overall scope:
 1. What is the main purpose of this document?
 2. What are the key topics it covers?
 3. What does it explicitly state it does NOT cover (exclusions)?
 
-Keep your response brief, under 200 words. Focus strictly on facts found in the text.
+Keep your response brief, under 150 words.
 
 --- START DOCUMENT TEXT ---
 {sample_text}
 --- END DOCUMENT TEXT ---
 
-Output:""",
-        "stream": False,
-        "options": {"num_ctx": get_num_ctx(ollama_model)}
-    }
+Output:"""
+
     try:
-        r = requests.post("http://127.0.0.1:11434/api/generate", json=payload, timeout=20)
-        if r.status_code == 200:
-            return r.json().get("response", "No summary generated.")
-    except Exception:
-        pass
-    return "Local summary extraction failed or Ollama unreachable."
+        from src.core.llm_client import query_llm
+        # Use query_llm which correctly routes to llama.cpp or Ollama
+        summary = query_llm(
+            prompt=summary_prompt,
+            model=ollama_model,
+            num_ctx=get_num_ctx(ollama_model),
+            temperature=0.0,
+            timeout=15     # Hard 15s cap — skip gracefully if model is cold
+        )
+        return summary if summary.strip() else "Document scope summary unavailable."
+    except Exception as e:
+        print(f"[CONTEXT SUMMARY] Skipped (LLM unavailable or timeout): {e}", flush=True)
+        return "Document scope summary unavailable (LLM not ready)."
 
 def _checkpoint_create(session_id, bg_key, ai_model, selected_sls, file_names, context_str, total_controls, batch_size):
     with force_master():
@@ -419,6 +423,32 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)
     _sid = session_id or bg_key
     try:
+        # ── Pre-flight: verify LLM server is reachable (3s timeout) ──────────
+        import os as _os
+        import requests as _req
+        _backend = _os.environ.get("LLM_BACKEND", "ollama").strip().lower()
+        _is_llamacpp = _backend in ("llama.cpp", "llamacpp")
+        _llm_host = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if not _llm_host.startswith("http"):
+            _llm_host = f"http://{_llm_host}"
+        _health_url = f"{_llm_host}/health" if _is_llamacpp else f"{_llm_host}/api/tags"
+        try:
+            _hr = _req.get(_health_url, timeout=3)
+            print(f"[_run_ollama_bg] LLM server health check OK ({_health_url}): {_hr.status_code}", flush=True)
+        except Exception as _hc_err:
+            _backend_label = "llama.cpp" if _is_llamacpp else "Ollama"
+            _err_msg = (
+                f"❌ {_backend_label} server is not reachable at {_llm_host}. "
+                f"Please start your LLM server and try again. ({_hc_err})"
+            )
+            print(f"[_run_ollama_bg] Pre-flight FAILED: {_err_msg}", flush=True)
+            with _bg_lock:
+                _bg_results[bg_key] = {"error": _err_msg}
+                _bg_store["progress"].pop(bg_key, None)
+            _checkpoint_finish(_sid, "failed")
+            return
+        # ─────────────────────────────────────────────────────────────────────
+
         with _bg_lock:
             _bg_store["progress"][bg_key] = {
                 "text": "🔍 Scanning file security...",

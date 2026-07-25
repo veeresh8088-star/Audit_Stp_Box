@@ -140,10 +140,15 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
                 result_holder["error"] = str(ex)
         t = threading.Thread(target=_run, daemon=True)
         t.start()
-        t.join(timeout=540)  # 9-minute hard limit per LLM call (local llama.cpp)
+        # llama.cpp: 90s per control (vs 540s Ollama default)
+        # Each control typically takes 20-60s on llama.cpp CPU inference
+        import os as _os
+        _backend = _os.environ.get("LLM_BACKEND", "ollama").strip().lower()
+        _timeout = 90 if _backend in ("llama.cpp", "llamacpp") else 300
+        t.join(timeout=_timeout)
         if t.is_alive():
-            print(f"[LANGGRAPH TIMEOUT] Generator timed out for control {state.get('control_id','')}. Skipping.", flush=True)
-            return {"draft_finding": None, "validation_error": "LLM call timed out after 120s"}
+            print(f"[LANGGRAPH TIMEOUT] Generator timed out after {_timeout}s for control {state.get('control_id','')}. Skipping.", flush=True)
+            return {"draft_finding": None, "validation_error": f"LLM call timed out after {_timeout}s"}
         if "error" in result_holder:
             raise Exception(result_holder["error"])
         draft = result_holder["draft"]
