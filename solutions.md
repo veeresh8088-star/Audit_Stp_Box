@@ -528,4 +528,18 @@ The following core optimizations were implemented to improve CPU performance, UI
   * **Technical Scanner Vulnerabilities (CVSS v3.1)**: Scanner outputs (Nessus, Nmap, Burp, Trivy, Qualys) parse raw CVSS numerical scores (e.g. `CVSS 9.8`).
   * **Unified Severity Mapping**: Converts CVSS scores into the unified P1–P4 NIST scale (`9.0–10.0` $\rightarrow$ P1 Critical; `7.0–8.9` $\rightarrow$ P2 High; `4.0–6.9` $\rightarrow$ P3 Medium; `0.1–3.9` $\rightarrow$ P4 Low) to provide executive management with a single, consolidated risk view across both technical scans and policy evaluations.
 
+---
+
+### 7. Mixed Scanner Ingestion & 3-Tier Cross-Format Deduplication (CSV vs. Non-CSV)
+
+* **Files involved:** `src/core/parsers/finding_schema.py`, `src/core/parsers/base_parser.py`, `src/core/parsers/control_mapper.py`, `src/core/parsers/nessus_parser.py`, `src/core/parsers/nmap_parser.py`
+* **Architecture:**
+  * **Dual-Path Parser Routing**: Auto-detects input file extensions and formats (CSV/XLSX $\rightarrow$ Pandas; XML/HTML $\rightarrow$ BeautifulSoup; PDF/DOCX $\rightarrow$ Text Windowing).
+  * **Standardized `Finding` Dataclass**: Normalizes findings across CSV rows and XML/HTML tags into a unified schema containing `control_id`, `cve_list`, `severity`, `source_tool`, and `source_files`.
+  * **3-Tier Cross-Format Deduplication (`dedup_key`)**:
+    * **Tier 1 (CVE Match)**: Merges findings sharing the same CVE ID (`CVE:CVE-2024-21626`) across CSV and XML files.
+    * **Tier 2 (Plugin Match)**: Merges findings sharing the same Nessus Plugin ID (`source_tool:plugin_id`).
+    * **Tier 3 (Title & Target Match)**: Merges findings with identical vulnerability titles targeting the same IP/hostname.
+  * **Result**: Prevents double-counting vulnerabilities when mixing CSV and non-CSV scanner files, consolidating 100% of actionable findings into unified executive deliverables.
+
 
