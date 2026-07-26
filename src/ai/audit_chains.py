@@ -887,7 +887,7 @@ class NativeOllamaChain:
 
             if has_explicit_evidence:
                 print(f"[RECOVERY FALLBACK] Control {control_id_str}: Evidence found in retrieved context despite LLM parse error. Recovering as COMPLIANT for control {control_id_str}.", flush=True)
-                evidence_snippet = retrieved_ctx[:300].strip()
+                evidence_snippet = retrieved_ctx[:1500].strip()
                 return AuditFindingSchema(
                     status="COMPLIANT",
                     severity="N/A",
