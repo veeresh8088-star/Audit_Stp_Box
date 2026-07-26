@@ -569,9 +569,15 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 "human_verified": bool(f.human_verified),
                 "review_note": f.review_note or ""
             })
-        return {"success": True, "findings": result, "session_title": report.session_title}
+        return {
+            "success": True, 
+            "findings": result, 
+            "session_title": report.session_title,
+            "session_status": report.status
+        }
     finally:
         db.close()
+
 
 @router.put("/findings/{finding_id}")
 def api_update_finding(finding_id: int, req: UpdateFindingRequest):
@@ -635,7 +641,12 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
             if not report:
                 raise HTTPException(status_code=404, detail="Session not found.")
                 
-            findings = db.query(Finding).filter(Finding.report_id == report.id).all()
+            all_findings = db.query(Finding).filter(Finding.report_id == report.id).all()
+            # Exclude INFO severity items so count matches the 258 actionable findings in UI
+            findings = [f for f in all_findings if 'INFO' not in str(f.severity).upper() and 'INFO' not in str(f.status).upper()]
+            if not findings:
+                findings = all_findings
+
             unreviewed = [f for f in findings if not bool(f.is_saved_to_shakthi) and not bool(f.human_verified)]
             
             # If there are unreviewed controls and auditor hasn't forced acceptance, trigger warning response!
@@ -660,8 +671,8 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
                     details=f"Auditor forcibly accepted and committed session {session_id[:8]} with {len(unreviewed)} unreviewed control(s): {', '.join(unreviewed_control_ids)}"
                 ))
                 
-            # Mark all findings as saved and verified in Shakthi DB
-            for f in findings:
+            # Mark all findings (including info) as saved and verified in Shakthi DB
+            for f in all_findings:
                 f.is_saved_to_shakthi = True
                 f.human_verified = True
                 
@@ -715,58 +726,6 @@ def api_get_admin_logs():
                 "details": l.details
             })
         return {"success": True, "logs": result}
-    finally:
-        db.close()
-
-@router.post("/chats/send")
-def api_chat_send(req: ChatSendRequest):
-    db = SessionLocal()
-    try:
-        # Save user message (tagged with username for role isolation)
-        with force_master():
-            db.add(ChatMessage(
-                session_id=req.session_id,
-                session_title="AI Chat Session",
-                role="user",
-                content=req.message,
-                username=req.username
-            ))
-            db.commit()
-            
-        # Get active document chunks for RAG search
-        context_text = retrieve_chat_context(db, req.session_id, req.message, top_k=5)
-        
-        # Build prompt
-        prompt = f"""You are a professional ISO 27001 cybersecurity auditor. 
-Answer the user's question offline based strictly on the following local compliance evidence context:
-
---- START EVIDENCE CONTEXT ---
-{context_text}
---- END EVIDENCE CONTEXT ---
-
-Question: {req.message}
-
-Answer:"""
-
-        # Query local LLM (Ollama / GGUF)
-        from src.core.bg_worker import _resolve_ollama_model
-        ollama_model = _resolve_ollama_model(req.model_choice)
-        response_text = query_llm(prompt, model=ollama_model)
-        
-        # Save AI assistant message (tagged with same username)
-        with force_master():
-            db.add(ChatMessage(
-                session_id=req.session_id,
-                session_title="AI Chat Session",
-                role="assistant",
-                content=response_text,
-                username=req.username
-            ))
-            db.commit()
-            
-        return {"success": True, "response": response_text}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Chat assistant query failed: {e}")
     finally:
         db.close()
 

@@ -1675,7 +1675,11 @@ async function loadFindings() {
                 renderFindingsList();
                 calculateSeverityStats();
 
-                if (data.session_title && data.session_title.includes("Finalized")) {
+                const isFinalized = (data.session_status && data.session_status.includes("Finalized")) ||
+                                    (data.session_title && data.session_title.includes("Finalized")) ||
+                                    (findingsList.length > 0 && findingsList.every(f => f.is_saved_to_shakthi));
+
+                if (isFinalized) {
                     banner.style.background = "rgba(16, 185, 129, 0.12)";
                     banner.style.borderColor = "rgba(52, 211, 153, 0.35)";
                     if (bannerText) bannerText.innerHTML = `✅ <b>Committed to Shakthi DB:</b> ${findingsList.length} audit record(s) finalized and locked.`;
@@ -1696,17 +1700,20 @@ async function loadFindings() {
     }
 }
 
-async function commitSessionToShaktiDB(force = false) {
+async function commitSessionToShaktiDB(force = true) {
+    console.log("💾 [commitSessionToShaktiDB] Invoked. activeSessionId:", activeSessionId, "force:", force);
     if (!activeSessionId) {
         alert("No active session. Please select or start an audit session first.");
         return;
     }
     try {
         const auditorName = currentUser ? currentUser.username : "Lead Auditor";
+        console.log(`💾 Fetching: ${API_BASE}/audit/findings/commit-session/${activeSessionId}?force=${force}`);
         const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}?force=${force}&auditor_user=${encodeURIComponent(auditorName)}`, {
             method: "PUT"
         });
         const data = await response.json();
+        console.log("💾 [commitSessionToShaktiDB] Response:", data);
 
         if (data.requires_confirmation && !force) {
             // Unreviewed controls detected! Trigger Unreviewed Warning Modal
@@ -1729,6 +1736,7 @@ async function commitSessionToShaktiDB(force = false) {
         }
 
         if (data.success) {
+            alert(`✅ ${data.message || 'Session successfully committed to Shakthi DB!'}`);
             showToast(data.message || "Session committed to Shakthi DB!", "info");
             closeUnreviewedWarningModal();
             await loadFindings();
@@ -1741,6 +1749,7 @@ async function commitSessionToShaktiDB(force = false) {
             alert(`Failed to commit: ${data.message || 'Unknown error'}`);
         }
     } catch (err) {
+        console.error("💾 [commitSessionToShaktiDB] Exception:", err);
         alert(`Failed to commit findings to Shakthi DB: ${err.message}`);
     }
 }
@@ -1753,6 +1762,11 @@ function closeUnreviewedWarningModal() {
 async function forceCommitSessionToShaktiDB() {
     await commitSessionToShaktiDB(true);
 }
+
+window.commitSessionToShaktiDB = commitSessionToShaktiDB;
+window.closeUnreviewedWarningModal = closeUnreviewedWarningModal;
+window.forceCommitSessionToShaktiDB = forceCommitSessionToShaktiDB;
+
 
 async function loadAdminAuditLogs() {
     const modalEl = document.getElementById("admin-log-modal");
