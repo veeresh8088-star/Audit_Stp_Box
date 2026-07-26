@@ -647,8 +647,10 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
             if not findings:
                 findings = all_findings
 
-            unreviewed = [f for f in findings if not bool(f.is_saved_to_shakthi) and not bool(f.human_verified)]
-            
+            unreviewed = [f for f in findings if not bool(f.human_verified) or not bool(f.is_saved_to_shakthi)]
+            if not unreviewed and report.status != "Reviewed & Finalized":
+                unreviewed = findings
+
             # If there are unreviewed controls and auditor hasn't forced acceptance, trigger warning response!
             if unreviewed and not is_force:
                 unreviewed_controls = [f"{f.control_id} - {f.control_name or f.status}" for f in unreviewed]
@@ -661,15 +663,16 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
                 }
                 
             # If auditor forces acceptance of unreviewed controls, log to Admin Audit Log!
-            if unreviewed and is_force:
-                unreviewed_control_ids = [f.control_id for f in unreviewed]
+            if is_force and (unreviewed or report.status != "Reviewed & Finalized"):
+                unreviewed_control_ids = [f.control_id for f in (unreviewed if unreviewed else findings)]
                 db.add(AdminAuditLog(
                     auditor_user=auditor_user,
                     session_id=session_id,
                     action="FORCE_ACCEPT_UNREVIEWED_CONTROLS",
-                    unreviewed_controls=json.dumps(unreviewed_control_ids),
-                    details=f"Auditor forcibly accepted and committed session {session_id[:8]} with {len(unreviewed)} unreviewed control(s): {', '.join(unreviewed_control_ids)}"
+                    unreviewed_controls=json.dumps(unreviewed_control_ids[:50]),
+                    details=f"Auditor forcibly accepted and committed session {session_id[:8]} with {len(unreviewed_control_ids)} unreviewed control(s): {', '.join(unreviewed_control_ids[:10])}"
                 ))
+
                 
             # Mark all findings (including info) as saved and verified in Shakthi DB
             for f in all_findings:
@@ -1142,6 +1145,201 @@ def api_export_docx(session_id: str, saved_only: bool = False):
                     "status": f.status or "Non-Compliant",
                     "severity": f.severity or "Medium",
                     "severity_score": sev_score,
+"auditor_comments": fb.auditor_comments,
+                "confidence": fb.confidence,
+                "hallucination_check": fb.hallucination_check
+            })
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@router.post("/feedback/import")
+def api_import_feedback(file: UploadFile = File(...)):
+    """Imports AuditorFeedback records from uploaded JSON file."""
+    db = SessionLocal()
+    try:
+        import json
+        file_bytes = file.file.read()
+        feedbacks_data = json.loads(file_bytes)
+        
+        from src.db.database import AuditorFeedback
+        imported_count = 0
+        with force_master():
+            for item in feedbacks_data:
+                control_id = item.get("control_id")
+                evidence_snippet = item.get("evidence_snippet")
+                corrected_status = item.get("corrected_status")
+                finding = item.get("finding")
+                
+                # Prevent duplication
+                dup = db.query(AuditorFeedback).filter(
+                    AuditorFeedback.control_id == control_id,
+                    AuditorFeedback.evidence_snippet == evidence_snippet,
+                    AuditorFeedback.corrected_status == corrected_status,
+                    AuditorFeedback.finding == finding
+                ).first()
+                if not dup:
+                    db.add(AuditorFeedback(
+                        control_id=control_id,
+                        evidence_snippet=evidence_snippet,
+                        corrected_status=corrected_status,
+                        finding=finding,
+                        recommendation=item.get("recommendation"),
+                        auditor_comments=item.get("auditor_comments"),
+                        confidence=item.get("confidence", 10),
+                        hallucination_check=item.get("hallucination_check")
+                    ))
+                    imported_count += 1
+            db.commit()
+            
+        return {"success": True, "message": f"Successfully imported {imported_count} feedback records."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@router.get("/chats/sessions")
+def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = None):
+    """Retrieves list of active compliance sessions scoped to the logged-in user."""
+    db = SessionLocal()
+    try:
+        sessions_dict = {}
+        # 1. AuditReports — filter by user if auditee role
+        if role == "auditee" and username:
+            user = db.query(User).filter(User.username == username).first()
+            if user:
+                reports = db.query(AuditReport).filter(AuditReport.auditee_id == user.id).all()
+            else:
+                reports = []
+        else:
+            reports = db.query(AuditReport).all()
+        for r in reports:
+            sessions_dict[r.session_id] = {
+                "session_id": r.session_id,
+                "session_title": r.session_title,
+                "created_at": str(r.created_at)
+            }
+            
+        # 2. ChatMessages — scope to the requesting user only, fall back if username column missing
+        try:
+            if username:
+                chats = db.query(ChatMessage).filter(
+                    ChatMessage.username == username
+                ).order_by(ChatMessage.created_at.desc()).all()
+            else:
+                chats = []
+        except Exception:
+            # Fallback: username column may not exist in older DB — query without filter
+            try:
+                chats = db.query(ChatMessage).order_by(ChatMessage.created_at.desc()).limit(50).all()
+            except Exception:
+                chats = []
+
+        for c in chats:
+            if c.session_id not in sessions_dict:
+                sessions_dict[c.session_id] = {
+                    "session_id": c.session_id,
+                    "session_title": getattr(c, "session_title", None) or "AI Chat Session",
+                    "created_at": str(c.created_at)
+                }
+                    
+        # Sort
+        sorted_sessions = list(sessions_dict.values())
+        sorted_sessions.sort(key=lambda x: x["created_at"], reverse=True)
+        return {"success": True, "sessions": sorted_sessions[:12]}
+    except Exception as e:
+        return {"success": True, "sessions": [], "error": str(e)}
+    finally:
+        db.close()
+
+
+@router.get("/chats/history")
+def api_get_chat_history(session_id: str, username: Optional[str] = None):
+    """Retrieves messages for specified chat session — filtered to the requesting user."""
+    db = SessionLocal()
+    try:
+        query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
+        if username:
+            # Only show messages that belong to this user OR have no username (legacy rows)
+            from sqlalchemy import or_
+            query = query.filter(or_(ChatMessage.username == username, ChatMessage.username == None))
+        messages = query.order_by(ChatMessage.created_at.asc()).all()
+        res = []
+        for m in messages:
+            res.append({
+                "role": m.role,
+                "content": m.content,
+                "created_at": str(m.created_at)
+            })
+        return {"success": True, "messages": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@router.post("/chats/clear")
+def api_clear_chat_session(session_id: str = Form(...), username: Optional[str] = Form(None)):
+    """Clears only the current user's messages for a session."""
+    db = SessionLocal()
+    try:
+        with force_master():
+            q = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
+            if username:
+                from sqlalchemy import or_
+                q = q.filter(or_(ChatMessage.username == username, ChatMessage.username == None))
+            q.delete(synchronize_session=False)
+            db.query(AuditCheckpoint).filter(AuditCheckpoint.session_id == session_id).delete()
+            db.commit()
+        return {"success": True, "message": "Chat history cleared successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+@router.get("/export/docx")
+def api_export_docx(session_id: str, saved_only: bool = False):
+    """Exports findings report as DOCX using custom layout templates."""
+    db = SessionLocal()
+    try:
+        from fastapi.responses import StreamingResponse
+        from src.db.database import Finding, AuditReport
+        from src.core.report_exporter import export_docx_report
+        
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found.")
+                
+            query = db.query(Finding).filter(Finding.report_id == report.id)
+            if saved_only or report.status == "Reviewed & Finalized":
+                query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
+            db_findings = query.all()
+            
+            findings_mapped = []
+            resolved_list = []
+            for f in db_findings:
+                sev = f.severity or "Medium"
+                sev_score = 5.0
+                if "Critical" in sev or "1" in sev:
+                    sev_score = 9.5
+                elif "High" in sev:
+                    sev_score = 8.0
+                elif "Medium" in sev or "2" in sev:
+                    sev_score = 5.0
+                else:
+                    sev_score = 2.5
+                    
+                findings_mapped.append({
+                    "control_id": f.control_id,
+                    "control": f.control_name or f.control_id,
+                    "clause": "ISO 27001 Annex A",
+                    "finding": f.description or f.gap_detected or "",
+                    "description": f.description or f.gap_detected or "",
+                    "status": f.status or "Non-Compliant",
+                    "severity": f.severity or "Medium",
+                    "severity_score": sev_score,
                     "business_impact": f.reasoning or "Compliance verification pending.",
                     "recommendation": f.recommendation or "",
                     "evidence_snippet": f.evidence_snippet or "",
@@ -1176,14 +1374,17 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
     try:
         from fastapi.responses import StreamingResponse
         from src.db.database import Finding, AuditReport
-        from src.core.report_exporter import export_pdf_report
         
         with force_master():
             report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
             if not report:
                 raise HTTPException(status_code=404, detail="Session not found.")
                 
-            query = db.query(Finding).filter(Finding.report_id == report.id)
+            query = db.query(Finding).filter(
+                Finding.report_id == report.id,
+                ~Finding.severity.ilike("%INFO%"),
+                ~Finding.status.ilike("%INFO%")
+            )
             if saved_only or report.status == "Reviewed & Finalized":
                 query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
             db_findings = query.all()
@@ -1191,23 +1392,17 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
             findings_mapped = []
             resolved_list = []
             for f in db_findings:
-                sev = f.severity or "Medium"
-                sev_score = 0.0
-                try:
-                    if f.evidence_found:
-                        sev_score = float(f.evidence_found)
-                except Exception:
-                    sev_score = 0.0
-
-                if sev_score <= 0.0:
-                    if "Critical" in sev or "1" in sev:
-                        sev_score = 9.5
-                    elif "High" in sev:
-                        sev_score = 8.0
-                    elif "Medium" in sev or "2" in sev:
-                        sev_score = 5.5
-                    else:
-                        sev_score = 2.5
+                raw_sev = str(f.severity or "").upper()
+                if "CRIT" in raw_sev or "P1" in raw_sev:
+                    c_sev, sev_score = "CRITICAL", 9.8
+                elif "HIGH" in raw_sev or "P2" in raw_sev:
+                    c_sev, sev_score = "HIGH", 8.0
+                elif "MED" in raw_sev or "P3" in raw_sev:
+                    c_sev, sev_score = "MEDIUM", 5.5
+                elif "LOW" in raw_sev or "P4" in raw_sev:
+                    c_sev, sev_score = "LOW", 2.5
+                else:
+                    c_sev, sev_score = "MEDIUM", 5.5
                     
                 findings_mapped.append({
                     "control_id": f.control_id,
@@ -1217,7 +1412,7 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
                     "clause": "ISO 27001 Annex A",
                     "description": f.description or f.gap_detected or "",
                     "status": f.status or "Non-Compliant",
-                    "severity": f.severity or "Medium",
+                    "severity": c_sev,
                     "severity_score": sev_score,
                     "target": f.source_files or "Scoped Target Systems",
                     "business_impact": f.reasoning or "Compliance verification pending.",
@@ -1226,7 +1421,7 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
                     "evidence_quote": f.evidence_snippet or "",
                     "source_files": f.source_files or ""
                 })
-                if f.status == "Compliant":
+                if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS"):
                     resolved_list.append(f.control_id)
                     
             is_vapt = report.framework in ("VAPT Framework Controls", "VAPT") or "VAPT" in (report.framework or "").upper()

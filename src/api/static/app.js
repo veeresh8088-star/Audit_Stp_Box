@@ -1700,7 +1700,7 @@ async function loadFindings() {
     }
 }
 
-async function commitSessionToShaktiDB(force = true) {
+async function commitSessionToShaktiDB(force = false) {
     console.log("💾 [commitSessionToShaktiDB] Invoked. activeSessionId:", activeSessionId, "force:", force);
     if (!activeSessionId) {
         alert("No active session. Please select or start an audit session first.");

@@ -674,10 +674,8 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.ln(4)
     pdf.set_font("Helvetica", "B", 9.5)
     pdf.cell(0, 4.5, "2.3.3 Graphical Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "B", 9.5)
-    pdf.cell(0, 4.5, "2.3.3 Graphical Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(3)
+
 
     # Native High-Precision Horizontal Bar Chart (Guaranteed rendering in all environments)
     start_chart_y = pdf.get_y()
