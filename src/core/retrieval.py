@@ -456,12 +456,6 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
                 
         if chunks_to_embed:
             status_text = None
-            try:
-                import streamlit as st
-                status_text = st.empty()
-                status_text.info(f"⏳ Processing local semantic embeddings for {len(chunks_to_embed)} document sections...")
-            except Exception:
-                pass
                 
             def embed_worker(item):
                 key, content = item

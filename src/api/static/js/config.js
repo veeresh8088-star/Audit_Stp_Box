@@ -1,12 +1,12 @@
 // ── GLOBAL STATE & UTILITY HELPERS ──
-const API_BASE = window.location.origin + "/api";
+var API_BASE = window.location.origin + "/api";
 
-let activeSessionId = localStorage.getItem("shakti_active_session") || null;
-let currentUser = JSON.parse(localStorage.getItem("shakti_user") || "null");
-let selectedRole = localStorage.getItem("shakti_role") || "auditor";
-let selectedAnalysisMode = "Deep";
-let selectedScopeControlIds = [];
-let findingsList = [];
+var activeSessionId = localStorage.getItem("shakti_active_session") || null;
+var currentUser = JSON.parse(localStorage.getItem("shakti_user") || "null");
+var selectedRole = localStorage.getItem("shakti_role") || "auditor";
+var selectedAnalysisMode = "Deep";
+var selectedScopeControlIds = [];
+var findingsList = [];
 
 function escapeHtml(str) {
     if (!str) return "";

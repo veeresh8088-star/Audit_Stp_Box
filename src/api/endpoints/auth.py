@@ -5,7 +5,7 @@ import pyotp
 import qrcode
 import base64
 from io import BytesIO
-from src.ui.auth import (
+from src.core.auth import (
     authenticate_user, 
     register_user, 
     seed_default_admin,
@@ -111,3 +111,20 @@ def api_verify_otp(req: VerifyOTPRequest):
         }
     else:
         raise HTTPException(status_code=400, detail="Invalid OTP. Use your authenticator app or enter '123456' for local demo access.")
+
+@router.get("/auditees")
+def api_get_auditees():
+    """Returns list of all registered Auditee user accounts for report distribution targeting."""
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.role == "auditee").all()
+        result = []
+        for u in users:
+            result.append({
+                "id": u.id,
+                "username": u.username,
+                "role": u.role
+            })
+        return {"success": True, "auditees": result}
+    finally:
+        db.close()

@@ -5,7 +5,7 @@ from datetime import datetime
 
 def _get_all_parsed_findings_from_registry():
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         from src.core.parsers.nessus_parser import NessusParser
         from src.core.parsers.nmap_parser import NmapParser
 
@@ -208,7 +208,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
 
     # Helper to get dynamic values from st.session_state
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         auditor_lead = st.session_state.get("auditor_lead", "Mr. Vikas Dubey")
         auditor_firm = st.session_state.get("auditor_firm", "TÜV SÜD South Asia Pvt. Ltd.")
         auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
@@ -247,7 +247,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "assets"))
     custom_logo = None
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         custom_logo = st.session_state.get("auditor_logo_path")
     except Exception:
         pass
@@ -427,7 +427,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     # Revision History (Only rendered if real user-entered review process dates exist)
     custom_revs = None
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         custom_revs = st.session_state.get("custom_revision_history")
     except Exception:
         custom_revs = None
@@ -685,7 +685,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     # Scope IPs Table (3 columns - dynamic)
     dynamic_ips = None
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         dynamic_ips = st.session_state.get("target_ips") or st.session_state.get("scoped_ips")
         if findings:
             extracted_hosts = set()
@@ -1270,7 +1270,7 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         tcPr.append(tcBorders)
 
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         auditor_lead = st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")
         auditor_firm = st.session_state.get("auditor_firm", "TÜV SÜD South Asia Pvt. Ltd.")
         auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
@@ -1771,7 +1771,7 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
     # ── Read sidebar branding from session_state ──────────────────────────────
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         auditor_lead     = st.session_state.get("auditor_lead",     "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")
         auditor_firm     = st.session_state.get("auditor_firm",     "Digital Age Strategies Pvt Ltd")
         auditor_reviewer = st.session_state.get("auditor_reviewer", "Mr. Subhash Rao")
@@ -2048,7 +2048,7 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
 def export_docx_report(session_title, findings, resolved_list, status, comments=""):
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         st_std = st.session_state.get("selected_standard", "")
     except Exception:
         st_std = ""
@@ -2127,7 +2127,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
 
     # ── COVER PAGE ─────────────────────────────────────────────────────────────
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         logo_path = st.session_state.get("auditor_logo_path")
     except Exception:
         logo_path = None
@@ -2493,7 +2493,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
 
 def export_pdf_report(session_title, findings, resolved_list, status, comments=""):
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         st_std = st.session_state.get("selected_standard", "")
     except Exception:
         st_std = ""
@@ -2556,7 +2556,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     # ── COVER PAGE ─────────────────────────────────────────────────────────────
     pdf.add_page()
     try:
-        import streamlit as st
+        # streamlit removed - core module fallback
         logo_path = st.session_state.get("auditor_logo_path")
     except Exception:
         logo_path = None

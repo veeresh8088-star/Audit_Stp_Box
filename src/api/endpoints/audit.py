@@ -152,6 +152,8 @@ def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None)
         for r in reports:
             score_row = db.query(ComplianceScore).filter(ComplianceScore.report_id == r.id).first()
             score_pct = score_row.score_percent if score_row else 0
+            findings_count = db.query(Finding).filter(Finding.report_id == r.id).count()
+            
             result.append({
                 "id": r.id,
                 "session_id": r.session_id,
@@ -159,6 +161,7 @@ def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None)
                 "framework": r.framework,
                 "status": r.status,
                 "score_percent": score_pct,
+                "findings_count": findings_count,
                 "created_at": str(r.created_at)
             })
         return {"success": True, "sessions": result}
@@ -420,6 +423,16 @@ def api_get_status(session_id: str):
 def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bool = False):
     db = SessionLocal()
     try:
+        from src.core.controls_data import USE_CASES
+        control_catalog = {}
+        for uc in USE_CASES:
+            # Map by SL and control_id (e.g. "5.15" or "5.15 ACCESS CONTROL")
+            u_case = uc.get("use_case", "")
+            parts = u_case.split()
+            cid = parts[0].upper() if parts else str(uc.get("sl"))
+            control_catalog[cid] = uc
+            control_catalog[str(uc.get("sl"))] = uc
+
         with force_master():
             report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
             if not report:
@@ -433,16 +446,54 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
         
         result = []
         for f in findings:
+            cid_clean = (f.control_id or "").strip().upper()
+            uc_info = control_catalog.get(cid_clean) or control_catalog.get(cid_clean.split()[0]) or {}
+            
+            is_comp = (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")
+            
+            # Smart description fallback hierarchy
+            if f.description and len(f.description.strip()) > 5:
+                desc = f.description
+            elif f.gap_detected and len(f.gap_detected.strip()) > 5:
+                desc = f.gap_detected
+            elif uc_info.get("expected"):
+                desc = f"Control Requirements: {uc_info['expected']}"
+            elif uc_info.get("finding"):
+                desc = uc_info["finding"]
+            else:
+                desc = f.reasoning or "Evaluated against ISO 27001 / VAPT compliance standards."
+                
+            # Smart recommendation fallback hierarchy
+            if f.recommendation and len(f.recommendation.strip()) > 5:
+                recom = f.recommendation
+            elif f.review_note and len(f.review_note.strip()) > 5:
+                recom = f.review_note
+            elif uc_info.get("recommendation"):
+                recom = uc_info["recommendation"]
+            else:
+                recom = f"Maintain current documented policies and verification procedures for {f.control_id}." if is_comp else f"Establish, document, and implement procedures to satisfy {f.control_id}."
+
+            # Safe control name — fallback to uc_info label or control_id
+            ctrl_name = f.control_name
+            if not ctrl_name or ctrl_name in ("null", "undefined", "None"):
+                ctrl_name = uc_info.get("label") or uc_info.get("use_case") or f.control_id or ""
+
+            # Safe severity fallback
+            sev = f.severity
+            if not sev or sev in ("null", "undefined", "None"):
+                raw_sev = (uc_info.get("severity") or "MEDIUM").upper()
+                sev = {"CRITICAL": "P1 Critical", "HIGH": "P2 High", "MEDIUM": "P3 Medium", "LOW": "P4 Low"}.get(raw_sev, "P3 Medium")
+
             result.append({
                 "id": f.id,
                 "control_id": f.control_id,
-                "control_name": f.control_name,
-                "severity": f.severity,
-                "description": f.description,
+                "control_name": ctrl_name,
+                "severity": sev,
+                "description": desc,
                 "evidence_found": f.evidence_found,
                 "evidence_snippet": f.evidence_snippet,
-                "recommendation": f.recommendation,
-                "reasoning": f.reasoning,
+                "recommendation": recom,
+                "reasoning": f.reasoning or "Semantic RAG compliance evaluation.",
                 "status": f.status,
                 "source_files": f.source_files,
                 "policy_present": f.policy_present,
@@ -1016,7 +1067,7 @@ def api_export_docx(session_id: str):
     try:
         from fastapi.responses import StreamingResponse
         from src.db.database import Finding, AuditReport
-        from src.ui.report_exporter import export_docx_report
+        from src.core.report_exporter import export_docx_report
         
         report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
         if not report:
@@ -1081,7 +1132,7 @@ def api_export_pdf(session_id: str):
     try:
         from fastapi.responses import StreamingResponse
         from src.db.database import Finding, AuditReport
-        from src.ui.report_exporter import export_pdf_report
+        from src.core.report_exporter import export_pdf_report
         
         report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
         if not report:
@@ -1132,7 +1183,7 @@ def api_export_pdf(session_id: str):
                 
         is_vapt = report.framework in ("VAPT Framework Controls", "VAPT") or "VAPT" in (report.framework or "").upper()
         if is_vapt:
-            from src.ui.report_exporter import _export_vapt_pdf
+            from src.core.report_exporter import _export_vapt_pdf
             pdf_bytes = _export_vapt_pdf(
                 session_title=report.framework,
                 findings=findings_mapped,
@@ -1141,7 +1192,7 @@ def api_export_pdf(session_id: str):
                 comments="Lead auditor generated report"
             )
         else:
-            from src.ui.report_exporter import export_pdf_report
+            from src.core.report_exporter import export_pdf_report
             pdf_bytes = export_pdf_report(
                 session_title=report.framework,
                 findings=findings_mapped,

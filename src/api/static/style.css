@@ -1469,9 +1469,20 @@ button {
     color: #0f172a !important;
 }
 
-[data-theme="light"] #active-session-badge,
-[data-theme="light"] #current-time-label {
-    color: #475569 !important;
+.clause-accordion-card {
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.clause-header {
+    background: rgba(30, 41, 59, 0.8);
+    color: #f1f5f9;
+}
+
+.clause-count-badge {
+    color: #60a5fa;
+    background: rgba(37, 99, 235, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 /* ── TABS HEADER & LINKS ── */
@@ -1663,6 +1674,295 @@ button {
     background: #ffffff !important;
     color: #0f172a !important;
     border-color: #cbd5e1 !important;
+}
+
+/* ── HIGH-CONTRAST LIGHT MODE UI OVERRIDES ── */
+[data-theme="light"] .clause-accordion-card {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .clause-header {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .clause-header span {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .clause-count-badge {
+    background: #dbeafe !important;
+    color: #1d4ed8 !important;
+    border-color: #93c5fd !important;
+}
+
+[data-theme="light"] .btn-secondary,
+[data-theme="light"] .collapse-header {
+    background: #f1f5f9 !important;
+    color: #1e293b !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .btn-secondary:hover,
+[data-theme="light"] .collapse-header:hover {
+    background: #e2e8f0 !important;
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .btn-secondary span,
+[data-theme="light"] .collapse-header span {
+    color: #1e293b !important;
+}
+
+[data-theme="light"] .segmented-control {
+    background: #f1f5f9 !important;
+    border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .segmented-btn {
+    color: #475569 !important;
+}
+
+[data-theme="light"] .segmented-btn.active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+}
+
+[data-theme="light"] #recent-sessions-count-badge {
+    background: #dbeafe !important;
+    color: #1d4ed8 !important;
+}
+
+[data-theme="light"] .drop-zone {
+    background: #f8fafc !important;
+    border-color: #93c5fd !important;
+}
+
+[data-theme="light"] #uploaded-files-registry {
+    background: #f8fafc !important;
+}
+
+[data-theme="light"] .empty-state {
+    color: #64748b !important;
+}
+
+/* ── LIGHT MODE OVERRIDES FOR ALL TABS & TABLES ── */
+[data-theme="light"] .chat-container {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .chat-sidebar {
+    background: #f8fafc !important;
+    border-right-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .chat-header {
+    background: #f8fafc !important;
+    border-bottom-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .chat-bubble.assistant {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .kpi-box {
+    background: #ffffff !important;
+    border-color: #e2e8f0 !important;
+    color: #0f172a !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03) !important;
+}
+
+[data-theme="light"] .kpi-label {
+    color: #475569 !important;
+}
+
+[data-theme="light"] .kpi-number {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] #shakti-commit-banner {
+    background: #fffbeb !important;
+    border-color: #fcd34d !important;
+    color: #92400e !important;
+}
+
+[data-theme="light"] #shakti-banner-text {
+    color: #92400e !important;
+}
+
+[data-theme="light"] .create-control-card,
+[data-theme="light"] .custom-controls-list-card,
+[data-theme="light"] .system-logs-panel,
+[data-theme="light"] .developer-terminal-panel {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .checklist-table th,
+[data-theme="light"] .logs-table th {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    border-bottom: 2px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .checklist-table td,
+[data-theme="light"] .logs-table td {
+    color: #0f172a !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+}
+
+[data-theme="light"] .pagination-controls button {
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .modal-content,
+[data-theme="light"] .modal-card {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15) !important;
+}
+
+[data-theme="light"] .modal-content h3,
+[data-theme="light"] .modal-content h4,
+[data-theme="light"] .modal-card h3 {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .modal-overlay {
+    background: rgba(15, 23, 42, 0.4) !important;
+    backdrop-filter: blur(4px);
+}
+
+/* ── LIGHT MODE AUTH CARD & LOGIN OVERLAY ── */
+[data-theme="light"] .overlay {
+    background: radial-gradient(circle at 50% 50%, rgba(248, 250, 252, 0.98) 0%, #e2e8f0 100%) !important;
+}
+
+[data-theme="light"] .auth-card {
+    background: #ffffff !important;
+    border: 1px solid #cbd5e1 !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05) !important;
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .auth-header h2 {
+    color: #0f172a !important;
+    text-shadow: none !important;
+}
+
+[data-theme="light"] .auth-header p {
+    color: #475569 !important;
+}
+
+[data-theme="light"] .role-btn {
+    background: #f1f5f9 !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #475569 !important;
+}
+
+[data-theme="light"] .role-btn:hover {
+    background: #e2e8f0 !important;
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .role-btn.active {
+    background: #2563eb !important;
+    border-color: #1d4ed8 !important;
+    color: #ffffff !important;
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3) !important;
+}
+
+[data-theme="light"] .role-desc {
+    color: #334155 !important;
+}
+
+[data-theme="light"] .auth-card label {
+    color: #334155 !important;
+}
+
+[data-theme="light"] .auth-card input[type="text"],
+[data-theme="light"] .auth-card input[type="password"] {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .auth-card input[type="text"]::placeholder,
+[data-theme="light"] .auth-card input[type="password"]::placeholder {
+    color: #94a3b8 !important;
+}
+
+[data-theme="light"] #toggle-label {
+    color: #64748b !important;
+}
+
+[data-theme="light"] #toggle-action-btn {
+    background: #f1f5f9 !important;
+    color: #1e293b !important;
+    border-color: #cbd5e1 !important;
+}
+
+/* ── LIGHT MODE DIGITAL REPORT CANVAS OVERRIDES ── */
+[data-theme="light"] .digital-report-canvas,
+[data-theme="light"] .report-preview-card {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+    color: #0f172a !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06) !important;
+}
+
+[data-theme="light"] .digital-report-canvas h3,
+[data-theme="light"] .digital-report-canvas h4,
+[data-theme="light"] .digital-report-canvas strong,
+[data-theme="light"] .digital-report-canvas td,
+[data-theme="light"] .report-preview-card h2,
+[data-theme="light"] .report-preview-card h4,
+[data-theme="light"] .report-preview-card td {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .digital-report-summary {
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+}
+
+[data-theme="light"] .digital-report-summary div {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .clause-body {
+    background: #ffffff !important;
+    border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] .ctrl-checkbox-item label {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .ctrl-checkbox-item:hover {
+    background: #f1f5f9 !important;
+}
+
+[data-theme="light"] select,
+[data-theme="light"] input,
+[data-theme="light"] textarea {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
+    border-color: #cbd5e1 !important;
+}
+
+[data-theme="light"] option {
+    background-color: #ffffff !important;
+    color: #0f172a !important;
 }
 
 /* ── FLOATING AI COPILOT FAB & DRAWER ── */

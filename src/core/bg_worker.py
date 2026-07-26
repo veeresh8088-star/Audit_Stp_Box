@@ -545,19 +545,24 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                     # Clear existing findings for this report
                     db_write.query(Finding).filter(Finding.report_id == report.id).delete()
                     for f in all_results_combined:
+                        f_desc = f.get("description") or f.get("finding") or f.get("gap_detected") or f.get("reasoning") or "Evaluated against ISO 27001 / VAPT compliance standards."
+                        f_status = f.get("status", "Non-Compliant")
+                        is_comp = (f_status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")
+                        f_recom = f.get("recommendation") or f.get("remediation") or (f"Maintain current documented policies and verification procedures for {f.get('control_id')}." if is_comp else f"Establish formal policy documentation, access controls, and logging evidence for {f.get('control_id')}.")
+
                         db_write.add(Finding(
                             report_id=report.id,
                             control_id=f.get("control_id"),
                             control_name=f.get("control_label") or f.get("control"),
                             severity=f.get("severity", "P3 Medium"),
-                            description=f.get("finding", ""),
-                            gap_detected=f.get("finding", ""),
+                            description=f_desc,
+                            gap_detected=f_desc,
                             relevance_score=f.get("relevance_score", 0),
                             evidence_found=f.get("evidence_found", ""),
                             evidence_snippet=f.get("evidence_snippet", ""),
-                            recommendation=f.get("recommendation", ""),
-                            reasoning=f.get("reasoning", ""),
-                            status=f.get("status", "Non-Compliant"),
+                            recommendation=f_recom,
+                            reasoning=f.get("reasoning", "Semantic RAG compliance evaluation."),
+                            status=f_status,
                             source_files=f.get("source_files", "")
                         ))
                     

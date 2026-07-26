@@ -1,21 +1,20 @@
 // ── AICyberAuditBox Client Application ──
+var API_BASE = window.location.origin + "/api";
 
-const API_BASE = "http://127.0.0.1:8000/api";
-
-let currentUser = null;
-let selectedRole = "admin";
-let activeTab = "";
-let activeSessionId = "";
-let activeSessionTitle = "";
-let findingsList = [];
-let uploadedFilesList = [];
-let selectedAnalysisMode = "Deep";
-let activeSeverityFilter = "";
-let activeStatusFilter = "All";
-let logsPage = 0;
-let logsTotalPages = 1;
-let customEvidenceMappings = null;
-let customControlDocuments = null;
+var currentUser = typeof currentUser !== "undefined" ? currentUser : null;
+var selectedRole = typeof selectedRole !== "undefined" ? selectedRole : "admin";
+var activeTab = typeof activeTab !== "undefined" ? activeTab : "";
+var activeSessionId = typeof activeSessionId !== "undefined" ? activeSessionId : "";
+var activeSessionTitle = typeof activeSessionTitle !== "undefined" ? activeSessionTitle : "";
+var findingsList = typeof findingsList !== "undefined" ? findingsList : [];
+var uploadedFilesList = typeof uploadedFilesList !== "undefined" ? uploadedFilesList : [];
+var selectedAnalysisMode = typeof selectedAnalysisMode !== "undefined" ? selectedAnalysisMode : "Deep";
+var activeSeverityFilter = typeof activeSeverityFilter !== "undefined" ? activeSeverityFilter : "";
+var activeStatusFilter = typeof activeStatusFilter !== "undefined" ? activeStatusFilter : "All";
+var logsPage = typeof logsPage !== "undefined" ? logsPage : 0;
+var logsTotalPages = typeof logsTotalPages !== "undefined" ? logsTotalPages : 1;
+var customEvidenceMappings = typeof customEvidenceMappings !== "undefined" ? customEvidenceMappings : null;
+var customControlDocuments = typeof customControlDocuments !== "undefined" ? customControlDocuments : null;
 
 // --- EMOJIS & ICONS FOR FRAMEWORK CONTROLS ---
 const DEFAULT_FRAMEWORK_CONTROLS = [
@@ -283,6 +282,7 @@ async function initializeDashboard(user) {
     setDisplay("sidebar-mode-setup", (isAdmin || isAuditor) ? "block" : "none");
     setDisplay("sidebar-checklist-setup", (isAdmin || isAuditor) ? "block" : "none");
     setDisplay("sidebar-action-setup", (isAdmin || isAuditor) ? "block" : "none");
+    setDisplay("sidebar-admin-tools", isAdmin ? "block" : "none");
     
     // Setup Tabs Bar
     setupTabs(user.role);
@@ -295,6 +295,9 @@ async function initializeDashboard(user) {
     // Resolve Active Audit Session ID
     await loadOrCreateSession(user);
     loadRecentSessions();
+    if (!window._recentSessionsInterval) {
+        window._recentSessionsInterval = setInterval(loadRecentSessions, 10000);
+    }
     
     // Load Chat History list
     if (user.role !== "auditee") {
@@ -313,14 +316,24 @@ function setupTabs(role) {
             { id: "tab-upload-evidence", label: "Upload Evidence" },
             { id: "tab-submitted-reports", label: "Submitted" }
         ];
-    } else {
-        // Admin & Auditor Roles
+    } else if (role === "admin") {
+        // Admin Role - includes System & Auditor Warning Logs
         tabs = [
             { id: "tab-scan-workspace", label: "Scan Workspace" },
             { id: "tab-audit-records", label: "Audit Records & Findings" },
             { id: "tab-manage-controls", label: "✨ Manage & Add Controls" },
             { id: "tab-audit-report", label: "PDF Report Exporter" },
-            { id: "tab-auditee-docs", label: "Auditee Submissions & Logs" }
+            { id: "tab-auditee-docs", label: "Auditee Submissions" },
+            { id: "tab-admin-logs", label: "📜 System & Auditor Logs" }
+        ];
+    } else {
+        // Auditor Role
+        tabs = [
+            { id: "tab-scan-workspace", label: "Scan Workspace" },
+            { id: "tab-audit-records", label: "Audit Records & Findings" },
+            { id: "tab-manage-controls", label: "✨ Manage & Add Controls" },
+            { id: "tab-audit-report", label: "PDF Report Exporter" },
+            { id: "tab-auditee-docs", label: "Auditee Submissions" }
         ];
     }
     
@@ -401,7 +414,6 @@ function toggleCollapsible(contentId) {
 async function loadRecentSessions() {
     const container = document.getElementById("recent-sessions-list");
     if (!container) return;
-    container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">Loading sessions...</div>`;
     
     try {
         let url = `${API_BASE}/audit/sessions`;
@@ -427,19 +439,36 @@ async function loadRecentSessions() {
                 return;
             }
 
+            const badgeCount = document.getElementById("recent-sessions-count-badge");
+            if (badgeCount) badgeCount.innerText = `(${filteredSessions.length})`;
+
             filteredSessions.forEach(s => {
                 const btn = document.createElement("button");
                 btn.className = "recent-session-item";
+                if (activeSessionId === s.session_id) btn.classList.add("active-session");
+
                 btn.onclick = () => switchRecentSession(s.session_id, s.session_title);
-                btn.style.cssText = "display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 8px 10px; background: rgba(30, 41, 59, 0.4); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 8px; color: var(--text-main); font-size: 0.78rem; text-align: left; cursor: pointer; margin-bottom: 4px; transition: background 0.15s;";
-                btn.onmouseover = () => btn.style.background = "rgba(59, 130, 246, 0.15)";
-                btn.onmouseout = () => btn.style.background = "rgba(30, 41, 59, 0.4)";
+                
+                const isFinal = (s.status || "").toLowerCase().includes("final") || (s.status || "").toLowerCase().includes("review");
+                const statusPill = isFinal 
+                    ? `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:800;">FINAL</span>`
+                    : `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:800;">OPEN</span>`;
+
+                const shortTitle = s.session_title || `Audit Session (${s.session_id.slice(0,6)})`;
+                const dateStr = s.created_at ? s.created_at.slice(0, 10) : "";
+
+                btn.style.cssText = "display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 9px 11px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; color: var(--text-main); font-size: 0.78rem; text-align: left; cursor: pointer; margin-bottom: 6px; transition: all 0.15s ease;";
+                btn.onmouseover = () => { btn.style.background = "rgba(37, 99, 235, 0.1)"; btn.style.borderColor = "rgba(37, 99, 235, 0.4)"; };
+                btn.onmouseout = () => { btn.style.background = "var(--bg-card)"; btn.style.borderColor = "var(--border-color)"; };
                 
                 btn.innerHTML = `
-                    <div style="font-weight: 700; color: #60a5fa; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;">📌 ${s.session_title}</div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
+                        <span style="font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;" title="${shortTitle}">📌 ${shortTitle}</span>
+                        ${statusPill}
+                    </div>
                     <div style="font-size: 0.7rem; color: var(--text-muted); display: flex; justify-content: space-between; width: 100%;">
-                        <span>Score: <b style="color:#10b981;">${s.score_percent || 0}%</b></span>
-                        <span>${(s.created_at || '').slice(0, 10)}</span>
+                        <span>${s.findings_count || 0} findings &bull; <b style="color:#10b981;">${s.score_percent || 0}%</b></span>
+                        <span>${dateStr}</span>
                     </div>
                 `;
                 container.appendChild(btn);
@@ -448,7 +477,7 @@ async function loadRecentSessions() {
             container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">No recent sessions found.</div>`;
         }
     } catch (err) {
-        container.innerHTML = `<div style="font-size: 0.75rem; color: #ef4444; text-align: center; padding: 6px;">Failed to load sessions.</div>`;
+        console.error("Failed to load recent sessions:", err);
     }
 }
 
@@ -461,9 +490,12 @@ async function switchRecentSession(sessionId, sessionTitle) {
     if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
     if (wsTitle) wsTitle.innerText = activeSessionTitle || "ISO 27001 Local Compliance Audit";
 
-    // Set filter default to "All" so all detailed findings render immediately
+    // FULLY reset ALL filters to "All Records" on session switch
     const select = document.getElementById("status-filter");
     if (select) select.value = "All";
+
+    // Also reset KPI box visual highlights if any
+    document.querySelectorAll(".kpi-box").forEach(b => b.style.outline = "none");
 
     // Refresh evidence files list for this session
     loadEvidenceFileList();
@@ -475,6 +507,9 @@ async function switchRecentSession(sessionId, sessionTitle) {
     // Auto switch tab view to Audit Records
     const recordsTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Records"));
     if (recordsTabBtn) switchTab("tab-audit-records", recordsTabBtn);
+
+    // Refresh sidebar to highlight active session
+    loadRecentSessions();
 
     showToast(`📂 Loaded audit session: ${sessionId.slice(0, 8)}`, "info");
 }
@@ -529,19 +564,47 @@ async function populateAuditeeSelector() {
     select.innerHTML = "";
     
     try {
+        // Fetch registered Auditee User Accounts
+        const userRes = await fetch(`${API_BASE}/auth/auditees`);
+        const userData = await userRes.json();
+        
+        if (userData.success && userData.auditees && userData.auditees.length > 0) {
+            const userGroup = document.createElement("optgroup");
+            userGroup.label = "Registered Client / Auditee Accounts";
+            userData.auditees.forEach(a => {
+                const opt = document.createElement("option");
+                opt.value = `auditee:${a.username}`;
+                opt.innerText = `👤 ${a.username} (Registered Auditee Account)`;
+                userGroup.appendChild(opt);
+            });
+            select.appendChild(userGroup);
+        }
+
+        // Fetch Audit Sessions
         const response = await fetch(`${API_BASE}/audit/sessions`);
         const data = await response.json();
         
-        if (data.success) {
-            data.sessions.forEach(s => {
-                const opt = document.createElement("option");
-                opt.value = s.id;
-                opt.innerText = `${s.session_title} (${s.session_id.slice(0,6)})`;
-                select.appendChild(opt);
+        if (data.success && data.sessions.length > 0) {
+            const sessionGroup = document.createElement("optgroup");
+            sessionGroup.label = "Active Audit Sessions";
+            
+            // Filter out repetitive test sessions if clean sessions exist
+            const filteredSessions = data.sessions.filter(s => {
+                const title = (s.session_title || "").toLowerCase();
+                return !title.includes("test shakthi save session");
             });
+
+            const displayList = filteredSessions.length > 0 ? filteredSessions : data.sessions.slice(0, 10);
+            displayList.forEach(s => {
+                const opt = document.createElement("option");
+                opt.value = `session:${s.id}`;
+                opt.innerText = `📋 ${s.session_title} (ID: ${s.session_id.slice(0,6)})`;
+                sessionGroup.appendChild(opt);
+            });
+            select.appendChild(sessionGroup);
         }
     } catch (err) {
-        console.error(err);
+        console.error("Failed to populate auditee selector:", err);
     }
 }
 
@@ -971,33 +1034,33 @@ async function loadFrameworkControls() {
 
             const accordionCard = document.createElement("div");
             accordionCard.className = "clause-accordion-card";
-            accordionCard.style.cssText = "margin-bottom: 8px; border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; background: rgba(30, 41, 59, 0.6); overflow: hidden;";
+            accordionCard.style.cssText = "margin-bottom: 8px; border-radius: 10px; overflow: hidden;";
 
             const contentId = `clause_body_${idx}`;
             
             const header = document.createElement("div");
             header.className = "clause-header";
-            header.style.cssText = "padding: 10px 12px; background: rgba(30, 41, 59, 0.8); font-size: 0.82rem; font-weight: 700; color: #f1f5f9; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;";
+            header.style.cssText = "padding: 10px 12px; font-size: 0.82rem; font-weight: 700; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;";
             header.onclick = () => toggleClauseAccordion(contentId, header);
             header.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
                     <span class="clause-arrow" style="color: #60a5fa; font-weight: 700; font-size: 0.85rem; width: 14px; text-align: center;">›</span>
-                    <span style="font-weight: 700; color: #f1f5f9; font-size: 0.8rem; text-transform: none; white-space: normal; line-height: 1.2;">${clauseTitle}</span>
+                    <span style="font-weight: 700; font-size: 0.8rem; text-transform: none; white-space: normal; line-height: 1.2;">${clauseTitle}</span>
                 </div>
-                <span class="clause-count-badge" id="clause_badge_${idx}" style="font-size: 0.7rem; color: #60a5fa; font-weight: 700; background: rgba(37, 99, 235, 0.2); padding: 2px 6px; border-radius: 6px; border: 1px solid rgba(59, 130, 246, 0.3); white-space: nowrap; margin-left: 6px;">[0/0]</span>
+                <span class="clause-count-badge" id="clause_badge_${idx}" style="font-size: 0.7rem; font-weight: 700; padding: 2px 6px; border-radius: 6px; white-space: nowrap; margin-left: 6px;">[0/0]</span>
             `;
 
             const body = document.createElement("div");
             body.id = contentId;
             body.className = "clause-body";
-            body.style.cssText = "display: none; padding: 10px 12px; border-top: 1px solid rgba(148, 163, 184, 0.2); background: rgba(15, 23, 42, 0.85); max-height: 360px; overflow-y: auto; scrollbar-width: thin;";
+            body.style.cssText = "display: none; padding: 10px 12px; border-top: 1px solid var(--border-color); background: var(--bg-card); max-height: 360px; overflow-y: auto; scrollbar-width: thin;";
 
             controls.forEach(c => {
                 const itemDiv = document.createElement("div");
                 itemDiv.className = "checkbox-item ctrl-checkbox-item";
-                itemDiv.style.cssText = "display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; margin-bottom: 4px; transition: background 0.15s ease; background: rgba(255, 255, 255, 0.02);";
+                itemDiv.style.cssText = "display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; margin-bottom: 4px; transition: background 0.15s ease;";
                 itemDiv.onmouseover = () => itemDiv.style.background = "rgba(59, 130, 246, 0.12)";
-                itemDiv.onmouseout = () => itemDiv.style.background = "rgba(255, 255, 255, 0.02)";
+                itemDiv.onmouseout = () => itemDiv.style.background = "transparent";
 
                 const input = document.createElement("input");
                 input.type = "checkbox";
@@ -1009,7 +1072,7 @@ async function loadFrameworkControls() {
 
                 const label = document.createElement("label");
                 label.htmlFor = `ctrl_chk_${c.sl}`;
-                label.style.cssText = "cursor: pointer; font-size: 0.82rem; color: #f8fafc; font-weight: 600; text-transform: none; white-space: normal; word-break: break-word; line-height: 1.35; margin: 0; flex: 1;";
+                label.style.cssText = "cursor: pointer; font-size: 0.82rem; color: var(--text-main); font-weight: 600; text-transform: none; white-space: normal; word-break: break-word; line-height: 1.35; margin: 0; flex: 1;";
                 
                 const ctrlId = c.control_id || c.sl;
                 const ctrlName = c.label || c.control_name || "";
@@ -1729,7 +1792,11 @@ async function renderAuditReportPreview() {
                 const isComp = isFindingCompliant(f);
                 const badgeColor = isComp ? "#10b981" : "#ef4444";
                 const badgeBg = isComp ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)";
-                const ctrlTitle = (f.control_name && f.control_name !== "null") ? f.control_name : (f.control || f.control_id);
+                // Safe control name: never show "undefined" or "null"
+                const rawCtrlName = f.control_name;
+                const ctrlTitle = (rawCtrlName && rawCtrlName !== 'null' && rawCtrlName !== 'undefined')
+                    ? rawCtrlName
+                    : f.control_id;
                 
                 const polSub = f.policy_present ? `<div style="font-size:0.68rem; color:#60a5fa; margin-top:2px;">📜 Policy: ${f.policy_present}</div>` : '';
                 const evSub = f.evidence_present ? `<div style="font-size:0.68rem; color:#c084fc; margin-top:1px;">🔍 Evidence: ${f.evidence_present}</div>` : '';
@@ -1737,6 +1804,7 @@ async function renderAuditReportPreview() {
                 const evSnippet = f.evidence_snippet ? `<div style="margin-bottom:4px; color:#e2e8f0; font-family:var(--font-mono); font-size:0.74rem;"><b>Exact Evidence:</b> "${f.evidence_snippet}"</div>` : '';
                 const evDesc = f.description ? `<div style="color:#94a3b8; font-size:0.74rem;">${f.description}</div>` : '';
                 const srcFile = f.source_files ? `<div style="font-size:0.7rem; color:#60a5fa; margin-top:2px;">📁 ${f.source_files}</div>` : '';
+                const sev = (f.severity && f.severity !== 'null' && f.severity !== 'undefined') ? f.severity : 'P3 Medium';
 
                 rowsHtml += `
                     <tr style="border-bottom: 1px solid rgba(148,163,184,0.15);">
@@ -1747,7 +1815,7 @@ async function renderAuditReportPreview() {
                             ${polSub}
                             ${evSub}
                         </td>
-                        <td style="padding: 10px; color:#cbd5e1;">${f.severity || 'P3 Medium'}</td>
+                        <td style="padding: 10px; color:#cbd5e1;">${sev}</td>
                         <td style="padding: 10px; max-width: 360px;">${evSnippet}${evDesc}${srcFile}</td>
                     </tr>
                 `;
@@ -1846,7 +1914,12 @@ function calculateSeverityStats() {
 function toggleComplianceFilter(statusType) {
     const select = document.getElementById("status-filter");
     if (select) {
-        select.value = statusType;
+        // Toggle: if already on this filter, click again to go back to All
+        if (select.value === statusType) {
+            select.value = "All";
+        } else {
+            select.value = statusType;
+        }
         renderFindingsList();
     }
 }
@@ -1938,7 +2011,7 @@ function renderFindingsList() {
             
             <div class="finding-detail-row">
                 <label>Finding Description</label>
-                <p>${f.description || 'No detailed description logged.'}</p>
+                <p>${f.description || f.gap_detected || f.reasoning || 'Evaluated against ISO 27001 / VAPT compliance standards.'}</p>
             </div>
             
             ${f.evidence_snippet ? `
@@ -1949,7 +2022,7 @@ function renderFindingsList() {
 
             <div class="finding-detail-row">
                 <label>Lead Auditor Recommendations</label>
-                <p style="color: #60a5fa;">${f.recommendation || 'No recommendation logged.'}</p>
+                <p style="color: #2563eb;">${f.recommendation || f.review_note || (isFindingCompliant(f) ? `Maintain current documented policies and verification procedures for ${f.control_id}.` : `Establish formal policy documentation, access controls, and logging evidence for ${f.control_id}.`)}</p>
             </div>
 
             <div class="finding-actions" style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.15);">
@@ -2511,49 +2584,49 @@ async function renderAuditReportPreview() {
                     : `<span style="background: rgba(239,68,68,0.15); color: #ef4444; padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; border: 1px solid rgba(239,68,68,0.3);">🔴 NON-COMPLIANT</span>`;
 
                 rowsHtml += `
-                    <tr style="border-bottom: 1px solid rgba(148,163,184,0.15);">
-                        <td style="padding: 10px 12px; font-weight: 700; color: #60a5fa; white-space: nowrap;">${f.control_id}</td>
-                        <td style="padding: 10px 12px; font-weight: 600; color: #f8fafc;">${f.control_name || f.control}</td>
+                    <tr style="border-bottom: 1px solid var(--border-color);">
+                        <td style="padding: 10px 12px; font-weight: 700; color: #2563eb; white-space: nowrap;">${f.control_id}</td>
+                        <td style="padding: 10px 12px; font-weight: 600; color: var(--text-main);">${f.control_name || f.control}</td>
                         <td style="padding: 10px 12px;">${statusBadge}</td>
-                        <td style="padding: 10px 12px; color: #cbd5e1; font-weight: 600;">${f.severity || 'P3 Medium'}</td>
-                        <td style="padding: 10px 12px; color: #94a3b8; font-size: 0.76rem; max-width: 320px; word-break: break-word;">${f.evidence_snippet ? `"${f.evidence_snippet.slice(0, 120)}..."` : (f.description || 'N/A')}</td>
+                        <td style="padding: 10px 12px; color: var(--text-muted); font-weight: 600;">${f.severity || 'P3 Medium'}</td>
+                        <td style="padding: 10px 12px; color: var(--text-muted); font-size: 0.76rem; max-width: 320px; word-break: break-word;">${f.evidence_snippet ? `"${f.evidence_snippet.slice(0, 120)}..."` : (f.description || 'N/A')}</td>
                     </tr>
                 `;
             });
         }
 
         container.innerHTML = `
-            <div class="digital-report-canvas" style="background: rgba(15, 23, 42, 0.75); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+            <div class="digital-report-canvas" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px;">
                 
                 <!-- Report Header Block -->
                 <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(59, 130, 246, 0.4); padding-bottom: 16px; margin-bottom: 20px;">
                     <div>
                         <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
                             <span style="font-size: 1.3rem;">📄</span>
-                            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: #f8fafc; letter-spacing: 0.5px;">FINAL EXECUTIVE AUDIT EVALUATION REPORT</h3>
+                            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: var(--text-main); letter-spacing: 0.5px;">FINAL EXECUTIVE AUDIT EVALUATION REPORT</h3>
                         </div>
-                        <p style="margin: 0; font-size: 0.76rem; color: #60a5fa; font-weight: 600;">ISO 27001 / VAPT Framework Audit — Official Real-Time Compliance Record</p>
+                        <p style="margin: 0; font-size: 0.76rem; color: #2563eb; font-weight: 600;">ISO 27001 / VAPT Framework Audit — Official Real-Time Compliance Record</p>
                     </div>
                     <div style="text-align: right; font-size: 0.74rem; color: var(--text-muted);">
-                        <div>Auditor Firm: <strong style="color: #f8fafc;">${brandFirm}</strong></div>
-                        <div>Document Reference ID: <strong style="color: #60a5fa;">${brandDocId}</strong></div>
-                        <div>Generated Date: <strong style="color: #cbd5e1;">${new Date().toLocaleDateString()}</strong></div>
+                        <div>Auditor Firm: <strong style="color: var(--text-main);">${brandFirm}</strong></div>
+                        <div>Document Reference ID: <strong style="color: #2563eb;">${brandDocId}</strong></div>
+                        <div>Generated Date: <strong style="color: var(--text-main);">${new Date().toLocaleDateString()}</strong></div>
                     </div>
                 </div>
 
                 <!-- Report Metadata Summary Grid -->
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
+                <div class="digital-report-summary" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: rgba(30, 41, 59, 0.4); border: 1px solid var(--border-color); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
                     <div>
                         <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Client Organization</span>
-                        <div style="font-size: 0.85rem; font-weight: 700; color: #f8fafc;">${brandClient}</div>
+                        <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-main);">${brandClient}</div>
                     </div>
                     <div>
                         <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Client Contact Email</span>
-                        <div style="font-size: 0.8rem; font-weight: 600; color: #60a5fa;">${brandClientEmail}</div>
+                        <div style="font-size: 0.8rem; font-weight: 600; color: #2563eb;">${brandClientEmail}</div>
                     </div>
                     <div>
                         <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Lead Auditor(s)</span>
-                        <div style="font-size: 0.82rem; font-weight: 700; color: #f8fafc;">${brandAuditor}</div>
+                        <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">${brandAuditor}</div>
                     </div>
                     <div>
                         <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Compliance Score</span>
@@ -2564,14 +2637,14 @@ async function renderAuditReportPreview() {
                 <!-- Control Findings Breakdown Table -->
                 <div style="margin-bottom: 20px;">
                     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                        <h4 style="margin: 0; font-size: 0.88rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                        <h4 style="margin: 0; font-size: 0.88rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
                             <span>📊</span> <span>Audit Control Evaluation Details (${totalCount} controls evaluated)</span>
                         </h4>
                     </div>
-                    <div style="overflow-x: auto; border-radius: 10px; border: 1px solid rgba(148, 163, 184, 0.2);">
+                    <div style="overflow-x: auto; border-radius: 10px; border: 1px solid var(--border-color);">
                         <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left;">
                             <thead>
-                                <tr style="background: rgba(30, 41, 59, 0.9); color: var(--text-muted); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px;">
+                                <tr style="background: rgba(30, 41, 59, 0.4); color: var(--text-muted); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px;">
                                     <th style="padding: 10px 12px;">Control ID</th>
                                     <th style="padding: 10px 12px;">Control Name</th>
                                     <th style="padding: 10px 12px;">Status</th>
@@ -2587,9 +2660,9 @@ async function renderAuditReportPreview() {
                 </div>
 
                 <!-- Report Sign-Off Footer -->
-                <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 14px; border-top: 1px solid rgba(148, 163, 184, 0.2); font-size: 0.74rem; color: var(--text-muted);">
-                    <div>Reviewed By: <strong style="color: #cbd5e1;">${brandReviewer}</strong></div>
-                    <div>Approved By: <strong style="color: #cbd5e1;">${brandApprover}</strong></div>
+                <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 14px; border-top: 1px solid var(--border-color); font-size: 0.74rem; color: var(--text-muted);">
+                    <div>Reviewed By: <strong style="color: var(--text-main);">${brandReviewer}</strong></div>
+                    <div>Approved By: <strong style="color: var(--text-main);">${brandApprover}</strong></div>
                     <div>ShakthiDB Hash: <strong style="color: #10b981;">SECURE_COMMIT_VERIFIED</strong></div>
                 </div>
 
@@ -3282,10 +3355,17 @@ function toggleChatSidebar() {
 
 /* ── INSTANT THEME SWITCHER (DARK / LIGHT) ── */
 function toggleAppTheme() {
-    const currentTheme = document.documentElement.getAttribute("data-theme") || "dark";
+    const currentTheme = document.documentElement.getAttribute("data-theme") || (document.body.classList.contains("light-theme") ? "light" : "dark");
     const newTheme = currentTheme === "dark" ? "light" : "dark";
     
     document.documentElement.setAttribute("data-theme", newTheme);
+    if (newTheme === "light") {
+        document.body.classList.remove("dark-theme");
+        document.body.classList.add("light-theme");
+    } else {
+        document.body.classList.remove("light-theme");
+        document.body.classList.add("dark-theme");
+    }
     localStorage.setItem("aicyber_theme", newTheme);
     
     updateThemeToggleUI(newTheme);
@@ -3314,6 +3394,13 @@ function updateThemeToggleUI(theme) {
     const savedTheme = localStorage.getItem("aicyber_theme") || "dark";
     document.documentElement.setAttribute("data-theme", savedTheme);
     document.addEventListener("DOMContentLoaded", () => {
+        if (savedTheme === "light") {
+            document.body.classList.remove("dark-theme");
+            document.body.classList.add("light-theme");
+        } else {
+            document.body.classList.remove("light-theme");
+            document.body.classList.add("dark-theme");
+        }
         updateThemeToggleUI(savedTheme);
     });
 })();
