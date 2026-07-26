@@ -1867,22 +1867,22 @@ async function renderAuditReportPreview() {
                 const polSub = f.policy_present ? `<div style="font-size:0.68rem; color:#60a5fa; margin-top:2px;">📜 Policy: ${f.policy_present}</div>` : '';
                 const evSub = f.evidence_present ? `<div style="font-size:0.68rem; color:#c084fc; margin-top:1px;">🔍 Evidence: ${f.evidence_present}</div>` : '';
 
-                const evSnippet = f.evidence_snippet ? `<div style="margin-bottom:4px; color:#e2e8f0; font-family:var(--font-mono); font-size:0.74rem;"><b>Exact Evidence:</b> "${f.evidence_snippet}"</div>` : '';
-                const evDesc = f.description ? `<div style="color:#94a3b8; font-size:0.74rem;">${f.description}</div>` : '';
-                const srcFile = f.source_files ? `<div style="font-size:0.7rem; color:#60a5fa; margin-top:2px;">📁 ${f.source_files}</div>` : '';
+                const evSnippet = f.evidence_snippet ? `<div class="ev-snippet-text" style="margin-bottom:4px; font-family:var(--font-mono); font-size:0.74rem; line-height: 1.4;"><b>Exact Evidence:</b> "${escapeHtml(f.evidence_snippet)}"</div>` : '';
+                const evDesc = f.description ? `<div class="ev-desc-text" style="font-size:0.74rem; line-height: 1.4; opacity: 0.9;">${escapeHtml(f.description)}</div>` : '';
+                const srcFile = f.source_files ? `<div style="font-size:0.7rem; color:#2563eb; margin-top:3px; font-weight:600;">📁 ${escapeHtml(f.source_files)}</div>` : '';
                 const sev = (f.severity && f.severity !== 'null' && f.severity !== 'undefined') ? f.severity : 'P3 Medium';
 
                 rowsHtml += `
-                    <tr style="border-bottom: 1px solid rgba(148,163,184,0.15);">
-                        <td style="padding: 10px; font-weight:700; color:#60a5fa;">${f.control_id}</td>
-                        <td style="padding: 10px; color:#e2e8f0; font-weight:600;">${ctrlTitle}</td>
+                    <tr style="border-bottom: 1px solid rgba(148,163,184,0.2);">
+                        <td style="padding: 10px; font-weight:700; color:#2563eb; font-family:var(--font-mono);">${f.control_id}</td>
+                        <td style="padding: 10px; font-weight:600;" class="preview-ctrl-title">${escapeHtml(ctrlTitle)}</td>
                         <td style="padding: 10px;">
-                            <span style="padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight:700; color:${badgeColor}; background:${badgeBg};">${displayStatus}</span>
+                            <span style="padding: 4px 9px; border-radius: 6px; font-size: 0.72rem; font-weight:700; color:${badgeColor}; background:${badgeBg}; border: 1px solid ${badgeColor}40;">${displayStatus}</span>
                             ${polSub}
                             ${evSub}
                         </td>
-                        <td style="padding: 10px; color:#cbd5e1;">${sev}</td>
-                        <td style="padding: 10px; max-width: 360px;">${evSnippet}${evDesc}${srcFile}</td>
+                        <td style="padding: 10px; font-weight:700; font-size:0.74rem;">${sev}</td>
+                        <td style="padding: 10px; max-width: 420px;">${evSnippet}${evDesc}${srcFile}</td>
                     </tr>
                 `;
             });
@@ -1892,33 +1892,33 @@ async function renderAuditReportPreview() {
             <div class="report-preview-card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 16px; padding: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid rgba(148, 163, 184, 0.2); padding-bottom: 16px; margin-bottom: 20px;">
                     <div>
-                        <h2 style="margin: 0 0 6px 0; color: #f8fafc; font-size: 1.3rem; font-weight: 800;">📋 FINAL EXECUTIVE AUDIT EVALUATION REPORT</h2>
-                        <div style="font-size: 0.82rem; color: #60a5fa; font-weight: 600;">ISO 27001 / VAPT Framework Audit • Live Real-Time Record</div>
+                        <h2 style="margin: 0 0 6px 0; color: var(--text-primary, #f8fafc); font-size: 1.3rem; font-weight: 800;">📋 FINAL EXECUTIVE AUDIT EVALUATION REPORT</h2>
+                        <div style="font-size: 0.82rem; color: #2563eb; font-weight: 700;">ISO 27001 / VAPT Framework Audit • Live Real-Time Record</div>
                     </div>
                     <div style="text-align: right; font-size: 0.78rem; color: var(--text-muted); line-height: 1.5;">
-                        <div>Auditor Firm: <b style="color:#e2e8f0;">${brandFirm}</b></div>
-                        <div>Document ID: <b style="color:#60a5fa;">${brandDocId}</b></div>
-                        <div>Date: <b style="color:#e2e8f0;">${new Date().toLocaleDateString()}</b></div>
+                        <div>Auditor Firm: <b style="color:var(--text-primary,#e2e8f0);">${brandFirm}</b></div>
+                        <div>Document ID: <b style="color:#2563eb;">${brandDocId}</b></div>
+                        <div>Date: <b style="color:var(--text-primary,#e2e8f0);">${new Date().toLocaleDateString()}</b></div>
                     </div>
                 </div>
 
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; background: rgba(30, 41, 59, 0.5); padding: 16px; border-radius: 12px; border: 1px solid rgba(148, 163, 184, 0.15);">
-                    <div><span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom: 2px;">Client Organization</span><b style="font-size:0.88rem; color:#e2e8f0;">${brandClient}</b></div>
-                    <div><span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom: 2px;">Client Contact Email</span><b style="font-size:0.88rem; color:#e2e8f0;">${brandEmail}</b></div>
-                    <div><span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom: 2px;">Lead Auditor(s)</span><b style="font-size:0.88rem; color:#e2e8f0;">${brandAuditor}</b></div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; background: rgba(30, 41, 59, 0.5); padding: 16px; border-radius: 12px; border: 1px solid rgba(148, 163, 184, 0.15);" class="preview-summary-card">
+                    <div><span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom: 2px;">Client Organization</span><b style="font-size:0.88rem; color:var(--text-primary,#e2e8f0);">${brandClient}</b></div>
+                    <div><span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom: 2px;">Client Contact Email</span><b style="font-size:0.88rem; color:var(--text-primary,#e2e8f0);">${brandEmail}</b></div>
+                    <div><span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom: 2px;">Lead Auditor(s)</span><b style="font-size:0.88rem; color:var(--text-primary,#e2e8f0);">${brandAuditor}</b></div>
                     <div><span style="font-size:0.72rem; color:var(--text-muted); display:block; margin-bottom: 2px;">Compliance Score</span><b style="font-size:1.1rem; color:${scorePercent >= 70 ? '#10b981' : '#f59e0b'};">${scorePercent}% Compliance</b></div>
                 </div>
 
-                <h4 style="color:#f8fafc; font-size: 0.95rem; font-weight: 700; margin-bottom:12px;">📊 Audit Control Evaluation Details (${findings.length} controls evaluated)</h4>
+                <h4 style="color: var(--text-primary, #f8fafc); font-size: 0.95rem; font-weight: 700; margin-bottom:12px;">📊 Audit Control Evaluation Details (${findings.length} controls evaluated)</h4>
                 <div style="overflow-x: auto; margin-bottom: 20px; border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 10px;">
-                    <table style="width:100%; border-collapse:collapse; font-size:0.8rem; text-align:left;">
+                    <table style="width:100%; border-collapse:collapse; font-size:0.8rem; text-align:left;" class="report-preview-table">
                         <thead>
-                            <tr style="background:rgba(30,41,59,0.8); color:#94a3b8; border-bottom: 1px solid rgba(148, 163, 184, 0.2);">
-                                <th style="padding:10px;">Control ID</th>
-                                <th style="padding:10px;">Control Name</th>
-                                <th style="padding:10px;">Status</th>
-                                <th style="padding:10px;">Severity</th>
-                                <th style="padding:10px;">Evidence / Reason Snippet</th>
+                            <tr style="background:rgba(30,41,59,0.8); color:var(--text-muted); border-bottom: 2px solid rgba(148, 163, 184, 0.25);">
+                                <th style="padding:10px; width: 10%;">Control ID</th>
+                                <th style="padding:10px; width: 28%;">Control Name</th>
+                                <th style="padding:10px; width: 14%;">Status</th>
+                                <th style="padding:10px; width: 10%;">Severity</th>
+                                <th style="padding:10px; width: 38%;">Evidence / Reason Snippet</th>
                             </tr>
                         </thead>
                         <tbody>
