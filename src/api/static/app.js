@@ -1731,7 +1731,10 @@ async function commitSessionToShaktiDB(force = false) {
                 listEl.innerHTML = shown.map(ctrl => `<li>• ${escapeHtml(ctrl)}</li>`).join("") +
                     (remaining > 0 ? `<li style="color:#94a3b8; font-style: italic;">... and ${remaining} more unreviewed controls</li>` : "");
             }
-            if (modalEl) modalEl.style.display = "flex";
+            if (modalEl) {
+                modalEl.style.display = "flex";
+                modalEl.style.zIndex = "100000";
+            }
             return;
         }
 
