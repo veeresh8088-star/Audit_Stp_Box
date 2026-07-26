@@ -2572,4 +2572,25 @@ background: rgba(15, 23, 42, 0.4);
 
 [data-theme="light"] .ev-desc-text {
     color: #334155 !important;
-}
+}
+
+/* ── REPORT PREVIEW CONTRAST FIXES ── */
+.preview-b-text {
+    color: #e2e8f0;
+}
+
+.preview-meta-block,
+.preview-footer-block {
+    color: #94a3b8;
+}
+
+[data-theme="light"] .preview-summary-card b,
+[data-theme="light"] .preview-b-text {
+    color: #0f172a !important;
+}
+
+[data-theme="light"] .preview-meta-block,
+[data-theme="light"] .preview-footer-block {
+    color: #475569 !important;
+}
+
