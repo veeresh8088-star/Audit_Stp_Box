@@ -272,6 +272,7 @@ def api_get_session_evidence(session_id: str):
 @router.post("/start")
 def api_start_audit(req: StartAuditRequest):
     bg_key = req.session_id
+    print(f"🚀 [API] /audit/start received for session {req.session_id} with {len(req.selected_sls)} controls (mode: {req.audit_mode})", flush=True)
     
     with _bg_lock:
         if bg_key in _bg_running:
@@ -292,16 +293,28 @@ def api_start_audit(req: StartAuditRequest):
             if os.path.exists(ev.file_path):
                 with open(ev.file_path, "rb") as f:
                     file_bytes = f.read()
-                # Re-extract text or read chunks (fallback)
-                f_like = io.BytesIO(file_bytes)
-                f_like.name = ev.filename
-                text = extract_text(f_like)
+
+                # ── Fast-path: use cached DocumentChunks instead of re-running OCR ──
+                cached_chunks = db.query(DocumentChunk).filter(
+                    DocumentChunk.filename == ev.filename
+                ).all()
+                if cached_chunks:
+                    text = " ".join(c.content for c in cached_chunks if c.content)
+                    print(f"[api_start_audit] Using {len(cached_chunks)} cached chunks for '{ev.filename}' (skipping OCR)", flush=True)
+                else:
+                    # No cache — extract fresh (may trigger EasyOCR for images)
+                    f_like = io.BytesIO(file_bytes)
+                    f_like.name = ev.filename
+                    text = extract_text(f_like)
+                    print(f"[api_start_audit] Fresh extraction for '{ev.filename}' ({len(text)} chars)", flush=True)
+
                 file_registry[ev.filename] = text
                 files_data.append({
                     "name": ev.filename,
                     "bytes": file_bytes,
                     "text": text
                 })
+
         
         # Determine standard/scoping
         if req.audit_mode in ("VAPT validation", "Technical findings only") or "VAPT" in (report.framework or "").upper():

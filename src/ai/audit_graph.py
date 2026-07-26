@@ -140,15 +140,22 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
                 result_holder["error"] = str(ex)
         t = threading.Thread(target=_run, daemon=True)
         t.start()
-        # llama.cpp: 90s per control (vs 540s Ollama default)
-        # Each control typically takes 20-60s on llama.cpp CPU inference
-        import os as _os
-        _backend = _os.environ.get("LLM_BACKEND", "ollama").strip().lower()
-        _timeout = 90 if _backend in ("llama.cpp", "llamacpp") else 300
-        t.join(timeout=_timeout)
+        # 360s (6 min) hard limit — llama.cpp needs ~5 min per control for deep models
+        _timeout = 360
+        # ── Heartbeat: update progress every 15s so UI never shows stuck 0% ──
+        _elapsed = 0
+        _heartbeat_interval = 15
+        while t.is_alive() and _elapsed < _timeout:
+            t.join(timeout=_heartbeat_interval)
+            _elapsed += _heartbeat_interval
+            if t.is_alive():
+                # Slowly increment between 30%→70% to show LLM is still working
+                _hb_phase = min(0.3 + (_elapsed / _timeout) * 0.4, 0.69)
+                _update_progress(state, f"LLM analysing control... ({_elapsed}s)", _hb_phase)
         if t.is_alive():
             print(f"[LANGGRAPH TIMEOUT] Generator timed out after {_timeout}s for control {state.get('control_id','')}. Skipping.", flush=True)
             return {"draft_finding": None, "validation_error": f"LLM call timed out after {_timeout}s"}
+        # ─────────────────────────────────────────────────────────────────────
         if "error" in result_holder:
             raise Exception(result_holder["error"])
         draft = result_holder["draft"]
@@ -170,7 +177,7 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
     draft = state["draft_finding"]
     
     if not draft:
-        if state.get("audit_mode") == "Quick" or state["retry_count"] >= 2:
+        if state.get("audit_mode") == "Quick" or state["retry_count"] >= 1:
             mode_prefix = "Quick audit" if state.get("audit_mode") == "Quick" else "Self-correction"
             print(f"[LANGGRAPH] {mode_prefix} failed generation for control {state['control_id']}. Routing to fallback.", flush=True)
             fallback = {
@@ -288,9 +295,30 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
             }
             
         print(f"[LANGGRAPH VALIDATOR] Validation rejected for control {state['control_id']}: {error_msg}", flush=True)
+
+        # If LLM produced an empty/fallback response (LLM unavailable), accept with review flag
+        # rather than returning final_finding=None which causes result to be lost entirely
+        draft_status = str((state.get("draft_finding") or {}).get("status", "")).upper()
+        draft_evidence = str((state.get("draft_finding") or {}).get("evidence_quote", "")).upper()
+        llm_failed = (not state.get("draft_finding")) or (draft_evidence == "NOT_FOUND" and draft_status == "NON_COMPLIANT")
+
+        if state["retry_count"] >= 1 or llm_failed:
+            # Accept validated_finding (even if flagged) rather than losing the result
+            validated_finding["status"] = "NON_COMPLIANT"
+            validated_finding["requires_human_review"] = True
+            validated_finding["requires_review"] = True
+            validated_finding["review_note"] = f"LLM unavailable or grounding failed: {error_msg}"
+            validated_finding["control_id"] = state["control_id"]
+            validated_finding["control"] = state["control_label"]
+            _log_execution_event(state, validated_finding)
+            return {
+                "validation_error": None,
+                "final_finding": validated_finding
+            }
+
         return {
             "validation_error": error_msg,
-            "draft_finding": validated_finding, # Keep the updated validator state (e.g. requires_review=True)
+            "draft_finding": validated_finding,
             "final_finding": None
         }
     
@@ -335,9 +363,19 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
                 result_holder["error"] = str(ex)
         t = threading.Thread(target=_run_reflect, daemon=True)
         t.start()
-        t.join(timeout=540)  # 9-minute hard limit per reflection call (local llama.cpp)
+        # 300s (5 min) hard limit per reflection pass — same reason as generate_node
+        _ref_timeout = 300
+        # ── Heartbeat: keep progress moving between 85%→95% during reflection ──
+        _ref_elapsed = 0
+        _ref_hb = 15
+        while t.is_alive() and _ref_elapsed < _ref_timeout:
+            t.join(timeout=_ref_hb)
+            _ref_elapsed += _ref_hb
+            if t.is_alive():
+                _hb_ref_phase = min(0.85 + (_ref_elapsed / _ref_timeout) * 0.1, 0.94)
+                _update_progress(state, f"Self-correcting finding... ({_ref_elapsed}s)", _hb_ref_phase)
         if t.is_alive():
-            print(f"[LANGGRAPH TIMEOUT] Reflection timed out for control {state.get('control_id','')}. Accepting draft as-is.", flush=True)
+            print(f"[LANGGRAPH TIMEOUT] Reflection timed out after {_ref_timeout}s for control {state.get('control_id','')}. Accepting draft as-is.", flush=True)
             return {
                 "draft_finding": draft,
                 "validation_error": None,

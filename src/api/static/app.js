@@ -1389,8 +1389,10 @@ async function triggerAuditAnalysis() {
     
     const frameworkSelect = document.getElementById("framework-select");
     const isVaptFramework = frameworkSelect ? frameworkSelect.value.toUpperCase().includes("VAPT") : false;
-    const model = document.getElementById("llm-model-select").value;
-    const mode = isVaptFramework ? "VAPT validation" : document.querySelector("input[name='audit-mode']:checked").value;
+    const modelEl = document.getElementById("llm-model-select");
+    const model = modelEl ? modelEl.value : "Gemma 4 (e4b)";
+    const modeEl = document.querySelector("input[name='audit-mode']:checked");
+    const mode = isVaptFramework ? "VAPT validation" : (modeEl ? modeEl.value : "Deep");
     
     try {
         const response = await fetch(`${API_BASE}/audit/start`, {

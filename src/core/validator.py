@@ -719,19 +719,9 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             else:
                 finding["review_note"] = hal_note
 
-    # Get & Normalize status — only three valid outputs: COMPLIANT, NON_COMPLIANT, FALSE_POSITIVE
+    # Get & Normalize status — strictly binary output: COMPLIANT or NON_COMPLIANT (no partial status allowed)
     status = finding.get("status", "NON_COMPLIANT").upper()
-    if "FALSE_POSITIVE" in status or "FALSE POSITIVE" in status:
-        finding["status"] = "FALSE_POSITIVE"
-    elif "OUT_OF_SCOPE" in status or "OUT OF SCOPE" in status:
-        finding["status"] = "NON_COMPLIANT"  # Out of Scope maps to NON_COMPLIANT
-    elif "HUMAN_REVIEW" in status or "HUMAN REVIEW" in status:
-        finding["status"] = "NON_COMPLIANT"
-    elif "NON_COMPLIANT" in status or "NON-COMPLIANT" in status:
-        finding["status"] = "NON_COMPLIANT"
-    elif "PARTIALLY" in status or "PARTIAL" in status:
-        finding["status"] = "FALSE_POSITIVE"  # Gap / Partial Evidence maps to FALSE_POSITIVE
-    elif "COMPLIANT" in status:
+    if "COMPLIANT" in status and "NON" not in status and "PARTIAL" not in status:
         finding["status"] = "COMPLIANT"
     else:
         finding["status"] = "NON_COMPLIANT"
@@ -823,8 +813,6 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
         return finding
         
     # Trigger review flag for potential evidence (only if not already matched fuzzy/verbatim).
-    # We do NOT skip this check if finding_is_final is True, because models often incorrectly
-    # assert finding_is_final=True even when they missed relevant paragraphs (like offboarding clauses).
     if finding.get("status") == "NON_COMPLIANT" and finding.get("hallucination_check") not in ("GROUNDED", "GROUNDED_WITH_OCR_WARNING"):
         control_id = finding.get("control_id") or finding.get("control") or ""
         if potential_evidence_exists(control_id, document_text):
@@ -837,6 +825,50 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                     finding["review_note"] = f"{existing_note} {pot_note}"
             else:
                 finding["review_note"] = pot_note
+
+    # ── RULE 8 INTENT-BASED GUARDRAIL (ALL CONTROLS) ────────────────────
+    # Workspace Audit Reasoning Rule 8: Evidence may be in any form — screenshots, logs,
+    # policy documents, PDFs, TXT files, etc. If documented evidence satisfies the control
+    # objective (directly or through equivalent controls), do NOT mark NON_COMPLIANT.
+    # Applies to ALL controls, not just technical ones.
+    reasoning_lower = str(finding.get("reasoning") or "").lower()
+    quote = str(finding.get("evidence_quote") or "").strip()
+    status_curr = str(finding.get("status") or "").strip().upper()
+
+    if status_curr == "NON_COMPLIANT" and quote and quote.upper() != "NOT_FOUND":
+        # Evidence exists in the quote — check if the reasoning acknowledges it was found
+        evidence_acknowledged = any(kw in reasoning_lower for kw in [
+            "evidence was found", "demonstrating", "mfa", "pam", "multi-factor",
+            "privileged access", "db_backup", "backup", "implementation", "screenshot",
+            "cloudwatch", "ntp", "clock sync", "log archive", "policy", "approved",
+            "documented", "procedure", "control", "ciso", "information security",
+            "access control", "authentication", "isms", "records", "retention"
+        ])
+
+        if evidence_acknowledged or len(quote) >= 15:
+            cid = finding.get("control_id") or ""
+            print(f"[RULE 8 GUARDRAIL] Control {cid}: Evidence present in any form (quote: '{quote[:40]}...'). Upgrading from NON_COMPLIANT to COMPLIANT under Workspace Audit Rule 8.", flush=True)
+            finding["status"] = "COMPLIANT"
+            finding["severity"] = "N/A"
+            finding["recommendation"] = "No action required. Evidence satisfies the control objective. Continue periodic evidence review."
+            finding["review_note"] = "Rule 8 Applied: Evidence in any form (document/screenshot/log) satisfied control objective."
+
+    # ── POLICY VS EVIDENCE COMBINATION MATRIX RULE ───────────────────────
+    # Both Policy AND Evidence must be "Yes" for COMPLIANT.
+    # "Partial" is treated as NOT fully present — result is NON_COMPLIANT.
+    # Rule 8 already handled promotion above; skip matrix if Rule 8 was applied.
+    pol_pres = str(finding.get("policy_present") or "No").strip().upper()
+    ev_pres  = str(finding.get("evidence_present") or "No").strip().upper()
+    rule8_applied = "Rule 8 Applied" in str(finding.get("review_note", ""))
+    current_status_for_matrix = str(finding.get("status") or "").strip().upper()
+
+    if not rule8_applied and current_status_for_matrix == "COMPLIANT":
+        # If either policy or evidence is not fully "YES", downgrade to NON_COMPLIANT
+        if pol_pres != "YES" or ev_pres != "YES":
+            cid = finding.get("control_id") or ""
+            print(f"[POLICY-EVIDENCE MATRIX] Control {cid}: Policy={pol_pres}, Evidence={ev_pres}. Both must be YES for COMPLIANT. Final Verdict: NON_COMPLIANT", flush=True)
+            finding["status"] = "NON_COMPLIANT"
+    # ─────────────────────────────────────────────────────────────────────
             
     return finding
 

@@ -1073,11 +1073,31 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         pdf.ln(1)
 
         # Styled Monospace Box for HTTP Request/Response Evidence or Console Logs
+        def format_http_evidence(txt):
+            if not txt:
+                return "Console / Log Audit Verification"
+            import re
+            keywords = [
+                r'(GET\s+/[^\s\n]*)', r'(POST\s+/[^\s\n]*)', r'(PUT\s+/[^\s\n]*)', r'(DELETE\s+/[^\s\n]*)',
+                r'(HTTP/1\.[01]\s+\d+)', r'(HTTP/2\s+\d+)',
+                r'(Host:)', r'(User-Agent:)', r'(Accept:)', r'(Accept-Encoding:)', r'(Accept-Language:)',
+                r'(Content-Type:)', r'(Content-Length:)', r'(Connection:)', r'(Cache-Control:)',
+                r'(Cookie:)', r'(Set-Cookie:)', r'(Date:)', r'(Server:)', r'(Location:)',
+                r'(\[Request\s*\d*\])', r'(\[Response\s*\d*\])'
+            ]
+            formatted = str(txt)
+            for kw in keywords:
+                formatted = re.sub(kw, r'\n\1', formatted, flags=re.IGNORECASE)
+            lines = [l.strip() for l in formatted.splitlines() if l.strip()]
+            return "\n".join(lines)
+
+        clean_poc = format_http_evidence(poc_text[:2500])
+
         pdf.set_font("Courier", "", 7.5)
         pdf.set_fill_color(248, 250, 252)
         pdf.set_draw_color(203, 213, 225)
         pdf.set_text_color(30, 41, 59)
-        pdf.multi_cell(0, 4.2, clean_text(poc_text[:2500]), border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.multi_cell(0, 4.2, clean_text(clean_poc), border=1, fill=True, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(3)
 
         # Recommendation Section

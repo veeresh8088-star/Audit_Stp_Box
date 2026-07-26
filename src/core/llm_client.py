@@ -3,8 +3,21 @@ import requests
 import json
 
 def get_llm_backend():
-    """Reads LLM_BACKEND env var. Returns 'ollama' or 'llama.cpp'."""
-    return os.environ.get("LLM_BACKEND", "ollama").strip().lower()
+    """Reads LLM_BACKEND env var or auto-detects llama.cpp vs Ollama by probing port 11434."""
+    env = os.environ.get("LLM_BACKEND", "").strip().lower()
+    if env:
+        return env
+    # Auto-detect: probe /health endpoint on 11434 (llama.cpp returns 200 OK)
+    try:
+        host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+        if not host.startswith("http"):
+            host = f"http://{host}"
+        r = requests.get(f"{host}/health", timeout=1)
+        if r.status_code == 200:
+            return "llama.cpp"
+    except Exception:
+        pass
+    return "ollama"
 
 def _resolve_host(url=None, default_port=11434):
     """Resolves host URL, prepending http:// and appending default port if missing."""

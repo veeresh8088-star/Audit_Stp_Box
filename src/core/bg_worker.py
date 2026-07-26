@@ -426,14 +426,15 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         # ── Pre-flight: verify LLM server is reachable (3s timeout) ──────────
         import os as _os
         import requests as _req
-        _backend = _os.environ.get("LLM_BACKEND", "ollama").strip().lower()
+        from src.core.llm_client import get_llm_backend, _resolve_host
+        _backend = get_llm_backend()
         _is_llamacpp = _backend in ("llama.cpp", "llamacpp")
-        _llm_host = _os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if not _llm_host.startswith("http"):
-            _llm_host = f"http://{_llm_host}"
+        _llm_host = _resolve_host()
         _health_url = f"{_llm_host}/health" if _is_llamacpp else f"{_llm_host}/api/tags"
         try:
             _hr = _req.get(_health_url, timeout=3)
+            if _hr.status_code not in (200, 201):
+                raise Exception(f"Server returned HTTP {_hr.status_code} on {_health_url}")
             print(f"[_run_ollama_bg] LLM server health check OK ({_health_url}): {_hr.status_code}", flush=True)
         except Exception as _hc_err:
             _backend_label = "llama.cpp" if _is_llamacpp else "Ollama"
