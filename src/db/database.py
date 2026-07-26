@@ -93,6 +93,21 @@ class Finding(Base):
     policy_result         = Column(String(100), nullable=True)
     evidence_result       = Column(String(100), nullable=True)
     severity_score        = Column(Float, default=0.0, server_default="0.0")
+    is_saved_to_shakthi   = Column(Boolean, default=False, server_default="false")
+
+class AdminAuditLog(Base):
+    """
+    Audit log tracking administrative actions, force acceptances, and override events.
+    """
+    __tablename__ = "admin_audit_logs"
+    id                  = Column(Integer, primary_key=True, autoincrement=True)
+    timestamp           = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    auditor_user        = Column(String(100), default="Lead Auditor")
+    session_id          = Column(String(100), index=True)
+    action              = Column(String(100)) # e.g. "FORCE_ACCEPT_UNREVIEWED_CONTROLS"
+    unreviewed_controls = Column(Text, nullable=True) # JSON list or comma-separated IDs
+    details             = Column(Text, nullable=True)
+    ip_address          = Column(String(50), nullable=True)
 
 class AuditorLearningRule(Base):
     """
@@ -462,7 +477,7 @@ def reconcile_schemas(engine):
         "users", "audit_reports", "findings", "evidence_files", 
         "audit_records", "compliance_scores", "document_chunks", 
         "auditor_feedback", "audit_trail", "system_events", 
-        "chat_messages", "custom_controls", "license_wallets", "token_usage_logs"
+        "chat_messages", "custom_controls", "license_wallets", "token_usage_logs", "admin_audit_logs"
     ]
     
     # We want to check columns for each table

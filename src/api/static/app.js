@@ -1606,18 +1606,35 @@ async function loadFindings() {
     }
 }
 
-async function commitSessionToShaktiDB() {
+async function commitSessionToShaktiDB(force = false) {
     if (!activeSessionId) return;
     try {
-        const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}`, {
+        const auditorName = currentUser ? currentUser.username : "Lead Auditor";
+        const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}?force=${force}&auditor_user=${encodeURIComponent(auditorName)}`, {
             method: "PUT"
         });
         const data = await response.json();
+
+        if (data.requires_confirmation && !force) {
+            // Unreviewed controls detected! Trigger Unreviewed Warning Modal
+            const countEl = document.getElementById("unreviewed-count-text");
+            const listEl = document.getElementById("unreviewed-list-container");
+            const modalEl = document.getElementById("unreviewed-warning-modal");
+
+            if (countEl) countEl.innerText = data.unreviewed_count || 0;
+            if (listEl && data.unreviewed_controls) {
+                listEl.innerHTML = data.unreviewed_controls.map(ctrl => `<li>• ${escapeHtml(ctrl)}</li>`).join("");
+            }
+            if (modalEl) modalEl.style.display = "flex";
+            return;
+        }
+
         if (data.success) {
             showToast(`✅ ${data.message}`, "info");
+            closeUnreviewedWarningModal();
             await loadFindings();
             
-            // Switch to Report tab and render real-time review report
+            // Switch to Report tab and render real-time review report (only saved findings)
             await renderAuditReportPreview();
             const reportTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Report"));
             if (reportTabBtn) switchTab("tab-audit-report", reportTabBtn);
@@ -1627,6 +1644,49 @@ async function commitSessionToShaktiDB() {
     } catch (err) {
         alert(`Failed to commit findings to Shakthi DB: ${err.message}`);
     }
+}
+
+function closeUnreviewedWarningModal() {
+    const modalEl = document.getElementById("unreviewed-warning-modal");
+    if (modalEl) modalEl.style.display = "none";
+}
+
+async function forceCommitSessionToShaktiDB() {
+    await commitSessionToShaktiDB(true);
+}
+
+async function loadAdminAuditLogs() {
+    const modalEl = document.getElementById("admin-log-modal");
+    const tbody = document.getElementById("admin-log-table-body");
+    if (!modalEl || !tbody) return;
+
+    modalEl.style.display = "flex";
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:#94a3b8;">Loading Admin Audit Log trail...</td></tr>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/audit/admin-logs`);
+        const data = await response.json();
+        if (data.success && data.logs && data.logs.length > 0) {
+            tbody.innerHTML = data.logs.map(log => `
+                <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.15);">
+                    <td style="padding: 10px; font-family: monospace; font-size: 0.78rem;">${escapeHtml(log.timestamp)}</td>
+                    <td style="padding: 10px; font-weight: 600; color: #60a5fa;">${escapeHtml(log.auditor_user)}</td>
+                    <td style="padding: 10px;"><span style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.74rem;">${escapeHtml(log.action)}</span></td>
+                    <td style="padding: 10px; font-family: monospace; color: #fbbf24;">${escapeHtml(log.unreviewed_controls || 'N/A')}</td>
+                    <td style="padding: 10px; font-size: 0.78rem; color: #cbd5e1;">${escapeHtml(log.details)}</td>
+                </tr>
+            `).join("");
+        } else {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:#94a3b8;">No administrative overrides recorded yet.</td></tr>`;
+        }
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:#ef4444;">Failed to load logs: ${err.message}</td></tr>`;
+    }
+}
+
+function closeAdminLogModal() {
+    const modalEl = document.getElementById("admin-log-modal");
+    if (modalEl) modalEl.style.display = "none";
 }
 
 async function renderAuditReportPreview() {
@@ -1642,10 +1702,11 @@ async function renderAuditReportPreview() {
 
     try {
         const userRole = currentUser ? currentUser.role : (selectedRole || "auditor");
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${userRole}`);
+        // CRITICAL REQUIREMENT: Query saved_only=true so ONLY findings saved to Shakthi DB appear in PDF Exporter Review & Download!
+        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${userRole}&saved_only=true`);
         const data = await response.json();
 
-        const findings = (data.success && data.findings) ? data.findings : findingsList;
+        const findings = (data.success && data.findings) ? data.findings : [];
 
         const brandFirm = document.getElementById("brand-firm")?.value || "TÜV SÜD South Asia Pvt. Ltd.";
         const brandAuditor = document.getElementById("brand-auditor")?.value || "Lead Audit Team";
@@ -1667,7 +1728,7 @@ async function renderAuditReportPreview() {
 
         let rowsHtml = "";
         if (findings.length === 0) {
-            rowsHtml = `<tr><td colspan="5" style="text-align:center; padding:16px; color:var(--text-muted);">No findings recorded for this session yet. Run RAG scan to evaluate controls.</td></tr>`;
+            rowsHtml = `<tr><td colspan="5" style="text-align:center; padding:20px; color:#fbbf24; background: rgba(245, 158, 11, 0.08);">⚠️ <b>No findings saved to Shakthi DB yet.</b> Go to <b>Audit Records & Findings</b> tab, review your controls, and click <b>"Save to Shakthi DB"</b> to display them in this PDF report.</td></tr>`;
         } else {
             findings.forEach(f => {
                 const isComp = isFindingCompliant(f);

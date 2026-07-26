@@ -941,6 +941,68 @@
                     <button type="button" class="btn-primary" onclick="saveScopeFromModal()" style="padding: 10px 24px; font-weight: 700;">Save & Apply Scope</button>
                 </div>
             </div>
+    </div>
+
+    <!-- ── UNREVIEWED CONTROLS WARNING MODAL ── -->
+    <div id="unreviewed-warning-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); z-index: 10005; align-items: center; justify-content: center;">
+        <div class="modal-card" style="background: rgba(30, 41, 59, 0.98); border: 1px solid rgba(239, 68, 68, 0.5); border-radius: 20px; padding: 28px; max-width: 580px; width: 92%; box-shadow: 0 25px 50px rgba(0,0,0,0.85);">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; border-bottom: 1px solid rgba(239, 68, 68, 0.2); padding-bottom: 14px;">
+                <span style="font-size: 1.8rem; color: #ef4444;">⚠️</span>
+                <div>
+                    <h3 style="margin: 0; color: #f8fafc; font-size: 1.25rem; font-weight: 800;">Unreviewed Controls Warning</h3>
+                    <p style="margin: 2px 0 0 0; font-size: 0.8rem; color: #ef4444;">Auditor verification pending for live session controls</p>
+                </div>
+            </div>
+
+            <p style="font-size: 0.88rem; color: #cbd5e1; line-height: 1.5; margin-bottom: 12px;">
+                The following <b id="unreviewed-count-text" style="color: #ef4444;">0</b> control(s) have <b>NOT</b> been reviewed or saved to Shakthi DB yet:
+            </p>
+
+            <ul id="unreviewed-list-container" style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 12px; padding: 12px 16px 12px 34px; max-height: 180px; overflow-y: auto; color: #fca5a5; font-size: 0.84rem; font-family: monospace; line-height: 1.6; margin-bottom: 16px;">
+                <!-- Loaded dynamically -->
+            </ul>
+
+            <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 10px; padding: 10px 14px; font-size: 0.78rem; color: #fbbf24; margin-bottom: 20px;">
+                ℹ️ <b>Policy Rule:</b> Forcibly accepting will save all controls to Shakthi DB and record an immutable entry in the <b>Admin Audit Log</b> for compliance tracking.
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 12px;">
+                <button type="button" class="btn-secondary" onclick="closeUnreviewedWarningModal()" style="padding: 10px 18px; font-size: 0.84rem;">🔍 Review Remaining Controls</button>
+                <button type="button" class="btn-primary" onclick="forceCommitSessionToShaktiDB()" style="background: linear-gradient(135deg, #ef4444, #b91c1c); border: none; padding: 10px 20px; font-weight: 700; font-size: 0.84rem; cursor: pointer;">⚠️ Force Accept & Save All</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── ADMIN AUDIT LOG MODAL ── -->
+    <div id="admin-log-modal" class="modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); z-index: 10002; align-items: center; justify-content: center;">
+        <div class="modal-card" style="background: rgba(30, 41, 59, 0.98); border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 20px; padding: 24px; max-width: 900px; width: 92%; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px rgba(0,0,0,0.85);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); padding-bottom: 12px;">
+                <h3 style="margin: 0; color: #f8fafc; font-size: 1.2rem; font-weight: 800; display: flex; align-items: center; gap: 8px;">
+                    <span>📜</span> Shakthi DB Admin Audit Log Trail
+                </h3>
+                <button onclick="closeAdminLogModal()" style="background: transparent; border: none; color: #94a3b8; font-size: 1.3rem; cursor: pointer;">✕</button>
+            </div>
+
+            <div style="flex: 1; overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; color: #e2e8f0;">
+                    <thead>
+                        <tr style="background: rgba(15, 23, 42, 0.7); text-align: left; border-bottom: 1px solid rgba(148, 163, 184, 0.2);">
+                            <th style="padding: 10px;">Timestamp</th>
+                            <th style="padding: 10px;">Auditor User</th>
+                            <th style="padding: 10px;">Action</th>
+                            <th style="padding: 10px;">Unreviewed Controls</th>
+                            <th style="padding: 10px;">Details</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-log-table-body">
+                        <!-- Loaded dynamically -->
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; margin-top: 16px; border-top: 1px solid rgba(148, 163, 184, 0.15); padding-top: 12px;">
+                <button type="button" class="btn-secondary" onclick="closeAdminLogModal()">Close</button>
+            </div>
         </div>
     </div>
 

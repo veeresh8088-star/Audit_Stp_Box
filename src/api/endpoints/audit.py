@@ -417,15 +417,19 @@ def api_get_status(session_id: str):
     return {"status": "idle", "checkpoint": checkpoint_data}
 
 @router.get("/findings")
-def api_get_findings(session_id: str, role: Optional[str] = None):
+def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bool = False):
     db = SessionLocal()
     try:
-        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Audit session not found.")
-            
-        query = db.query(Finding).filter(Finding.report_id == report.id)
-        findings = query.order_by(Finding.control_id).all()
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Audit session not found.")
+                
+            query = db.query(Finding).filter(Finding.report_id == report.id)
+            if saved_only:
+                query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
+                
+            findings = query.order_by(Finding.control_id).all()
         
         result = []
         for f in findings:
@@ -442,7 +446,10 @@ def api_get_findings(session_id: str, role: Optional[str] = None):
                 "status": f.status,
                 "source_files": f.source_files,
                 "policy_present": f.policy_present,
-                "evidence_present": f.evidence_present
+                "evidence_present": f.evidence_present,
+                "is_saved_to_shakthi": bool(f.is_saved_to_shakthi or f.human_verified),
+                "human_verified": bool(f.human_verified),
+                "review_note": f.review_note or ""
             })
         return {"success": True, "findings": result, "session_title": report.session_title}
     finally:
@@ -466,6 +473,10 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest):
             if req.policy_present: finding.policy_present = req.policy_present
             if req.evidence_present: finding.evidence_present = req.evidence_present
             
+            # Explicitly mark as reviewed and saved to Shakthi DB
+            finding.is_saved_to_shakthi = True
+            finding.human_verified = True
+            
             # Record auditor comments in database if comment is updated
             if req.comment:
                 finding.review_note = req.comment
@@ -488,24 +499,55 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest):
                 ))
                 
             db.commit()
-            return {"success": True, "message": "Finding successfully updated."}
+            return {"success": True, "message": "Finding successfully updated and saved to Shakthi DB."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database update failed: {e}")
     finally:
         db.close()
 
 @router.put("/findings/commit-session/{session_id}")
-def api_commit_session_findings(session_id: str):
-    """Commits and finalizes all findings for a session into Shakthi DB, removing unreviewed warnings."""
+def api_commit_session_findings(session_id: str, force: bool = False, auditor_user: str = "Lead Auditor"):
+    """Commits and finalizes all findings for a session into Shakthi DB, with unreviewed controls warning & admin logging."""
     db = SessionLocal()
+    is_force = bool(force) or str(force).lower() in ('true', '1')
     try:
-        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Session not found.")
-            
+        from src.db.database import AdminAuditLog
         with force_master():
-            report.status = "Reviewed & Finalized"
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found.")
+                
             findings = db.query(Finding).filter(Finding.report_id == report.id).all()
+            unreviewed = [f for f in findings if not bool(f.is_saved_to_shakthi) and not bool(f.human_verified)]
+            
+            # If there are unreviewed controls and auditor hasn't forced acceptance, trigger warning response!
+            if unreviewed and not is_force:
+                unreviewed_controls = [f"{f.control_id} - {f.control_name or f.status}" for f in unreviewed]
+                return {
+                    "success": False,
+                    "requires_confirmation": True,
+                    "unreviewed_count": len(unreviewed),
+                    "unreviewed_controls": unreviewed_controls,
+                    "message": f"Warning: {len(unreviewed)} control(s) have not been reviewed/saved to Shakthi DB yet."
+                }
+                
+            # If auditor forces acceptance of unreviewed controls, log to Admin Audit Log!
+            if unreviewed and is_force:
+                unreviewed_control_ids = [f.control_id for f in unreviewed]
+                db.add(AdminAuditLog(
+                    auditor_user=auditor_user,
+                    session_id=session_id,
+                    action="FORCE_ACCEPT_UNREVIEWED_CONTROLS",
+                    unreviewed_controls=json.dumps(unreviewed_control_ids),
+                    details=f"Auditor forcibly accepted and committed session {session_id[:8]} with {len(unreviewed)} unreviewed control(s): {', '.join(unreviewed_control_ids)}"
+                ))
+                
+            # Mark all findings as saved and verified in Shakthi DB
+            for f in findings:
+                f.is_saved_to_shakthi = True
+                f.human_verified = True
+                
+            report.status = "Reviewed & Finalized"
             
             # Recalculate Compliance Score
             total_ctrls = len(findings)
@@ -515,24 +557,46 @@ def api_commit_session_findings(session_id: str):
             score_row = db.query(ComplianceScore).filter(ComplianceScore.report_id == report.id).first()
             if score_row:
                 score_row.score_percent = score_pct
-                score_row.compliant_controls = compliant_count
-                score_row.total_controls = total_ctrls
             else:
                 db.add(ComplianceScore(
                     report_id=report.id,
-                    score_percent=score_pct,
-                    compliant_controls=compliant_count,
-                    total_controls=total_ctrls
+                    framework=report.framework or "ISO 27001",
+                    score_percent=score_pct
                 ))
             db.commit()
             return {
                 "success": True, 
                 "message": f"Successfully committed {total_ctrls} audit record(s) to Shakthi DB (Compliance Score: {score_pct}%).",
                 "status": report.status,
-                "score_percent": score_pct
+                "score_percent": score_pct,
+                "unreviewed_count": len(unreviewed) if force else 0
             }
     except Exception as e:
+        import traceback
+        print(f"[COMMIT SESSION EXCEPTION ERROR] {e}\n{traceback.format_exc()}", flush=True)
         raise HTTPException(status_code=500, detail=f"Commit to Shakthi DB failed: {e}")
+    finally:
+        db.close()
+
+@router.get("/admin-logs")
+def api_get_admin_logs():
+    """Retrieves admin audit trail log records for force acceptances and overrides."""
+    db = SessionLocal()
+    try:
+        from src.db.database import AdminAuditLog
+        logs = db.query(AdminAuditLog).order_by(AdminAuditLog.id.desc()).limit(100).all()
+        result = []
+        for l in logs:
+            result.append({
+                "id": l.id,
+                "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC") if l.timestamp else "",
+                "auditor_user": l.auditor_user,
+                "session_id": l.session_id,
+                "action": l.action,
+                "unreviewed_controls": l.unreviewed_controls,
+                "details": l.details
+            })
+        return {"success": True, "logs": result}
     finally:
         db.close()
 
