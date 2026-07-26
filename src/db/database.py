@@ -394,15 +394,25 @@ def _execute_replicate_changes():
                             columns = rows[0]._fields if hasattr(rows[0], '_fields') else list(rows[0].keys())
                             col_names = ", ".join(f'"{col}"' for col in columns)
                             placeholders = ", ".join(f":{col}" for col in columns)
-                            insert_sql = text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})')
+                            if "id" in columns:
+                                update_cols = ", ".join(f'"{col}" = EXCLUDED."{col}"' for col in columns if col != "id")
+                                if update_cols:
+                                    insert_sql = text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders}) ON CONFLICT ("id") DO UPDATE SET {update_cols}')
+                                else:
+                                    insert_sql = text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders}) ON CONFLICT ("id") DO NOTHING')
+                            else:
+                                insert_sql = text(f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})')
                             
                             data = [dict(row._mapping) for row in rows]
                             dest_conn.execute(insert_sql, data)
                             
                             # Reset sequence if id column is present
                             if "id" in columns:
-                                seq_sql = text(f"SELECT setval(pg_get_serial_sequence('\"{table_name}\"', 'id'), coalesce(max(id), 1)) FROM \"{table_name}\";")
-                                dest_conn.execute(seq_sql)
+                                try:
+                                    seq_sql = text(f"SELECT setval(pg_get_serial_sequence('\"{table_name}\"', 'id'), coalesce(max(id), 1)) FROM \"{table_name}\";")
+                                    dest_conn.execute(seq_sql)
+                                except Exception:
+                                    pass
                 
                 dest_conn.execute(text("SET session_replication_role = 'origin';"))
             print(f"[REPLICATION SUCCESS] Synced Master -> {target_name}")

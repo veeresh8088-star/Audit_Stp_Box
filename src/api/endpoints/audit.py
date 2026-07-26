@@ -154,10 +154,17 @@ def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None)
             score_pct = score_row.score_percent if score_row else 0
             findings_count = db.query(Finding).filter(Finding.report_id == r.id).count()
             
+            auditee_name = None
+            if r.auditee_id:
+                u = db.query(User).filter(User.id == r.auditee_id).first()
+                if u:
+                    auditee_name = u.username
+
             result.append({
                 "id": r.id,
                 "session_id": r.session_id,
                 "session_title": r.session_title,
+                "auditee_name": auditee_name,
                 "framework": r.framework,
                 "status": r.status,
                 "score_percent": score_pct,
@@ -165,6 +172,45 @@ def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None)
                 "created_at": str(r.created_at)
             })
         return {"success": True, "sessions": result}
+    finally:
+        db.close()
+
+@router.get("/auditee-sessions")
+def api_get_auditee_sessions():
+    """Returns only sessions that belong to a real auditee OR have auditee-submitted evidence files."""
+    db = SessionLocal()
+    try:
+        with force_master():
+            auditee_ev_report_ids = [r[0] for r in db.query(EvidenceFile.report_id).filter(EvidenceFile.is_auditor_uploaded == False).distinct().all()]
+            
+            query_filter = (AuditReport.auditee_id != None)
+            if auditee_ev_report_ids:
+                query_filter = query_filter | (AuditReport.id.in_(auditee_ev_report_ids))
+
+            reports = db.query(AuditReport).filter(query_filter).order_by(AuditReport.created_at.desc()).all()
+
+            result = []
+            for r in reports:
+                auditee_username = None
+                if r.auditee_id:
+                    u = db.query(User).filter(User.id == r.auditee_id).first()
+                    if u:
+                        auditee_username = u.username
+
+                files_count = db.query(EvidenceFile).filter(
+                    EvidenceFile.report_id == r.id,
+                    EvidenceFile.is_auditor_uploaded == False
+                ).count()
+
+                result.append({
+                    "id": r.id,
+                    "session_id": r.session_id,
+                    "session_title": r.session_title,
+                    "auditee_username": auditee_username or "Auditee Client",
+                    "files_count": files_count,
+                    "created_at": str(r.created_at)
+                })
+            return {"success": True, "sessions": result}
     finally:
         db.close()
 
@@ -176,10 +222,13 @@ def api_upload_evidence(
 ):
     db = SessionLocal()
     try:
-        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Active audit session not found.")
-        
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail=f"Active audit session not found for session_id={session_id}.")
+            # Extract primitive values INSIDE context to avoid DetachedInstanceError
+            report_id = report.id
+
         uploaded_details = []
         import zipfile
         
@@ -193,11 +242,11 @@ def api_upload_evidence(
             if not is_clean:
                 raise HTTPException(
                     status_code=400, 
-                    detail=f"🚨 SECURITY ALERT: '{f.filename}' BLOCKED! {reason}"
+                    detail=f"SECURITY ALERT: '{f.filename}' BLOCKED! {reason}"
                 )
             
             # Store file on local disk
-            ev_dir = os.path.normpath(os.path.join(os.getcwd(), "data", "evidence", str(report.id)))
+            ev_dir = os.path.normpath(os.path.join(os.getcwd(), "data", "evidence", str(report_id)))
             os.makedirs(ev_dir, exist_ok=True)
             prefix = "auditor_" if is_auditor_uploaded else "auditee_"
             dest_path = os.path.join(ev_dir, prefix + f.filename)
@@ -209,12 +258,12 @@ def api_upload_evidence(
             # Add to database
             with force_master():
                 exists = db.query(EvidenceFile).filter(
-                    EvidenceFile.report_id == report.id,
+                    EvidenceFile.report_id == report_id,
                     EvidenceFile.filename == f.filename
                 ).first()
                 if not exists:
                     new_ev = EvidenceFile(
-                        report_id=report.id,
+                        report_id=report_id,
                         filename=f.filename,
                         file_path=os.path.abspath(dest_path),
                         is_auditor_uploaded=is_auditor_uploaded,
@@ -235,7 +284,11 @@ def api_upload_evidence(
             })
             
         return {"success": True, "files": uploaded_details}
+    except HTTPException:
+        raise
     except Exception as e:
+        import traceback
+        print(f"[UPLOAD ERROR] session={session_id} | {e}\n{traceback.format_exc()}", flush=True)
         raise HTTPException(status_code=500, detail=f"Upload processing failed: {e}")
     finally:
         db.close()
@@ -245,30 +298,31 @@ def api_get_session_evidence(session_id: str):
     """Returns list of uploaded evidence files for the given session ID."""
     db = SessionLocal()
     try:
-        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-        if not report:
-            return {"success": True, "files": []}
-        
-        files = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id).order_by(EvidenceFile.uploaded_at.desc()).all()
-        result = []
-        for f in files:
-            size_str = "0 KB"
-            if f.file_path and os.path.exists(f.file_path):
-                sz = os.path.getsize(f.file_path)
-                if sz > 1024 * 1024:
-                    size_str = f"{sz / (1024 * 1024):.1f} MB"
-                elif sz > 1024:
-                    size_str = f"{sz / 1024:.1f} KB"
-                else:
-                    size_str = f"{sz} B"
-            result.append({
-                "id": f.id,
-                "filename": f.filename,
-                "size_str": size_str,
-                "is_auditor": bool(f.is_auditor_uploaded),
-                "created_at": str(f.uploaded_at)
-            })
-        return {"success": True, "files": result}
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if not report:
+                return {"success": True, "files": []}
+            
+            files = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id).order_by(EvidenceFile.uploaded_at.desc()).all()
+            result = []
+            for f in files:
+                size_str = "0 KB"
+                if f.file_path and os.path.exists(f.file_path):
+                    sz = os.path.getsize(f.file_path)
+                    if sz > 1024 * 1024:
+                        size_str = f"{sz / (1024 * 1024):.1f} MB"
+                    elif sz > 1024:
+                        size_str = f"{sz / 1024:.1f} KB"
+                    else:
+                        size_str = f"{sz} B"
+                result.append({
+                    "id": f.id,
+                    "filename": f.filename,
+                    "size_str": size_str,
+                    "is_auditor": bool(f.is_auditor_uploaded),
+                    "created_at": str(f.uploaded_at)
+                })
+            return {"success": True, "files": result}
     finally:
         db.close()
 
@@ -284,52 +338,60 @@ def api_start_audit(req: StartAuditRequest):
     
     db = SessionLocal()
     try:
-        report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Session not found.")
-        
-        # Load evidence files text & bytes from disk
-        ev_files = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id).all()
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found.")
+            report_id = report.id
+            report_framework = report.framework or ""
+
+            # Load evidence files text & bytes from disk
+            ev_files = db.query(EvidenceFile).filter(EvidenceFile.report_id == report_id).all()
+            ev_file_list = [(ev.file_path, ev.filename) for ev in ev_files]
+
         files_data = []
         file_registry = {}
-        for ev in ev_files:
-            if os.path.exists(ev.file_path):
-                with open(ev.file_path, "rb") as f:
+        for file_path, filename in ev_file_list:
+            if os.path.exists(file_path):
+                with open(file_path, "rb") as f:
                     file_bytes = f.read()
 
-                # ── Fast-path: use cached DocumentChunks instead of re-running OCR ──
-                cached_chunks = db.query(DocumentChunk).filter(
-                    DocumentChunk.filename == ev.filename
-                ).all()
-                if cached_chunks:
-                    text = " ".join(c.content for c in cached_chunks if c.content)
-                    print(f"[api_start_audit] Using {len(cached_chunks)} cached chunks for '{ev.filename}' (skipping OCR)", flush=True)
-                else:
-                    # No cache — extract fresh (may trigger EasyOCR for images)
-                    f_like = io.BytesIO(file_bytes)
-                    f_like.name = ev.filename
-                    text = extract_text(f_like)
-                    print(f"[api_start_audit] Fresh extraction for '{ev.filename}' ({len(text)} chars)", flush=True)
+                with force_master():
+                    cached_chunks = db.query(DocumentChunk).filter(
+                        DocumentChunk.filename == filename
+                    ).all()
+                    chunk_contents = [c.content for c in cached_chunks if c.content]
 
-                file_registry[ev.filename] = text
+                if chunk_contents:
+                    text = " ".join(chunk_contents)
+                    print(f"[api_start_audit] Using {len(chunk_contents)} cached chunks for '{filename}' (skipping OCR)", flush=True)
+                else:
+                    f_like = io.BytesIO(file_bytes)
+                    f_like.name = filename
+                    text = extract_text(f_like)
+                    print(f"[api_start_audit] Fresh extraction for '{filename}' ({len(text)} chars)", flush=True)
+
+                file_registry[filename] = text
                 files_data.append({
-                    "name": ev.filename,
+                    "name": filename,
                     "bytes": file_bytes,
                     "text": text
                 })
 
-        
         # Determine standard/scoping
-        if req.audit_mode in ("VAPT validation", "Technical findings only") or "VAPT" in (report.framework or "").upper():
+        if req.audit_mode in ("VAPT validation", "Technical findings only") or "VAPT" in report_framework.upper():
             is_vapt_std = True
             is_tech_only = True
-            report.framework = "VAPT Framework Controls"
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()
+            with force_master():
+                report_obj = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
+                if report_obj:
+                    report_obj.framework = "VAPT Framework Controls"
+                    try:
+                        db.commit()
+                    except Exception:
+                        db.rollback()
         else:
-            is_vapt_std = report.framework in ("VAPT Framework Controls", "VAPT")
+            is_vapt_std = report_framework in ("VAPT Framework Controls", "VAPT")
             is_tech_only = False
         
         # Spawn Background Worker thread
@@ -420,7 +482,7 @@ def api_get_status(session_id: str):
     return {"status": "idle", "checkpoint": checkpoint_data}
 
 @router.get("/findings")
-def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bool = False):
+def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bool = False, include_info: bool = False):
     db = SessionLocal()
     try:
         from src.core.controls_data import USE_CASES
@@ -439,6 +501,11 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 raise HTTPException(status_code=404, detail="Audit session not found.")
                 
             query = db.query(Finding).filter(Finding.report_id == report.id)
+            if not include_info:
+                query = query.filter(
+                    ~Finding.severity.ilike("%INFO%"),
+                    ~Finding.status.ilike("%INFO%")
+                )
             if saved_only:
                 query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
                 
@@ -838,7 +905,7 @@ def api_upload_scope_excel(file: UploadFile = File(...)):
 @router.post("/deliver")
 def api_deliver_report(
     session_id: str = Form(...),
-    auditee_id: int = Form(...),
+    auditee_id: str = Form(...),
     username: str = Form("admin")
 ):
     """Delivers report session to specified auditee account."""
@@ -848,21 +915,35 @@ def api_deliver_report(
         if not report:
             raise HTTPException(status_code=404, detail="Session not found.")
             
-        user = db.query(User).filter(User.username == username).first()
-        auditor_id = user.id if user else None
+        auditor_user = db.query(User).filter(User.username == username).first()
+        auditor_id = auditor_user.id if auditor_user else None
         
+        # Parse target auditee user safely
+        target_user = None
+        raw_target = str(auditee_id).strip()
+        if raw_target.startswith("auditee:"):
+            uname = raw_target.replace("auditee:", "")
+            target_user = db.query(User).filter(User.username == uname).first()
+        elif raw_target.isdigit():
+            target_user = db.query(User).filter(User.id == int(raw_target)).first()
+        else:
+            target_user = db.query(User).filter(User.username == raw_target).first()
+            
+        target_uid = target_user.id if target_user else None
+
         with force_master():
             db.add(AuditRecord(
                 report_id=report.id,
                 auditor_id=auditor_id,
                 status="Sent to Auditee",
-                comments="Report published to auditee from records dashboard"
+                comments=f"Report published to auditee '{target_user.username if target_user else raw_target}'"
             ))
             report.status = "Sent to Auditee"
-            report.auditee_id = auditee_id
+            if target_uid:
+                report.auditee_id = target_uid
             db.commit()
             
-        return {"success": True, "message": "Report successfully delivered to auditee."}
+        return {"success": True, "message": f"Report successfully delivered to auditee '{target_user.username if target_user else raw_target}'."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -1061,72 +1142,76 @@ def api_clear_chat_session(session_id: str = Form(...), username: Optional[str] 
         db.close()
 
 @router.get("/export/docx")
-def api_export_docx(session_id: str):
-    """Exports findings report as DOCX using template mappings."""
+def api_export_docx(session_id: str, saved_only: bool = False):
+    """Exports findings report as DOCX using custom layout templates."""
     db = SessionLocal()
     try:
         from fastapi.responses import StreamingResponse
         from src.db.database import Finding, AuditReport
         from src.core.report_exporter import export_docx_report
         
-        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Session not found.")
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found.")
+                
+            query = db.query(Finding).filter(Finding.report_id == report.id)
+            if saved_only or report.status == "Reviewed & Finalized":
+                query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
+            db_findings = query.all()
             
-        db_findings = db.query(Finding).filter(Finding.report_id == report.id).all()
-        
-        findings_mapped = []
-        resolved_list = []
-        for f in db_findings:
-            sev = f.severity or "Medium"
-            sev_score = 5.0
-            if "Critical" in sev or "1" in sev:
-                sev_score = 9.5
-            elif "High" in sev:
-                sev_score = 8.0
-            elif "Medium" in sev or "2" in sev:
+            findings_mapped = []
+            resolved_list = []
+            for f in db_findings:
+                sev = f.severity or "Medium"
                 sev_score = 5.0
-            else:
-                sev_score = 2.5
-                
-            findings_mapped.append({
-                "control_id": f.control_id,
-                "control": f.control_name or f.control_id,
-                "clause": "ISO 27001 Annex A",
-                "finding": f.description or f.gap_detected or "",
-                "description": f.description or f.gap_detected or "",
-                "status": f.status or "Non-Compliant",
-                "severity": f.severity or "Medium",
-                "severity_score": sev_score,
-                "business_impact": f.reasoning or "Compliance verification pending.",
-                "recommendation": f.recommendation or "",
-                "evidence_snippet": f.evidence_snippet or "",
-                "evidence_quote": f.evidence_snippet or "",
-                "source_files": f.source_files or ""
-            })
-            if f.status == "Compliant":
-                resolved_list.append(f.control_id)
-                
-        docx_bytes = export_docx_report(
-            session_title=report.framework,
-            findings=findings_mapped,
-            resolved_list=resolved_list,
-            status=report.status or "Draft",
-            comments="Lead auditor generated report"
-        )
-        
-        return StreamingResponse(
-            io.BytesIO(docx_bytes),
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f"attachment; filename={report.framework.replace(' ', '_')}_Report.docx"}
-        )
+                if "Critical" in sev or "1" in sev:
+                    sev_score = 9.5
+                elif "High" in sev:
+                    sev_score = 8.0
+                elif "Medium" in sev or "2" in sev:
+                    sev_score = 5.0
+                else:
+                    sev_score = 2.5
+                    
+                findings_mapped.append({
+                    "control_id": f.control_id,
+                    "control": f.control_name or f.control_id,
+                    "clause": "ISO 27001 Annex A",
+                    "finding": f.description or f.gap_detected or "",
+                    "description": f.description or f.gap_detected or "",
+                    "status": f.status or "Non-Compliant",
+                    "severity": f.severity or "Medium",
+                    "severity_score": sev_score,
+                    "business_impact": f.reasoning or "Compliance verification pending.",
+                    "recommendation": f.recommendation or "",
+                    "evidence_snippet": f.evidence_snippet or "",
+                    "evidence_quote": f.evidence_snippet or "",
+                    "source_files": f.source_files or ""
+                })
+                if f.status == "Compliant":
+                    resolved_list.append(f.control_id)
+                    
+            docx_bytes = export_docx_report(
+                session_title=report.framework,
+                findings=findings_mapped,
+                resolved_list=resolved_list,
+                status=report.status or "Draft",
+                comments="Lead auditor generated report"
+            )
+            
+            return StreamingResponse(
+                io.BytesIO(docx_bytes),
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={"Content-Disposition": f"attachment; filename={report.framework.replace(' ', '_')}_Report.docx"}
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
 
 @router.get("/export/pdf")
-def api_export_pdf(session_id: str):
+def api_export_pdf(session_id: str, saved_only: bool = False):
     """Exports findings report as PDF using custom layout templates."""
     db = SessionLocal()
     try:
@@ -1134,78 +1219,82 @@ def api_export_pdf(session_id: str):
         from src.db.database import Finding, AuditReport
         from src.core.report_exporter import export_pdf_report
         
-        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Session not found.")
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found.")
+                
+            query = db.query(Finding).filter(Finding.report_id == report.id)
+            if saved_only or report.status == "Reviewed & Finalized":
+                query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
+            db_findings = query.all()
             
-        db_findings = db.query(Finding).filter(Finding.report_id == report.id).all()
-        
-        findings_mapped = []
-        resolved_list = []
-        for f in db_findings:
-            sev = f.severity or "Medium"
-            sev_score = 0.0
-            try:
-                if f.evidence_found:
-                    sev_score = float(f.evidence_found)
-            except Exception:
+            findings_mapped = []
+            resolved_list = []
+            for f in db_findings:
+                sev = f.severity or "Medium"
                 sev_score = 0.0
+                try:
+                    if f.evidence_found:
+                        sev_score = float(f.evidence_found)
+                except Exception:
+                    sev_score = 0.0
 
-            if sev_score <= 0.0:
-                if "Critical" in sev or "1" in sev:
-                    sev_score = 9.5
-                elif "High" in sev:
-                    sev_score = 8.0
-                elif "Medium" in sev or "2" in sev:
-                    sev_score = 5.5
-                else:
-                    sev_score = 2.5
-                
-            findings_mapped.append({
-                "control_id": f.control_id,
-                "title": f.control_name or f.control_id,
-                "finding": f.control_name or f.description or "",
-                "control": f.control_name or f.control_id,
-                "clause": "ISO 27001 Annex A",
-                "description": f.description or f.gap_detected or "",
-                "status": f.status or "Non-Compliant",
-                "severity": f.severity or "Medium",
-                "severity_score": sev_score,
-                "target": f.source_files or "Scoped Target Systems",
-                "business_impact": f.reasoning or "Compliance verification pending.",
-                "recommendation": f.recommendation or "",
-                "evidence_snippet": f.evidence_snippet or "",
-                "evidence_quote": f.evidence_snippet or "",
-                "source_files": f.source_files or ""
-            })
-            if f.status == "Compliant":
-                resolved_list.append(f.control_id)
-                
-        is_vapt = report.framework in ("VAPT Framework Controls", "VAPT") or "VAPT" in (report.framework or "").upper()
-        if is_vapt:
-            from src.core.report_exporter import _export_vapt_pdf
-            pdf_bytes = _export_vapt_pdf(
-                session_title=report.framework,
-                findings=findings_mapped,
-                resolved_list=resolved_list,
-                status=report.status or "Completed",
-                comments="Lead auditor generated report"
+                if sev_score <= 0.0:
+                    if "Critical" in sev or "1" in sev:
+                        sev_score = 9.5
+                    elif "High" in sev:
+                        sev_score = 8.0
+                    elif "Medium" in sev or "2" in sev:
+                        sev_score = 5.5
+                    else:
+                        sev_score = 2.5
+                    
+                findings_mapped.append({
+                    "control_id": f.control_id,
+                    "title": f.control_name or f.control_id,
+                    "finding": f.control_name or f.description or "",
+                    "control": f.control_name or f.control_id,
+                    "clause": "ISO 27001 Annex A",
+                    "description": f.description or f.gap_detected or "",
+                    "status": f.status or "Non-Compliant",
+                    "severity": f.severity or "Medium",
+                    "severity_score": sev_score,
+                    "target": f.source_files or "Scoped Target Systems",
+                    "business_impact": f.reasoning or "Compliance verification pending.",
+                    "recommendation": f.recommendation or "",
+                    "evidence_snippet": f.evidence_snippet or "",
+                    "evidence_quote": f.evidence_snippet or "",
+                    "source_files": f.source_files or ""
+                })
+                if f.status == "Compliant":
+                    resolved_list.append(f.control_id)
+                    
+            is_vapt = report.framework in ("VAPT Framework Controls", "VAPT") or "VAPT" in (report.framework or "").upper()
+            if is_vapt:
+                from src.core.report_exporter import _export_vapt_pdf
+                pdf_bytes = _export_vapt_pdf(
+                    session_title=report.framework,
+                    findings=findings_mapped,
+                    resolved_list=resolved_list,
+                    status=report.status or "Completed",
+                    comments="Lead auditor generated report"
+                )
+            else:
+                from src.core.report_exporter import export_pdf_report
+                pdf_bytes = export_pdf_report(
+                    session_title=report.framework,
+                    findings=findings_mapped,
+                    resolved_list=resolved_list,
+                    status=report.status or "Draft",
+                    comments="Lead auditor generated report"
+                )
+            
+            return StreamingResponse(
+                io.BytesIO(pdf_bytes),
+                media_type="application/pdf",
+                headers={"Content-Disposition": f"attachment; filename={report.framework.replace(' ', '_')}_Report.pdf"}
             )
-        else:
-            from src.core.report_exporter import export_pdf_report
-            pdf_bytes = export_pdf_report(
-                session_title=report.framework,
-                findings=findings_mapped,
-                resolved_list=resolved_list,
-                status=report.status or "Draft",
-                comments="Lead auditor generated report"
-            )
-        
-        return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={"Content-Disposition": f"attachment; filename={report.framework.replace(' ', '_')}_Report.pdf"}
-        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

@@ -631,6 +631,7 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
                 f_dict["control"] = f_dict.get("control") or c_id
                 f_dict["status"] = "Non-Compliant" if f_dict.get("severity") != "INFO" else "Informational"
                 f_dict["display_status"] = "Open"
+                f_dict["source_files"] = fname
                 all_findings.append(f_dict)
                 resolved_ctrls.add(c_id)
 

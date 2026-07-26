@@ -5,10 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AICyberAuditBox - Local Compliance Intelligence</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
-    <link rel="stylesheet" href="/static/style.css?v=20260726_v170000">
+    <link rel="stylesheet" href="/static/style.css?v=20260726_v360000">
     <!-- Load custom fonts from web-safe fallback, no internet required -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap');
+        .scope-mode-btn {
+            background: transparent;
+            color: var(--text-muted);
+            border: none;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+        .scope-mode-btn.active-scope-mode {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+            color: #ffffff !important;
+            font-weight: 700 !important;
+            box-shadow: 0 3px 10px rgba(37, 99, 235, 0.4);
+        }
     </style>
 </head>
 <body class="dark-theme">
@@ -198,12 +211,48 @@
                         <label>Client Email</label>
                         <input type="text" id="brand-email" value="ashish.jaiswal1@motorolasolutions.com">
                     </div>
+                </div><!-- /branding-fields collapse-content -->
+            </div><!-- /sidebar-branding-setup sidebar-section -->
+
             <!-- ADMIN TOOLS SECTION -->
             <div class="sidebar-section" id="sidebar-admin-tools" style="margin-bottom: 16px; display: none;">
                 <div style="font-size: 0.72rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">ADMINISTRATIVE LOGS</div>
                 <button class="btn-secondary" onclick="loadAdminAuditLogs()" style="width: 100%; padding: 10px; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer; border-radius: 10px;">
                     <span>📜</span> <span>Admin Warning & Override Logs</span>
                 </button>
+            </div>
+
+            <!-- AUDITEE SUBMISSIONS (visible only to auditor role) -->
+            <div class="sidebar-section collapsible" id="sidebar-auditee-submissions" style="margin-bottom: 16px; display: none;">
+                <button class="collapse-header" onclick="toggleCollapsible('auditee-submissions-body'); loadSidebarAuditeeFiles();" style="background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.35); border-radius: 10px; padding: 10px 12px; color: var(--text-main); font-size: 0.82rem; width: 100%; display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
+                    <span style="display: flex; align-items: center; gap: 8px;">
+                        📥 <span>Auditee Submissions</span>
+                        <span id="auditee-submission-badge" class="badge-pill" style="font-size: 0.68rem; padding: 1px 7px; background: rgba(99,102,241,0.25); color: #818cf8; border-color: rgba(99,102,241,0.4);">0</span>
+                    </span>
+                    <span class="arrow">›</span>
+                </button>
+                <div id="auditee-submissions-body" class="collapse-content" style="display: none; padding-top: 8px;">
+                    <!-- Session Selector -->
+                    <div style="margin-bottom: 8px;">
+                        <select id="sidebar-auditee-session-select" onchange="loadSidebarAuditeeFiles()" style="width: 100%; padding: 6px 8px; font-size: 0.77rem; border-radius: 7px;">
+                            <option value="">— Select auditee session —</option>
+                        </select>
+                    </div>
+
+                    <!-- File list with checkboxes -->
+                    <div id="sidebar-auditee-files-list" style="max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; margin-bottom: 8px;">
+                        <div style="font-size: 0.74rem; color: var(--text-muted); text-align: center; padding: 8px;">Select a session above</div>
+                    </div>
+
+                    <!-- Action buttons -->
+                    <div style="display: flex; gap: 6px;">
+                        <button class="btn-secondary" onclick="selectAllSidebarAuditeeDocs(true)" style="flex: 1; padding: 5px 6px; font-size: 0.71rem; font-weight: 600;">✓ All</button>
+                        <button class="btn-secondary" onclick="selectAllSidebarAuditeeDocs(false)" style="flex: 1; padding: 5px 6px; font-size: 0.71rem; font-weight: 600;">✗ None</button>
+                        <button onclick="addAuditeeFilesToWorkspace()" style="flex: 2; padding: 5px 8px; font-size: 0.73rem; font-weight: 800; background: linear-gradient(135deg, #6366f1, #4f46e5); color: #fff; border: none; border-radius: 7px; cursor: pointer;">
+                            ➕ Add to Workspace
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <button class="logout-btn" onclick="logout()" style="margin-top: 16px; width: 100%; border-radius: 10px; padding: 10px; color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.08); font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
@@ -338,27 +387,52 @@
                                 <div style="margin-bottom: 10px;">
                                     <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: block; margin-bottom: 3px;">Target Framework</label>
                                     <select id="framework-select" onchange="loadFrameworkControls()" style="width: 100%; padding: 7px 10px; font-size: 0.82rem; border-radius: 8px;">
-                                        <option value="All Standards">All Standards (ISO 27001 + VAPT Framework)</option>
-                                        <option value="ISO 27001">ISO 27001:2022 Controls (93 Controls)</option>
-                                        <option value="VAPT">VAPT Framework Controls (15 Controls)</option>
-                                        <option value="SOC 2">SOC 2 Type II Controls</option>
-                                        <option value="PCI-DSS">PCI-DSS Security Controls</option>
+                                        <option value="ISO 27001">ISO 27001:2022 (93 controls)</option>
+                                        <option value="VAPT">VAPT — Vulnerability Assessment &amp; Pen Testing (15 controls)</option>
+                                        <option value="DPDP">DPDP / GDPR (15 controls)</option>
+                                        <option value="SOC2">SOC 2 (32 controls)</option>
+                                        <option value="BCMS">BCMS (Business Continuity) (4 controls)</option>
+                                        <option value="XBOM">X-BOM (Software Bill of Materials) (11 controls)</option>
+                                        <option value="All Standards">All Standards (108 controls: ISO 27001 + VAPT)</option>
                                     </select>
                                 </div>
 
-                                <!-- Scope Detection Bar -->
-                                <div style="margin-bottom: 10px;">
-                                    <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); display: block; margin-bottom: 4px;">Scope Detection</label>
-                                    <div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center;">
-                                        <button type="button" class="btn-secondary active" id="btn-ai-scoping" onclick="setScopingMode('AI Audit Scoping')" style="padding: 5px 10px; font-size: 0.75rem;">⚙️ AI Scoping</button>
-                                        <button type="button" class="btn-secondary" id="btn-checklist-scoping" onclick="setScopingMode('Audit Scope Checklist')" style="padding: 5px 10px; font-size: 0.75rem;">📋 Checklist Scoping</button>
-                                        <button type="button" class="btn-secondary" id="btn-excel-scoping" onclick="document.getElementById('scoping-excel-file').click()" style="padding: 5px 10px; font-size: 0.75rem;">📊 Excel Scoping</button>
-                                        <input type="file" id="scoping-excel-file" accept=".xlsx,.xls,.csv" style="display: none;" onchange="handleScopingExcelUpload(event)">
-                                        
-                                        <button type="button" class="btn-primary" onclick="openScopeSelectorModal()" style="padding: 5px 12px; font-size: 0.75rem; background: linear-gradient(135deg, #2563eb, #1d4ed8); margin-left: auto; font-weight: 700;">
-                                            <span id="sidebar-scope-count-badge">Edit Scope 108/108 Controls</span>
+                                <!-- Scope Detection Bar (3 Professional Segmented Options) -->
+                                <div style="margin-bottom: 12px;">
+                                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                                        <label style="font-size: 0.76rem; font-weight: 700; color: var(--text-main); margin: 0;">Scope Detection Method</label>
+                                        <button type="button" class="btn-primary" onclick="openScopeSelectorModal()" style="padding: 4px 10px; font-size: 0.72rem; background: linear-gradient(135deg, #2563eb, #1d4ed8); font-weight: 700;">
+                                            <span id="sidebar-scope-count-badge">Edit Scope (108/108)</span>
                                         </button>
                                     </div>
+
+                                    <!-- Segmented 3-Option Switch -->
+                                    <div style="display: flex; gap: 4px; background: rgba(15, 23, 42, 0.4); border: 1px solid var(--border-color); padding: 4px; border-radius: 10px; margin-bottom: 6px;">
+                                        <button type="button" class="scope-mode-btn active-scope-mode" id="btn-ai-scoping" onclick="setScopingMode('AI')" style="flex: 1; padding: 7px 6px; font-size: 0.75rem; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                                            <span>🤖</span> <span>AI Auto-Scoping</span>
+                                        </button>
+                                        <button type="button" class="scope-mode-btn" id="btn-excel-scoping" onclick="setScopingMode('EXCEL')" style="flex: 1; padding: 7px 6px; font-size: 0.75rem; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                                            <span>📊</span> <span>Excel Upload</span>
+                                        </button>
+                                        <button type="button" class="scope-mode-btn" id="btn-checklist-scoping" onclick="setScopingMode('MANUAL')" style="flex: 1; padding: 7px 6px; font-size: 0.75rem; border-radius: 8px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                                            <span>📋</span> <span>Manual Scope</span>
+                                        </button>
+                                    </div>
+
+                                    <!-- Live Context Status Note -->
+                                    <div id="scoping-mode-status-note" style="font-size: 0.72rem; color: var(--text-muted); padding: 0 2px;">
+                                        <span style="color:#10b981;font-weight:700;">🟢 Active:</span> <b>AI Auto-Scoping</b> — Automatically detecting applicable controls from evidence files.
+                                    </div>
+                                </div>
+
+                                <!-- Dedicated Excel Upload Dropzone Box (shown when Excel Upload button is selected) -->
+                                <div id="scoping-excel-dropzone" style="display: none; border: 2px dashed rgba(99, 102, 241, 0.4); border-radius: 12px; padding: 14px 10px; text-align: center; background: rgba(99, 102, 241, 0.05); margin-bottom: 12px; cursor: pointer;" onclick="document.getElementById('scoping-excel-file').click()">
+                                    <span style="font-size: 1.6rem; display: block; margin-bottom: 4px;">📊</span>
+                                    <h4 style="margin: 0; font-size: 0.84rem; font-weight: 700; color: #818cf8;">Upload Excel Scoping Matrix (.xlsx / .xls / .csv)</h4>
+                                    <p style="margin: 3px 0 8px 0; font-size: 0.72rem; color: var(--text-muted);">Drop client Excel scope checklist to auto-populate applicable controls</p>
+                                    <button type="button" class="btn-secondary" style="padding: 5px 14px; font-size: 0.74rem; font-weight: 700; background: rgba(99,102,241,0.2); color: #818cf8; border-color: rgba(99,102,241,0.4);">+ Browse Excel File</button>
+                                    <span id="scoping-file-name" class="badge-pill" style="display: none; margin-top: 6px; font-size: 0.72rem; color: #10b981; border-color: rgba(16,185,129,0.3);"></span>
+                                    <input type="file" id="scoping-excel-file" accept=".xlsx,.xls,.csv" style="display: none;" onchange="handleScopingExcelUpload(event)">
                                 </div>
 
                                 <!-- Target Controls to Audit Accordions -->
@@ -433,10 +507,10 @@
                     <div class="audit-records-filters" style="margin-top: 12px; margin-bottom: 16px;">
                         <div class="form-group inline" style="display: flex; align-items: center; gap: 12px;">
                             <label style="white-space: nowrap; font-weight: 600; color: var(--text-muted);">Workflow Status Filter:</label>
-                            <select id="status-filter" onchange="renderFindingsList()" style="min-width: 220px;">
-                                <option value="All">All Records (Compliant & Gaps)</option>
+                            <select id="status-filter" onchange="renderFindingsList()" style="min-width: 240px;">
+                                <option value="All">All Audit Records (Compliant &amp; Gaps)</option>
+                                <option value="Non-Compliant">🔴 Non-Compliant Gaps Only (P1-P4)</option>
                                 <option value="Compliant">🟢 Compliant Controls Only</option>
-                                <option value="Non-Compliant">🔴 Non-Compliant Gaps Only</option>
                                 <option value="Open">Unreviewed / Open Gaps</option>
                                 <option value="Accepted">Accepted Only</option>
                                 <option value="Rejected">Rejected Only</option>
@@ -1010,47 +1084,14 @@
             </div>
         </div>
     </div>
-
-    <!-- ── UNREVIEWED CONTROLS WARNING MODAL ── -->
-    <div id="unreviewed-warning-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 9999; align-items: center; justify-content: center;">
-        <div style="background: var(--bg-card); border: 1px solid rgba(239,68,68,0.5); border-radius: 16px; padding: 28px 32px; max-width: 540px; width: 92%; box-shadow: 0 20px 60px rgba(0,0,0,0.6);">
-            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                <span style="font-size: 2rem;">⚠️</span>
-                <div>
-                    <h3 style="margin:0; color:#ef4444; font-size: 1.1rem; font-weight: 800;">Unreviewed Audit Findings Detected</h3>
-                    <p style="margin:4px 0 0 0; font-size: 0.82rem; color: var(--text-muted);">
-                        <span id="unreviewed-count-text" style="font-weight:800; color:#f59e0b;">0</span> control(s) have not been Accepted or Rejected by the auditor.
-                    </p>
-                </div>
-            </div>
-
-            <div style="background: rgba(239,68,68,0.07); border: 1px solid rgba(239,68,68,0.2); border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; max-height: 180px; overflow-y: auto;">
-                <p style="font-size: 0.78rem; font-weight: 700; color: #fbbf24; margin: 0 0 8px 0;">📋 Unreviewed Controls:</p>
-                <ul id="unreviewed-list-container" style="margin: 0; padding-left: 14px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.8;"></ul>
-            </div>
-
-            <div style="background: rgba(245,158,11,0.08); border-left: 3px solid #f59e0b; border-radius: 4px; padding: 10px 14px; margin-bottom: 20px;">
-                <p style="margin: 0; font-size: 0.8rem; color: #fbbf24; font-weight: 600;">⚠️ Admin Warning</p>
-                <p style="margin: 4px 0 0 0; font-size: 0.77rem; color: var(--text-muted);">
-                    If you proceed with force-save, this action will be <b style="color:#ef4444;">permanently logged</b> in the 
-                    <b>Admin Audit Logs</b> as a forced override. Go back and review each finding using 
-                    <b>✓ Accept</b> or <b>✕ Reject</b> buttons before committing.
-                </p>
-            </div>
-
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                <button class="btn-secondary" onclick="closeUnreviewedWarningModal()" style="font-weight:600;">← Go Back & Review</button>
-                <button onclick="commitSessionToShaktiDB(true)" style="background: linear-gradient(135deg,#ef4444,#b91c1c); color:#fff; border:none; border-radius:8px; padding: 9px 18px; font-weight:800; cursor:pointer; font-size:0.83rem;">
-                    🚨 Force Save (Log Override)
-                </button>
             </div>
         </div>
     </div>
 
     <!-- Modular UI Script Loading -->
-    <script src="/static/js/config.js?v=20260726_v170000"></script>
-    <script src="/static/js/sidebar.js?v=20260726_v170000"></script>
-    <script src="/static/js/admin.js?v=20260726_v170000"></script>
-    <script src="/static/app.js?v=20260726_v170000"></script>
+    <script src="/static/js/config.js?v=20260726_v380000"></script>
+    <script src="/static/js/sidebar.js?v=20260726_v380000"></script>
+    <script src="/static/js/admin.js?v=20260726_v380000"></script>
+    <script src="/static/app.js?v=20260726_v380000"></script>
 </body>
 </html>

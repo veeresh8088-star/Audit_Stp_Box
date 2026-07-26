@@ -283,6 +283,7 @@ async function initializeDashboard(user) {
     setDisplay("sidebar-checklist-setup", (isAdmin || isAuditor) ? "block" : "none");
     setDisplay("sidebar-action-setup", (isAdmin || isAuditor) ? "block" : "none");
     setDisplay("sidebar-admin-tools", isAdmin ? "block" : "none");
+    setDisplay("sidebar-auditee-submissions", (isAdmin || isAuditor) ? "block" : "none");
     
     // Setup Tabs Bar
     setupTabs(user.role);
@@ -321,9 +322,9 @@ function setupTabs(role) {
         tabs = [
             { id: "tab-scan-workspace", label: "Scan Workspace" },
             { id: "tab-audit-records", label: "Audit Records & Findings" },
-            { id: "tab-manage-controls", label: "✨ Manage & Add Controls" },
             { id: "tab-audit-report", label: "PDF Report Exporter" },
             { id: "tab-auditee-docs", label: "Auditee Submissions" },
+            { id: "tab-manage-controls", label: "✨ Manage & Add Controls" },
             { id: "tab-admin-logs", label: "📜 System & Auditor Logs" }
         ];
     } else {
@@ -331,9 +332,9 @@ function setupTabs(role) {
         tabs = [
             { id: "tab-scan-workspace", label: "Scan Workspace" },
             { id: "tab-audit-records", label: "Audit Records & Findings" },
-            { id: "tab-manage-controls", label: "✨ Manage & Add Controls" },
             { id: "tab-audit-report", label: "PDF Report Exporter" },
-            { id: "tab-auditee-docs", label: "Auditee Submissions" }
+            { id: "tab-auditee-docs", label: "Auditee Submissions" },
+            { id: "tab-manage-controls", label: "✨ Manage & Add Controls" }
         ];
     }
     
@@ -522,9 +523,14 @@ async function loadOrCreateSession(user) {
         const data = await response.json();
         
         if (data.success && data.sessions.length > 0) {
-            // Re-use most recent draft session
-            activeSessionId = data.sessions[0].session_id;
-            activeSessionTitle = data.sessions[0].session_title;
+            // Prefer session that has findings (Pending Review / Reviewed & Finalized)
+            // over a blank newly created session with no findings
+            const sessionWithFindings = data.sessions.find(s =>
+                s.status === "Pending Review" || s.status === "Reviewed & Finalized"
+            );
+            const chosen = sessionWithFindings || data.sessions[0];
+            activeSessionId = chosen.session_id;
+            activeSessionTitle = chosen.session_title;
         } else {
             // Create fresh session
             const body = new FormData();
@@ -928,25 +934,32 @@ function stopAuditAnalysis() {
 // ── SIDEBAR FRAMEWORK CHECKLIST & SEGMENTED CONTROLS ──
 
 function setScopingMode(mode) {
-    const aiBtn = document.getElementById("btn-scoping-ai");
-    const chkBtn = document.getElementById("btn-scoping-checklist");
-    const radioAi = document.getElementById("radio-scoping-ai");
-    const radioChk = document.getElementById("radio-scoping-chk");
-    const checklistBox = document.getElementById("sidebar-checklist-setup");
-    const fileContainer = document.getElementById("scoping-file-container");
+    const aiBtn = document.getElementById("btn-ai-scoping");
+    const chkBtn = document.getElementById("btn-checklist-scoping");
+    const excelBtn = document.getElementById("btn-excel-scoping");
+    
+    const excelDropzone = document.getElementById("scoping-excel-dropzone");
+    const statusNote = document.getElementById("scoping-mode-status-note");
+    const checklistBox = document.getElementById("target-controls-container-box");
 
-    if (mode.includes("AI")) {
-        if (aiBtn) aiBtn.classList.add("active");
-        if (chkBtn) chkBtn.classList.remove("active");
-        if (radioAi) radioAi.checked = true;
+    // Reset active class on all buttons
+    [aiBtn, chkBtn, excelBtn].forEach(b => { if (b) b.classList.remove("active-scope-mode"); });
+
+    if (mode === "AI" || mode.includes("AI")) {
+        if (aiBtn) aiBtn.classList.add("active-scope-mode");
+        if (excelDropzone) excelDropzone.style.display = "none";
         if (checklistBox) checklistBox.style.display = "none";
-        if (fileContainer) fileContainer.style.display = "none";
-    } else {
-        if (chkBtn) chkBtn.classList.add("active");
-        if (aiBtn) aiBtn.classList.remove("active");
-        if (radioChk) radioChk.checked = true;
+        if (statusNote) statusNote.innerHTML = `<span style="color:#10b981;font-weight:700;">🟢 Active:</span> <b>AI Auto-Scoping</b> — Automatically detecting applicable controls from evidence files.`;
+    } else if (mode === "EXCEL" || mode.includes("Excel")) {
+        if (excelBtn) excelBtn.classList.add("active-scope-mode");
+        if (excelDropzone) excelDropzone.style.display = "block";
         if (checklistBox) checklistBox.style.display = "block";
-        if (fileContainer) fileContainer.style.display = "block";
+        if (statusNote) statusNote.innerHTML = `<span style="color:#10b981;font-weight:700;">🟢 Active:</span> <b>Excel Upload Scope</b> — Drag & drop or browse an Excel scoping matrix (.xlsx) below.`;
+    } else {
+        if (chkBtn) chkBtn.classList.add("active-scope-mode");
+        if (excelDropzone) excelDropzone.style.display = "none";
+        if (checklistBox) checklistBox.style.display = "block";
+        if (statusNote) statusNote.innerHTML = `<span style="color:#10b981;font-weight:700;">🟢 Active:</span> <b>Manual Checklist Scope</b> — Select or unselect specific controls from accordions below.`;
     }
 }
 
@@ -989,13 +1002,26 @@ async function loadFrameworkControls() {
         }
         
         container.innerHTML = "";
-        const selectedStd = select ? select.value : "All Standards";
+        const selectedStd = select ? select.value : "ISO 27001";
         
         const filtered = controlsToRender.filter(c => {
+            const cat = (c.category || "").toUpperCase();
+            const useCase = (c.use_case || "").toUpperCase();
+            const isVapt = cat.includes("VAPT") || useCase.includes("VAPT") || useCase.startsWith("VAPT-");
+            const isDpdp = cat.includes("DPDP") || cat.includes("GDPR") || useCase.includes("DPDP") || useCase.includes("GDPR");
+            const isSoc2 = cat.includes("SOC") || useCase.includes("SOC");
+            const isBcms = cat.includes("BCMS") || cat.includes("BUSINESS CONTINUITY") || useCase.includes("BCMS");
+            const isXbom = cat.includes("X-BOM") || cat.includes("SBOM") || useCase.includes("X-BOM") || useCase.includes("XBOM");
+            const isIso = !isVapt && !isDpdp && !isSoc2 && !isBcms && !isXbom;
+
             if (selectedStd === "All Standards") return true;
-            const isVapt = (c.category || "").toUpperCase().includes("VAPT") || (c.use_case || "").toUpperCase().includes("VAPT");
-            if (selectedStd === "ISO 27001") return !isVapt;
-            return isVapt;
+            if (selectedStd === "ISO 27001") return isIso;
+            if (selectedStd === "VAPT") return isVapt;
+            if (selectedStd === "DPDP") return isDpdp;
+            if (selectedStd === "SOC2") return isSoc2;
+            if (selectedStd === "BCMS") return isBcms;
+            if (selectedStd === "XBOM") return isXbom;
+            return true;
         });
 
         // Group into Clause Categories matching Streamlit UI
@@ -1336,6 +1362,7 @@ async function uploadFiles(files) {
         
         showToastBanner(`✅ ${files.length} Evidence File(s) successfully uploaded and indexed into RAG memory!`);
         await loadEvidenceFileList();
+        setTimeout(loadEvidenceFileList, 600);
     } catch (err) {
         alert(`❌ Upload Error: ${err.message}`);
         await loadEvidenceFileList();
@@ -1638,19 +1665,24 @@ async function loadFindings() {
         const bannerText = document.getElementById("shakti-banner-text");
         if (banner) {
             banner.style.display = "flex";
-            if (data.success && data.findings && data.findings.length > 0) {
-                findingsList = data.findings;
+            if (data.success && data.findings) {
+                findingsList = data.findings.filter(f => !isFindingInformational(f));
+                const statusFilterEl = document.getElementById("status-filter");
+                if (statusFilterEl && statusFilterEl.value === "Compliant") {
+                    const hasCompliant = findingsList.some(f => isFindingCompliant(f));
+                    if (!hasCompliant) statusFilterEl.value = "All";
+                }
                 renderFindingsList();
                 calculateSeverityStats();
 
                 if (data.session_title && data.session_title.includes("Finalized")) {
                     banner.style.background = "rgba(16, 185, 129, 0.12)";
                     banner.style.borderColor = "rgba(52, 211, 153, 0.35)";
-                    if (bannerText) bannerText.innerHTML = `✅ <b>Committed to Shakthi DB:</b> ${data.findings.length} audit record(s) finalized and locked.`;
+                    if (bannerText) bannerText.innerHTML = `✅ <b>Committed to Shakthi DB:</b> ${findingsList.length} audit record(s) finalized and locked.`;
                 } else {
                     banner.style.background = "rgba(245, 158, 11, 0.12)";
                     banner.style.borderColor = "rgba(245, 158, 11, 0.35)";
-                    if (bannerText) bannerText.innerHTML = `⚠️ <b>Notice:</b> ${data.findings.length} finding(s) loaded. Review records below and click "Save to Shakthi DB" to commit.`;
+                    if (bannerText) bannerText.innerHTML = `⚠️ <b>Notice:</b> ${findingsList.length} finding(s) loaded. Review records below and click "Save to Shakthi DB" to commit.`;
                 }
             } else {
                 banner.style.background = "rgba(245, 158, 11, 0.12)";
@@ -1665,7 +1697,10 @@ async function loadFindings() {
 }
 
 async function commitSessionToShaktiDB(force = false) {
-    if (!activeSessionId) return;
+    if (!activeSessionId) {
+        alert("No active session. Please select or start an audit session first.");
+        return;
+    }
     try {
         const auditorName = currentUser ? currentUser.username : "Lead Auditor";
         const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}?force=${force}&auditor_user=${encodeURIComponent(auditorName)}`, {
@@ -1681,14 +1716,20 @@ async function commitSessionToShaktiDB(force = false) {
 
             if (countEl) countEl.innerText = data.unreviewed_count || 0;
             if (listEl && data.unreviewed_controls) {
-                listEl.innerHTML = data.unreviewed_controls.map(ctrl => `<li>• ${escapeHtml(ctrl)}</li>`).join("");
+                // Show max 20 items to prevent browser overflow with large scans
+                const MAX_SHOW = 20;
+                const ctrls = data.unreviewed_controls || [];
+                const shown = ctrls.slice(0, MAX_SHOW);
+                const remaining = ctrls.length - shown.length;
+                listEl.innerHTML = shown.map(ctrl => `<li>• ${escapeHtml(ctrl)}</li>`).join("") +
+                    (remaining > 0 ? `<li style="color:#94a3b8; font-style: italic;">... and ${remaining} more unreviewed controls</li>` : "");
             }
             if (modalEl) modalEl.style.display = "flex";
             return;
         }
 
         if (data.success) {
-            showToast(`✅ ${data.message}`, "info");
+            showToast(data.message || "Session committed to Shakthi DB!", "info");
             closeUnreviewedWarningModal();
             await loadFindings();
             
@@ -1774,24 +1815,32 @@ async function renderAuditReportPreview() {
         const brandClient = document.getElementById("brand-client")?.value || "Motorola Solutions";
         const brandEmail = document.getElementById("brand-email")?.value || "client@domain.com";
 
+        // Standards Rule: Exclude pure INFO items from Executive Audit Evaluation details table!
+        const reportFindings = findings.filter(f => !isFindingInformational(f));
         let compliantCount = 0;
         let nonCompliantCount = 0;
-        findings.forEach(f => {
-            if (isFindingCompliant(f)) compliantCount++;
-            else nonCompliantCount++;
+
+        reportFindings.forEach(f => {
+            if (isFindingCompliant(f)) {
+                compliantCount++;
+            } else {
+                nonCompliantCount++;
+            }
         });
 
-        const totalCount = findings.length || 1;
-        const scorePercent = Math.round((compliantCount / totalCount) * 100);
+        const totalCount = reportFindings.length;
+        const scorePercent = Math.round((compliantCount / (totalCount || 1)) * 100);
 
         let rowsHtml = "";
-        if (findings.length === 0) {
-            rowsHtml = `<tr><td colspan="5" style="text-align:center; padding:20px; color:#fbbf24; background: rgba(245, 158, 11, 0.08);">⚠️ <b>No findings saved to Shakthi DB yet.</b> Go to <b>Audit Records & Findings</b> tab, review your controls, and click <b>"Save to Shakthi DB"</b> to display them in this PDF report.</td></tr>`;
+        if (reportFindings.length === 0) {
+            rowsHtml = `<tr><td colspan="5" style="text-align:center; padding:20px; color:#fbbf24; background: rgba(245, 158, 11, 0.08);">⚠️ <b>No actionable findings saved to Shakthi DB yet.</b> Go to <b>Audit Records & Findings</b> tab, review your controls, and click <b>"Save to Shakthi DB"</b> to display them in this PDF report.</td></tr>`;
         } else {
-            findings.forEach(f => {
+            reportFindings.forEach(f => {
                 const isComp = isFindingCompliant(f);
+                const displayStatus = f.status || (isComp ? "Compliant" : "Non-Compliant");
                 const badgeColor = isComp ? "#10b981" : "#ef4444";
                 const badgeBg = isComp ? "rgba(16,185,129,0.15)" : "rgba(239,68,68,0.15)";
+
                 // Safe control name: never show "undefined" or "null"
                 const rawCtrlName = f.control_name;
                 const ctrlTitle = (rawCtrlName && rawCtrlName !== 'null' && rawCtrlName !== 'undefined')
@@ -1811,7 +1860,7 @@ async function renderAuditReportPreview() {
                         <td style="padding: 10px; font-weight:700; color:#60a5fa;">${f.control_id}</td>
                         <td style="padding: 10px; color:#e2e8f0; font-weight:600;">${ctrlTitle}</td>
                         <td style="padding: 10px;">
-                            <span style="padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight:700; color:${badgeColor}; background:${badgeBg};">${f.status}</span>
+                            <span style="padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight:700; color:${badgeColor}; background:${badgeBg};">${displayStatus}</span>
                             ${polSub}
                             ${evSub}
                         </td>
@@ -1874,31 +1923,43 @@ async function renderAuditReportPreview() {
 }
 
 function isFindingCompliant(f) {
-    const st = (f.status || "").toUpperCase();
-    const wf = (f.workflow_status || f.display_status || "").toUpperCase();
+    const st = (f.status || "").toUpperCase().trim();
+    const wf = (f.workflow_status || f.display_status || "").toUpperCase().trim();
 
-    if (st.includes("NON") || st.includes("NOT") || st.includes("GAP") || st.includes("FAIL") || st.includes("PARTIAL")) {
+    // MUST check NON-COMPLIANT / GAP / FAIL / NOT FIRST so NON-COMPLIANT is never matched as COMPLIANT!
+    if (st.includes("NON") || st.includes("NOT") || st.includes("GAP") || st.includes("FAIL") || st.includes("PARTIAL") || st.includes("UNSATISFIED")) {
         return false;
     }
-    if (st.includes("COMPLIANT") || st.includes("PASS") || st.includes("SATISFIED") || st === "ACCEPTED" || wf === "ACCEPTED") {
+    
+    if (st === "COMPLIANT" || st === "PASS" || st === "SATISFIED" || st === "ACCEPTED" || wf === "ACCEPTED") {
         return true;
     }
     return false;
 }
 
+function isFindingInformational(f) {
+    const sev = (f.severity || "").toUpperCase();
+    const st = (f.status || "").toUpperCase();
+    return sev.includes("INFO") || st.includes("INFO");
+}
+
 function calculateSeverityStats() {
-    let p1 = 0, p2 = 0, p3 = 0, p4 = 0;
+    let p1 = 0, p2 = 0, p3 = 0, p4 = 0, infoCount = 0;
     let compliant = 0, nonCompliant = 0;
     findingsList.forEach(f => {
         const sev = (f.severity || "").toLowerCase();
+        const isInfo = isFindingInformational(f);
+
         if (sev.includes("p1") || sev.includes("critical")) p1++;
         else if (sev.includes("p2") || sev.includes("high")) p2++;
         else if (sev.includes("p3") || sev.includes("medium")) p3++;
         else if (sev.includes("p4") || sev.includes("low")) p4++;
+        else if (isInfo) infoCount++;
 
         if (isFindingCompliant(f)) {
             compliant++;
-        } else {
+        } else if (!isInfo) {
+            // Standards Rule: ONLY count actionable P1-P4 vulnerabilities as Non-Compliant gaps!
             nonCompliant++;
         }
     });
@@ -1924,17 +1985,46 @@ function toggleComplianceFilter(statusType) {
     }
 }
 
+function matchesSeverityFilter(fSeverity, activeFilter) {
+    if (!activeFilter) return true;
+    const sev = (fSeverity || "").toLowerCase();
+    const filter = activeFilter.toLowerCase();
+
+    if (filter.includes("p1") || filter.includes("critical")) {
+        return sev.includes("p1") || sev.includes("critical");
+    }
+    if (filter.includes("p2") || filter.includes("high")) {
+        return sev.includes("p2") || sev.includes("high");
+    }
+    if (filter.includes("p3") || filter.includes("medium")) {
+        return sev.includes("p3") || sev.includes("medium");
+    }
+    if (filter.includes("p4") || filter.includes("low")) {
+        return sev.includes("p4") || sev.includes("low");
+    }
+    if (filter.includes("info")) {
+        return sev.includes("info");
+    }
+    return true;
+}
+
 function toggleSeverityFilter(sev) {
+    document.querySelectorAll(".kpi-box").forEach(b => b.style.outline = "none");
+
     if (activeSeverityFilter === sev) {
         activeSeverityFilter = ""; // Clear filter
-        document.querySelectorAll(".sev-card").forEach(c => c.classList.remove("active"));
     } else {
         activeSeverityFilter = sev;
-        document.querySelectorAll(".sev-card").forEach(c => c.classList.remove("active"));
-        if (sev === "P1 Critical") document.querySelector(".sev-card.p1")?.classList.add("active");
-        else if (sev === "P2 High") document.querySelector(".sev-card.p2")?.classList.add("active");
-        else if (sev === "P3 Medium") document.querySelector(".sev-card.p3")?.classList.add("active");
-        else if (sev === "P4 Low") document.querySelector(".sev-card.p4")?.classList.add("active");
+        let selector = "";
+        if (sev.includes("P1")) selector = ".p1-box";
+        else if (sev.includes("P2")) selector = ".p2-box";
+        else if (sev.includes("P3")) selector = ".p3-box";
+        else if (sev.includes("P4")) selector = ".p4-box";
+        
+        if (selector) {
+            const box = document.querySelector(selector);
+            if (box) box.style.outline = "2px solid #3b82f6";
+        }
     }
     renderFindingsList();
 }
@@ -1949,25 +2039,33 @@ function renderFindingsList() {
     
     const filtered = findingsList.filter(f => {
         const isCompliant = isFindingCompliant(f);
+        const isInfo = isFindingInformational(f);
 
         // Workflow status filter
         if (filterStatus === "Compliant" && !isCompliant) return false;
-        if (filterStatus === "Non-Compliant" && isCompliant) return false;
-        if (filterStatus === "Open" && (isCompliant || f.status === "Accepted" || f.status === "Rejected")) return false;
+        if (filterStatus === "Non-Compliant" && (isCompliant || isInfo)) return false;
+        if (filterStatus === "Info" && !isInfo) return false;
+        if (filterStatus === "Open" && (isCompliant || isInfo || f.status === "Accepted" || f.status === "Rejected")) return false;
         if (filterStatus === "Accepted" && f.status !== "Accepted") return false;
         if (filterStatus === "Rejected" && f.status !== "Rejected") return false;
         
-        // Severity level filter
-        if (activeSeverityFilter) {
-            const f_sev = (f.severity || "").toLowerCase();
-            const filter_sev = activeSeverityFilter.toLowerCase();
-            if (!f_sev.includes(filter_sev.slice(0,2))) return false;
+        // Severity level filter (P1, P2, P3, P4)
+        if (activeSeverityFilter && !matchesSeverityFilter(f.severity, activeSeverityFilter)) {
+            return false;
         }
         return true;
     });
     
     if (filtered.length === 0) {
-        container.innerHTML = `<div class="empty-state">No matching findings found in this filter range.</div>`;
+        const totalCount = findingsList ? findingsList.length : 0;
+        container.innerHTML = `
+            <div class="empty-state" style="padding: 24px; text-align: center;">
+                <div style="font-size: 0.92rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px;">⚠️ No matching findings found in "${filterStatus}" filter range</div>
+                <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px;">Total loaded findings in this audit session: <b>${totalCount}</b></div>
+                <button type="button" class="btn-primary" onclick="document.getElementById('status-filter').value='All'; activeSeverityFilter=''; renderFindingsList();" style="padding: 7px 16px; font-size: 0.78rem; font-weight: 700; background: linear-gradient(135deg, #2563eb, #1d4ed8); cursor: pointer;">
+                    🔄 Reset Filter &amp; View All ${totalCount} Findings
+                </button>
+            </div>`;
         return;
     }
     
@@ -1984,6 +2082,8 @@ function renderFindingsList() {
         let statusBadgeClass = "non-compliant";
         if (isFindingCompliant(f)) {
             statusBadgeClass = "compliant";
+        } else if (isFindingInformational(f)) {
+            statusBadgeClass = "informational";
         } else if ((f.status || "").toUpperCase().includes("PARTIAL")) {
             statusBadgeClass = "partial";
         } else {
@@ -2546,133 +2646,6 @@ async function exportFindingsDOCX() {
     }
 }
 
-async function renderAuditReportPreview() {
-    const container = document.getElementById("report-preview-container");
-    if (!container) return;
-
-    try {
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser ? currentUser.role : 'auditor'}`);
-        const data = await response.json();
-        const findings = (data.success && data.findings) ? data.findings : findingsList;
-
-        const brandFirm = document.getElementById("brand-firm")?.value || "TÜV SÜD South Asia Pvt. Ltd.";
-        const brandAuditor = document.getElementById("brand-auditor")?.value || "Mr. Subhash Rao & Mr. Mahaveer Rajannavar";
-        const brandReviewer = document.getElementById("brand-reviewer")?.value || "Ms. Prianka Singla";
-        const brandApprover = document.getElementById("brand-approver")?.value || "Mr. Atul Srivastava";
-        const brandClient = document.getElementById("brand-client")?.value || "Motorola Solutions";
-        const brandClientEmail = document.getElementById("brand-client-email")?.value || "ashish.jaiswal1@motorolasolutions.com";
-        const brandDocId = document.getElementById("brand-docid")?.value || (activeSessionId ? activeSessionId.slice(0, 8).toUpperCase() : "3153142723");
-
-        // Update metadata summary card elements if present
-        const sfFirm = document.getElementById("summary-brand-firm"); if (sfFirm) sfFirm.innerText = brandFirm;
-        const sfAuditor = document.getElementById("summary-brand-auditor"); if (sfAuditor) sfAuditor.innerText = brandAuditor;
-        const sfClient = document.getElementById("summary-brand-client"); if (sfClient) sfClient.innerText = brandClient;
-        const sfDocId = document.getElementById("summary-brand-docid"); if (sfDocId) sfDocId.innerText = brandDocId;
-
-        const compliantCount = findings.filter(f => isFindingCompliant(f)).length;
-        const totalCount = findings.length;
-        const scorePct = totalCount > 0 ? Math.round((compliantCount / totalCount) * 100) : 0;
-
-        let rowsHtml = "";
-        if (findings.length === 0) {
-            rowsHtml = `<tr><td colspan="5" style="text-align: center; color: #94a3b8; padding: 20px;">No findings recorded for this session yet. Run RAG scan to evaluate controls.</td></tr>`;
-        } else {
-            findings.forEach(f => {
-                const isComp = isFindingCompliant(f);
-                const statusBadge = isComp 
-                    ? `<span style="background: rgba(16,185,129,0.15); color: #10b981; padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; border: 1px solid rgba(16,185,129,0.3);">🟢 COMPLIANT</span>`
-                    : `<span style="background: rgba(239,68,68,0.15); color: #ef4444; padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 0.72rem; border: 1px solid rgba(239,68,68,0.3);">🔴 NON-COMPLIANT</span>`;
-
-                rowsHtml += `
-                    <tr style="border-bottom: 1px solid var(--border-color);">
-                        <td style="padding: 10px 12px; font-weight: 700; color: #2563eb; white-space: nowrap;">${f.control_id}</td>
-                        <td style="padding: 10px 12px; font-weight: 600; color: var(--text-main);">${f.control_name || f.control}</td>
-                        <td style="padding: 10px 12px;">${statusBadge}</td>
-                        <td style="padding: 10px 12px; color: var(--text-muted); font-weight: 600;">${f.severity || 'P3 Medium'}</td>
-                        <td style="padding: 10px 12px; color: var(--text-muted); font-size: 0.76rem; max-width: 320px; word-break: break-word;">${f.evidence_snippet ? `"${f.evidence_snippet.slice(0, 120)}..."` : (f.description || 'N/A')}</td>
-                    </tr>
-                `;
-            });
-        }
-
-        container.innerHTML = `
-            <div class="digital-report-canvas" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 16px; padding: 24px;">
-                
-                <!-- Report Header Block -->
-                <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid rgba(59, 130, 246, 0.4); padding-bottom: 16px; margin-bottom: 20px;">
-                    <div>
-                        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-                            <span style="font-size: 1.3rem;">📄</span>
-                            <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: var(--text-main); letter-spacing: 0.5px;">FINAL EXECUTIVE AUDIT EVALUATION REPORT</h3>
-                        </div>
-                        <p style="margin: 0; font-size: 0.76rem; color: #2563eb; font-weight: 600;">ISO 27001 / VAPT Framework Audit — Official Real-Time Compliance Record</p>
-                    </div>
-                    <div style="text-align: right; font-size: 0.74rem; color: var(--text-muted);">
-                        <div>Auditor Firm: <strong style="color: var(--text-main);">${brandFirm}</strong></div>
-                        <div>Document Reference ID: <strong style="color: #2563eb;">${brandDocId}</strong></div>
-                        <div>Generated Date: <strong style="color: var(--text-main);">${new Date().toLocaleDateString()}</strong></div>
-                    </div>
-                </div>
-
-                <!-- Report Metadata Summary Grid -->
-                <div class="digital-report-summary" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: rgba(30, 41, 59, 0.4); border: 1px solid var(--border-color); padding: 14px; border-radius: 12px; margin-bottom: 20px;">
-                    <div>
-                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Client Organization</span>
-                        <div style="font-size: 0.85rem; font-weight: 700; color: var(--text-main);">${brandClient}</div>
-                    </div>
-                    <div>
-                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Client Contact Email</span>
-                        <div style="font-size: 0.8rem; font-weight: 600; color: #2563eb;">${brandClientEmail}</div>
-                    </div>
-                    <div>
-                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Lead Auditor(s)</span>
-                        <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-main);">${brandAuditor}</div>
-                    </div>
-                    <div>
-                        <span style="font-size: 0.7rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Compliance Score</span>
-                        <div style="font-size: 1.05rem; font-weight: 800; color: ${scorePct >= 80 ? '#10b981' : (scorePct >= 50 ? '#facc15' : '#ef4444')};">${scorePct}% Compliance</div>
-                    </div>
-                </div>
-
-                <!-- Control Findings Breakdown Table -->
-                <div style="margin-bottom: 20px;">
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                        <h4 style="margin: 0; font-size: 0.88rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 6px;">
-                            <span>📊</span> <span>Audit Control Evaluation Details (${totalCount} controls evaluated)</span>
-                        </h4>
-                    </div>
-                    <div style="overflow-x: auto; border-radius: 10px; border: 1px solid var(--border-color);">
-                        <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem; text-align: left;">
-                            <thead>
-                                <tr style="background: rgba(30, 41, 59, 0.4); color: var(--text-muted); text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.5px;">
-                                    <th style="padding: 10px 12px;">Control ID</th>
-                                    <th style="padding: 10px 12px;">Control Name</th>
-                                    <th style="padding: 10px 12px;">Status</th>
-                                    <th style="padding: 10px 12px;">Severity</th>
-                                    <th style="padding: 10px 12px;">Evidence / Reason Snippet</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                ${rowsHtml}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Report Sign-Off Footer -->
-                <div style="display: flex; align-items: center; justify-content: space-between; padding-top: 14px; border-top: 1px solid var(--border-color); font-size: 0.74rem; color: var(--text-muted);">
-                    <div>Reviewed By: <strong style="color: var(--text-main);">${brandReviewer}</strong></div>
-                    <div>Approved By: <strong style="color: var(--text-main);">${brandApprover}</strong></div>
-                    <div>ShakthiDB Hash: <strong style="color: #10b981;">SECURE_COMMIT_VERIFIED</strong></div>
-                </div>
-
-            </div>
-        `;
-    } catch (err) {
-        container.innerHTML = `<div class="empty-state" style="color: var(--error);">Failed to load report preview: ${err.message}</div>`;
-    }
-}
-
 async function exportFindingsPDF() {
     try {
         await renderAuditReportPreview();
@@ -2734,19 +2707,24 @@ async function triggerDeleteAllRecords() {
 async function loadAuditeeSessionsList() {
     const select = document.getElementById("auditee-session-selector");
     if (!select) return;
-    select.innerHTML = `<option value="">Choose session...</option>`;
+    select.innerHTML = `<option value="">— Select Auditee Submission —</option>`;
     
     try {
-        const response = await fetch(`${API_BASE}/audit/sessions`);
+        const response = await fetch(`${API_BASE}/audit/auditee-sessions`);
         const data = await response.json();
         
-        if (data.success) {
+        if (data.success && data.sessions && data.sessions.length > 0) {
             data.sessions.forEach(s => {
                 const opt = document.createElement("option");
                 opt.value = s.session_id;
-                opt.innerText = `${s.session_title} (${s.session_id.slice(0,6)})`;
+                const auditeeName = s.auditee_username || "Auditee Account";
+                const dateStr = s.created_at ? new Date(s.created_at).toLocaleDateString() : "";
+                const fileStr = s.files_count > 0 ? ` (${s.files_count} file(s) submitted)` : "";
+                opt.innerText = `👤 ${auditeeName} — ${s.session_title || 'Audit Session'} (${dateStr})${fileStr}`;
                 select.appendChild(opt);
             });
+        } else {
+            select.innerHTML = `<option value="">— No Auditee Submissions Found —</option>`;
         }
     } catch (err) {
         console.error(err);
@@ -2760,7 +2738,7 @@ async function loadAuditeeEvidenceDocs() {
     
     const sessId = selector.value;
     if (!sessId) {
-        container.innerHTML = `<div class="empty-state">Select an auditee session above to inspect evidence documents.</div>`;
+        container.innerHTML = `<div class="empty-state">Select an auditee account above to inspect submitted evidence documents.</div>`;
         return;
     }
     
@@ -2772,7 +2750,7 @@ async function loadAuditeeEvidenceDocs() {
         
         const files = (data.success && data.files) ? data.files : [];
         if (files.length === 0) {
-            container.innerHTML = `<div class="empty-state">No uploaded evidence documents found for session ${sessId.slice(0, 8)}.</div>`;
+            container.innerHTML = `<div class="empty-state">No uploaded evidence documents found for this auditee session.</div>`;
             return;
         }
         
@@ -2809,6 +2787,144 @@ async function loadAuditeeEvidenceDocs() {
 function selectAllAuditeeDocs(checked) {
     const checkboxes = document.querySelectorAll(".auditee-doc-checkbox");
     checkboxes.forEach(cb => cb.checked = checked);
+}
+
+// ── SIDEBAR: AUDITEE SUBMISSION PANEL ───────────────────────────────────────
+
+async function loadSidebarAuditeeFiles() {
+    const sessionSelect = document.getElementById("sidebar-auditee-session-select");
+    const fileList = document.getElementById("sidebar-auditee-files-list");
+    if (!sessionSelect || !fileList) return;
+
+    // Refresh auditee sessions list
+    try {
+        const currentVal = sessionSelect.value;
+        const res = await fetch(`${API_BASE}/audit/auditee-sessions`);
+        const data = await res.json();
+        if (data.success && data.sessions && data.sessions.length > 0) {
+            sessionSelect.innerHTML = `<option value="">— Select Auditee Account —</option>`;
+            data.sessions.forEach(s => {
+                const opt = document.createElement("option");
+                opt.value = s.session_id;
+                const auditeeName = s.auditee_username || "Auditee Account";
+                const dateStr = s.created_at ? new Date(s.created_at).toLocaleDateString() : "";
+                const fileStr = s.files_count > 0 ? ` (${s.files_count} file(s))` : "";
+                opt.innerText = `👤 ${auditeeName} — ${s.session_title || 'Audit Session'} (${dateStr})${fileStr}`;
+                sessionSelect.appendChild(opt);
+            });
+            if (currentVal) sessionSelect.value = currentVal;
+        } else {
+            sessionSelect.innerHTML = `<option value="">— No Auditee Submissions Yet —</option>`;
+            fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">No auditee submissions found yet.</div>`;
+            return;
+        }
+    } catch(e) { console.error(e); }
+
+    const sessId = sessionSelect.value;
+    if (!sessId) {
+        fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">Select a session above</div>`;
+        return;
+    }
+
+    fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">Loading...</div>`;
+
+    try {
+        const res = await fetch(`${API_BASE}/audit/evidence?session_id=${sessId}`);
+        const data = await res.json();
+        const files = (data.success && data.files) ? data.files : [];
+
+        // Update badge
+        const badge = document.getElementById("auditee-submission-badge");
+        if (badge) badge.innerText = files.length;
+
+        if (files.length === 0) {
+            fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">No documents submitted for this session.</div>`;
+            return;
+        }
+
+        fileList.innerHTML = "";
+        files.forEach((f, idx) => {
+            const fn = f.filename;
+            const ext = fn.split('.').pop().toLowerCase();
+            const iconMap = { pdf: "📄", doc: "📝", docx: "📝", xls: "📊", xlsx: "📊", csv: "📊", xml: "🗂️", txt: "📃" };
+            const icon = iconMap[ext] || "📎";
+            const sizeStr = f.size_str || "";
+
+            const row = document.createElement("div");
+            row.style.cssText = "display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: rgba(30,41,59,0.5); border: 1px solid rgba(148,163,184,0.15); border-radius: 8px; cursor: pointer;";
+            row.innerHTML = `
+                <input type="checkbox" class="sidebar-auditee-doc-cb" value="${fn}" data-session="${sessId}"
+                    id="sauditee_${idx}" checked style="width:15px;height:15px;cursor:pointer;flex-shrink:0;">
+                <span style="font-size:1rem;flex-shrink:0;">${icon}</span>
+                <label for="sauditee_${idx}" style="flex:1;min-width:0;font-size:0.73rem;font-weight:600;color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" title="${fn}">${fn}</label>
+                <span style="font-size:0.65rem;color:var(--text-muted);white-space:nowrap;">${sizeStr}</span>
+            `;
+            fileList.appendChild(row);
+        });
+    } catch(e) {
+        fileList.innerHTML = `<div style="font-size:0.74rem;color:#ef4444;padding:8px;">Error: ${e.message}</div>`;
+    }
+}
+
+function selectAllSidebarAuditeeDocs(checked) {
+    document.querySelectorAll(".sidebar-auditee-doc-cb").forEach(cb => cb.checked = checked);
+}
+
+async function addAuditeeFilesToWorkspace() {
+    const checked = Array.from(document.querySelectorAll(".sidebar-auditee-doc-cb:checked"));
+    if (checked.length === 0) {
+        showToast("⚠️ Please select at least one file first.", "warn");
+        return;
+    }
+
+    const sessionSelect = document.getElementById("sidebar-auditee-session-select");
+    const sessId = sessionSelect ? sessionSelect.value : "";
+    if (sessId) {
+        // Switch active session to the selected auditee session
+        activeSessionId = sessId;
+        const badge = document.getElementById("active-session-badge");
+        if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
+    }
+
+    // Add each selected file to the main workspace uploaded-files-registry
+    const registry = document.getElementById("uploaded-files-registry");
+    let addedCount = 0;
+
+    checked.forEach(cb => {
+        const fn = cb.value;
+        const ext = fn.split('.').pop().toLowerCase();
+        const iconMap = { pdf: "PDF", doc: "DOC", docx: "DOC", xls: "XLS", xlsx: "XLS", csv: "XLS", xml: "XML", txt: "TXT" };
+        const classMap = { pdf: "file-type-pdf", doc: "file-type-doc", docx: "file-type-doc", xls: "file-type-xls", xlsx: "file-type-xls", csv: "file-type-xls", xml: "file-type-xml" };
+        const iconText = iconMap[ext] || "FILE";
+        const fileClass = classMap[ext] || "file-type-xml";
+
+        // Skip if already in registry
+        if (registry && document.querySelector(`[data-filename="${CSS.escape(fn)}"]`)) return;
+
+        const card = document.createElement("div");
+        card.className = "file-card";
+        card.setAttribute("data-filename", fn);
+        card.style.cssText = "display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(30,41,59,0.5); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; position: relative;";
+        card.innerHTML = `
+            <div class="file-icon-badge ${fileClass}" style="flex-shrink:0;">${iconText}</div>
+            <div style="flex:1;min-width:0;">
+                <div style="font-weight:700;font-size:0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${fn}">${fn}</div>
+                <div style="font-size:0.7rem;color:#818cf8;margin-top:2px;">📥 Auditee Submission</div>
+            </div>
+            <span class="badge-pill" style="color:#818cf8;border-color:rgba(99,102,241,0.3);font-size:0.65rem;white-space:nowrap;">SUBMITTED</span>
+        `;
+        if (registry) registry.appendChild(card);
+        addedCount++;
+    });
+
+    // Refresh the actual file list from server
+    await loadEvidenceFileList();
+
+    // Switch to Scan workspace tab
+    const scanTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Scan"));
+    if (scanTabBtn) switchTab("tab-scan-workspace", scanTabBtn);
+
+    showToast(`✅ ${addedCount} file(s) added from auditee submission to workspace!`, "info");
 }
 
 async function runAnalysisOnSelectedAuditeeDocs() {
@@ -3307,33 +3423,6 @@ async function exportFindingsPDF() {
         document.body.removeChild(link);
     } catch (err) {
         alert("Error exporting PDF report: " + err.message);
-    }
-}
-
-async function commitSessionToShaktiDB() {
-    if (!activeSessionId) {
-        alert("⚠️ No active audit session selected.");
-        return;
-    }
-    
-    try {
-        const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}`, {
-            method: "PUT"
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Failed to commit session to ShaktiDB.");
-        
-        // Hide unreviewed warning banner
-        const banner = document.getElementById("shakti-commit-banner");
-        if (banner) banner.style.display = "none";
-        
-        // Real-time update recent sessions list in sidebar
-        loadRecentSessionsList();
-        loadFindings();
-        
-        alert(`💾 Session ${activeSessionId.slice(0, 8)}... successfully committed to Shakthi DB!`);
-    } catch (err) {
-        alert(`Failed to commit session: ${err.message}`);
     }
 }
 

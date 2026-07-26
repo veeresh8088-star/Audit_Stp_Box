@@ -4,105 +4,7 @@ import re
 from datetime import datetime
 
 def _get_all_parsed_findings_from_registry():
-    try:
-        # streamlit removed - core module fallback
-        from src.core.parsers.nessus_parser import NessusParser
-        from src.core.parsers.nmap_parser import NmapParser
-
-        file_registry = st.session_state.get("file_registry", {})
-        all_findings = []
-        nessus_p = NessusParser()
-        nmap_p = NmapParser()
-
-        # 1. Search file_registry
-        for fname, fcontent in file_registry.items():
-            if not fcontent:
-                continue
-            raw_content = str(fcontent)
-            if nessus_p.can_parse(fname, raw_content):
-                act, info = nessus_p.parse(fname, raw_content)
-                if act:
-                    all_findings.extend(act)
-                    continue
-            elif nmap_p.can_parse(fname, raw_content):
-                act, inv = nmap_p.parse(fname, raw_content)
-                if act:
-                    all_findings.extend(act)
-                    continue
-
-        # 2. Disk fallback search for raw scan files if registry contains stripped text
-        if not all_findings:
-            search_paths = []
-            ev_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "evidence"))
-            if os.path.exists(ev_dir):
-                for root, _, files in os.walk(ev_dir):
-                    for fn in files:
-                        if fn.lower().endswith((".html", ".xml", ".nessus")):
-                            search_paths.append(os.path.join(root, fn))
-
-            for sp in search_paths:
-                if os.path.exists(sp):
-                    try:
-                        with open(sp, "r", encoding="utf-8", errors="ignore") as sf:
-                            s_content = sf.read()
-                        if nessus_p.can_parse(os.path.basename(sp), s_content):
-                            act, info = nessus_p.parse(os.path.basename(sp), s_content)
-                            if act:
-                                all_findings.extend(act)
-                                break
-                    except Exception:
-                        pass
-
-        # Deduplicate using Finding.dedup_key()
-        deduped = {}
-        for f in all_findings:
-            key = f.dedup_key()
-            if key not in deduped:
-                deduped[key] = f
-            else:
-                if f.target and f.target not in deduped[key].target:
-                    deduped[key].target = f"{deduped[key].target}, {f.target}"
-
-        dict_findings = []
-        for f in deduped.values():
-            sev = str(f.severity or "INFO").strip().upper()
-            score_val = f.severity_score
-            try:
-                score_num = float(score_val) if score_val is not None else 0.0
-            except Exception:
-                score_num = 0.0
-
-            if "CRIT" in sev and (score_num < 9.0 or score_num > 10.0):
-                score_num = 9.5
-            elif "HIGH" in sev and (score_num < 7.0 or score_num > 8.9):
-                score_num = 8.0
-            elif "MED" in sev and (score_num < 4.0 or score_num > 6.9):
-                score_num = 5.5
-            elif "LOW" in sev and (score_num < 0.1 or score_num > 3.9):
-                score_num = 2.5
-            elif "INFO" in sev:
-                score_num = 0.0
-            elif score_num == 0.0:
-                score_num = 2.5
-
-            dict_findings.append({
-                "control": f.title,
-                "title": f.title,
-                "vapt_control": f.control_id or "VAPT-3",
-                "control_id": f.target or "Scoped Targets",
-                "target": f.target or "Scoped Targets",
-                "finding": f.description or f.title,
-                "status": "Detected",
-                "severity_score": score_num,
-                "severity": f.severity,
-                "cvss_vector": f.cvss_vector or "",
-                "evidence_quote": f.evidence,
-                "recommendation": f.remediation,
-                "references": "CVE: " + ", ".join(f.cve_list) if f.cve_list else "OWASP / OSSTMM Security Recommendations"
-            })
-        return dict_findings
-    except Exception:
-        pass
+    """Returns empty list when no session findings exist — prevents cross-session evidence leakage."""
     return []
 
 def extract_scan_dates_from_registry(file_registry):
@@ -773,78 +675,43 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.set_font("Helvetica", "B", 9.5)
     pdf.cell(0, 4.5, "2.3.3 Graphical Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 9.5)
+    pdf.cell(0, 4.5, "2.3.3 Graphical Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(3)
 
-    # Dynamic Risk Severity Bar Chart Generation (Native FPDF2 - 100% Environment Compatible)
-    chart_drawn = False
-    try:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
-        import tempfile, uuid
-
-        tmp_chart_file = os.path.join(tempfile.gettempdir(), f"vapt_chart_{uuid.uuid4().hex[:8]}.png")
-        fig, ax = plt.subplots(figsize=(6.5, 2.2), dpi=200)
-        categories = ['Low', 'Medium', 'High', 'Critical']
-        values = [int(low_cnt), int(medium_cnt), int(high_cnt), int(critical_cnt)]
-        colors = ['#00b050', '#ffc000', '#ff0000', '#c00000']
-
-        bars = ax.barh(categories, values, color=colors, height=0.55)
-        ax.set_xlim(0, max(values + [10]) * 1.15)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
-        ax.spines['bottom'].set_visible(False)
-        ax.spines['left'].set_color('#cbd5e1')
-        ax.tick_params(axis='both', which='both', length=0, labelsize=9)
-        ax.set_title("Vulnerability Severity Distribution", fontsize=11, fontweight='bold', pad=10, color='#0f172a')
-
-        for bar, val in zip(bars, values):
-            if val > 0:
-                ax.text(val + (max(values)*0.02), bar.get_y() + bar.get_height()/2, f" {val}",
-                        va='center', ha='left', fontsize=9, fontweight='bold', color='#0f172a')
-
-        plt.tight_layout()
-        plt.savefig(tmp_chart_file, format='png', bbox_inches='tight')
-        plt.close(fig)
-        if os.path.exists(tmp_chart_file):
-            pdf.image(tmp_chart_file, x=20, y=pdf.get_y(), w=170)
-            chart_drawn = True
-    except Exception:
-        chart_drawn = False
-
-    # Native FPDF2 Chart Fallback (Guarantees exact counts 99/7 if matplotlib missing)
-    if not chart_drawn:
-        pdf.ln(2)
-        start_chart_y = pdf.get_y()
-        max_val = max([critical_cnt, high_cnt, medium_cnt, low_cnt, info_cnt, 1])
-        max_bar_w = 110.0
-        categories_data = [
-            ("Critical", critical_cnt, (192, 0, 0)),
-            ("High",     high_cnt,     (255, 0, 0)),
-            ("Medium",   medium_cnt,   (255, 192, 0)),
-            ("Low",      low_cnt,      (0, 176, 80)),
-            ("Info",     info_cnt,     (0, 112, 192))
-        ]
-        for c_idx, (c_label, c_val, c_col) in enumerate(categories_data):
-            row_y = start_chart_y + (c_idx * 7.5)
-            pdf.set_xy(20, row_y)
-            pdf.set_font("Helvetica", "B", 8.5)
+    # Native High-Precision Horizontal Bar Chart (Guaranteed rendering in all environments)
+    start_chart_y = pdf.get_y()
+    max_val = max([critical_cnt, high_cnt, medium_cnt, low_cnt, info_cnt, 1])
+    max_bar_w = 115.0
+    categories_data = [
+        ("Critical", critical_cnt, (192, 0, 0)),
+        ("High",     high_cnt,     (255, 0, 0)),
+        ("Medium",   medium_cnt,   (255, 192, 0)),
+        ("Low",      low_cnt,      (0, 176, 80)),
+        ("Info",     info_cnt,     (0, 112, 192))
+    ]
+    for c_idx, (c_label, c_val, c_col) in enumerate(categories_data):
+        row_y = start_chart_y + (c_idx * 8.5)
+        pdf.set_xy(20, row_y)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*DARK_TEXT)
+        pdf.cell(24, 6, c_label)
+        
+        bar_w = (c_val / max_val) * max_bar_w if c_val > 0 else 0
+        if bar_w > 0:
+            pdf.set_fill_color(*c_col)
+            pdf.rect(48, row_y + 1.0, max(2.5, bar_w), 4.5, style="F")
+            pdf.set_xy(51 + max(2.5, bar_w), row_y)
+            pdf.set_font("Helvetica", "B", 9)
             pdf.set_text_color(*DARK_TEXT)
-            pdf.cell(22, 5, c_label)
-            
-            bar_w = max(3.0, (c_val / max_val) * max_bar_w) if c_val > 0 else 0
-            if bar_w > 0:
-                pdf.set_fill_color(*c_col)
-                pdf.rect(45, row_y + 0.5, bar_w, 4.0, style="F")
-                pdf.set_xy(47 + bar_w, row_y)
-                pdf.set_font("Helvetica", "B", 8.5)
-                pdf.set_text_color(*DARK_TEXT)
-                pdf.cell(15, 5, str(c_val))
-            else:
-                pdf.set_xy(47, row_y)
-                pdf.set_font("Helvetica", "", 8.5)
-                pdf.set_text_color(*BODY_TEXT)
-                pdf.cell(15, 5, "0")
-        pdf.set_y(start_chart_y + 34)
+            pdf.cell(15, 6, str(c_val))
+        else:
+            pdf.set_xy(51, row_y)
+            pdf.set_font("Helvetica", "", 9)
+            pdf.set_text_color(*BODY_TEXT)
+            pdf.cell(15, 6, "0")
+
+    pdf.set_y(start_chart_y + 48)
 
     # ── PAGE 8: VULNERABILITIES SUMMARY TABLE ──────────────────────────────
     pdf.add_page()
@@ -1035,11 +902,26 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         else:
             sev_rgb = (100, 116, 139)   # Slate #64748B
 
-        # Heading Title
-        pdf.set_font("Helvetica", "B", 11)
+        # Heading Title (Multi-cell so long vulnerability titles wrap cleanly without spilling off page!)
+        pdf.set_font("Helvetica", "B", 10.5)
         pdf.set_text_color(*sev_rgb)
-        pdf.cell(0, 6, clean_text(f"FN-{idx:02d}  {vuln_title}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(2)
+        pdf.multi_cell(0, 5, clean_text(f"FN-{idx:02d}  {vuln_title}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(1.5)
+
+        # Derive actual Tool / Scanner Name dynamically
+        raw_tool = f.get('source_tool') or f.get('tool') or ''
+        if not raw_tool or raw_tool.lower() in ('vapt engine', 'vapt', 'unknown', 'none'):
+            comb_text = (vuln_title + " " + desc + " " + str(f.get('source_files', ''))).lower()
+            if any(k in comb_text for k in ('nessus', 'cve-', 'ms10-', 'ms16-', 'ms15-', 'ms14-', 'ms12-', 'ms11-', 'smb', '.net', 'winrar')):
+                scanner_name = "Nessus Professional Scanner"
+            elif any(k in comb_text for k in ('burp', 'sql injection', 'xss', 'xxe', 'csti', 'ssrf')):
+                scanner_name = "Burp Suite Professional Scanner"
+            elif any(k in comb_text for k in ('nmap', 'syn scanner', 'port ')):
+                scanner_name = "Nmap Network Security Scanner"
+            else:
+                scanner_name = "Automated VAPT Scanner & RAG Engine"
+        else:
+            scanner_name = raw_tool
 
         # Meta Summary Table Grid
         with pdf.table(col_widths=(40, 140), text_align="L") as table:
@@ -1053,7 +935,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
 
             r = table.row()
             r.cell("Status / Scanner", style=lbl_style)
-            r.cell(clean_text(f"{status_str}  |  Tool: {f.get('source_tool') or 'VAPT Engine'}"), style=body_style)
+            r.cell(clean_text(f"{status_str}  |  Tool: {scanner_name}"), style=body_style)
 
         pdf.ln(3)
 

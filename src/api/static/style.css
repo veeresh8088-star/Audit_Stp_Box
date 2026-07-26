@@ -1085,6 +1085,12 @@ button {
     border: 1px solid rgba(248, 113, 113, 0.35) !important;
 }
 
+.badge-status.informational {
+    background: rgba(96, 165, 250, 0.18) !important;
+    color: #60a5fa !important;
+    border: 1px solid rgba(96, 165, 250, 0.35) !important;
+}
+
 .badge-status.partial {
     background: rgba(245, 158, 11, 0.18) !important;
     color: #fbbf24 !important;
