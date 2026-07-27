@@ -99,6 +99,7 @@ class UpdateFindingRequest(BaseModel):
     reasoning: Optional[str] = None
     policy_present: Optional[str] = None
     evidence_present: Optional[str] = None
+    source_files: Optional[str] = None
     comment: Optional[str] = None
 
 class ChatSendRequest(BaseModel):
@@ -596,6 +597,7 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest):
             if req.reasoning: finding.reasoning = req.reasoning
             if req.policy_present: finding.policy_present = req.policy_present
             if req.evidence_present: finding.evidence_present = req.evidence_present
+            if req.source_files is not None: finding.source_files = req.source_files
             
             # Explicitly mark as reviewed and saved to Shakthi DB
             finding.is_saved_to_shakthi = True

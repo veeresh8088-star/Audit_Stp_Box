@@ -2326,6 +2326,12 @@ function openEditFindingModal(finding) {
 
     const descElem = document.getElementById("edit-finding-desc");
     if (descElem) descElem.value = finding.description || finding.gap_detected || "";
+    
+    const srcElem = document.getElementById("edit-finding-source-files");
+    if (srcElem) {
+        srcElem.value = finding.source_files || finding.evidence_source_file || "";
+    }
+    
     document.getElementById("edit-finding-snippet").value = finding.evidence_snippet || "";
     document.getElementById("edit-finding-recommendation").value = finding.recommendation || "";
     document.getElementById("edit-finding-reasoning").value = finding.description || finding.gap_detected || finding.reasoning || "";
@@ -2341,6 +2347,7 @@ async function handleEditFindingSubmit(e) {
     e.preventDefault();
     const id = document.getElementById("edit-finding-id").value;
     const descValue = document.getElementById("edit-finding-reasoning").value;
+    const srcFileValue = document.getElementById("edit-finding-source-files") ? document.getElementById("edit-finding-source-files").value : "";
     
     const body = {
         status: document.getElementById("edit-finding-status").value,
@@ -2348,6 +2355,7 @@ async function handleEditFindingSubmit(e) {
         evidence_present: document.getElementById("edit-finding-evidence").value,
         severity: document.getElementById("edit-finding-severity").value,
         description: descValue,
+        source_files: srcFileValue,
         evidence_snippet: document.getElementById("edit-finding-snippet").value,
         recommendation: document.getElementById("edit-finding-recommendation").value,
         reasoning: descValue
