@@ -61,13 +61,13 @@ def get_reranker(mode="quick"):
 
 # Configurable defaults for retrieval
 DEFAULT_TOP_K = {
-    "pdf": 12,
-    "docx": 12,
-    "txt": 12,
-    "xlsx": 8,
-    "csv": 8,
-    "pptx": 10,
-    "image": 8
+    "pdf": 6,
+    "docx": 6,
+    "txt": 6,
+    "xlsx": 6,
+    "csv": 6,
+    "pptx": 6,
+    "image": 6
 }
 
 def load_top_k_config():

@@ -41,7 +41,7 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
             "temperature": temperature,
             "stream": False,
             "n_predict": 1024,
-            "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>"]
+            "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>", "</audit_finding>", "</gap_analysis>", "</vapt_finding>", "</finding>", "```"]
         }
         if format == "json":
             payload["response_format"] = {"type": "json_object"}
@@ -85,7 +85,7 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
                 "temperature": temperature,
                 "stream": False,
                 "n_predict": 1024,
-                "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>"]
+                "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>", "</audit_finding>", "</gap_analysis>", "</vapt_finding>", "</finding>", "```"]
             }
             try:
                 lr = requests.post(l_url, json=l_payload, timeout=timeout)
