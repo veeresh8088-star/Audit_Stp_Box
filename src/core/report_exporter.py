@@ -153,7 +153,8 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         custom_logo = st.session_state.get("auditor_logo_path")
     except Exception:
         pass
-    logo_path = custom_logo if (custom_logo and os.path.exists(custom_logo)) else os.path.join(assets_dir, "tuv_sud_logo.png")
+    shield_logo_path = os.path.join(assets_dir, "shield_logo.png")
+    logo_path = custom_logo if (custom_logo and os.path.exists(custom_logo)) else (shield_logo_path if os.path.exists(shield_logo_path) else os.path.join(assets_dir, "tuv_sud_logo.png"))
     bg_path   = os.path.join(assets_dir, "cover_matrix_bg.png")
     chart_path= os.path.join(assets_dir, "chart_risk_severity.png")
     poc_cbc   = os.path.join(assets_dir, "poc_nmap_cbc.png")
@@ -196,7 +197,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
                 self.set_font("Helvetica", "", 9)
                 self.set_text_color(15, 23, 42)
                 self.cell(20, 8, clean_text(str(self.page_no())), align="L")
-                self.cell(160, 8, clean_text("Cyber Security Services | TÜV SÜD South Asia"), align="R")
+                self.cell(160, 8, clean_text("Cyber Security Services | XYZ Security Services Pvt. Ltd."), align="R")
 
     pdf = VAPTPDF()
     pdf.set_auto_page_break(auto=True, margin=18)
@@ -227,14 +228,14 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         pdf.set_font("Helvetica", "B", 10)
         pdf.set_text_color(*TUV_BLUE)
         pdf.set_xy(16, 22)
-        pdf.cell(26, 6, "TÜV SÜD", new_x=XPos.RIGHT, new_y=YPos.TOP)
+        pdf.cell(26, 6, "XYZ Security", new_x=XPos.RIGHT, new_y=YPos.TOP)
 
     pdf.set_draw_color(180, 180, 180)
     pdf.line(45, 15, 45, 43) # vertical divider line
     pdf.set_font("Helvetica", "B", 8.5)
     pdf.set_text_color(*TUV_BLUE)
     pdf.set_xy(48, 20)
-    pdf.multi_cell(45, 4, clean_text("Add value.\nInspire trust."))
+    pdf.multi_cell(45, 4, clean_text("Cyber Security Audit\n& Advisory Services"))
 
     # Title & Target Client Block
     pdf.set_y(65)
@@ -2557,8 +2558,8 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     # Details of Auditor (Table 5)
     section_title("Details of Auditor:")
     auditor_data = [
-        ["1", "Auditor", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"],
-        ["2", "Auditor", "Mr. Mahaveer Rajannavar BE.CEH, ISO 27001 LA"]
+        ["1", "Lead Auditor", "Lead Cyber Security Auditor"],
+        ["2", "Auditing Firm", "XYZ Security Services Pvt. Ltd."]
     ]
     with pdf.table(col_widths=(20, 40, 130), text_align="L") as table:
         for row in auditor_data:

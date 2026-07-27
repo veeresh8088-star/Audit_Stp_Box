@@ -1824,13 +1824,13 @@ async function renderAuditReportPreview() {
 
         const findings = (data.success && data.findings) ? data.findings : [];
 
-        const brandFirm = document.getElementById("brand-firm")?.value || "TÜV SÜD South Asia Pvt. Ltd.";
-        const brandAuditor = document.getElementById("brand-auditor")?.value || "Lead Audit Team";
-        const brandReviewer = document.getElementById("brand-reviewer")?.value || "Ms. Prianka Singla";
-        const brandApprover = document.getElementById("brand-approver")?.value || "Mr. Atul Srivastava";
+        const brandFirm = document.getElementById("brand-firm")?.value || "XYZ Security Services Pvt. Ltd.";
+        const brandAuditor = document.getElementById("brand-auditor")?.value || "Lead Cyber Security Auditor";
+        const brandReviewer = document.getElementById("brand-reviewer")?.value || "Senior Security Reviewer";
+        const brandApprover = document.getElementById("brand-approver")?.value || "Chief Information Security Officer";
         const brandDocId = document.getElementById("brand-docid")?.value || activeSessionId.slice(0, 8).toUpperCase();
-        const brandClient = document.getElementById("brand-client")?.value || "Motorola Solutions";
-        const brandEmail = document.getElementById("brand-email")?.value || "client@domain.com";
+        const brandClient = document.getElementById("brand-client")?.value || "XYZ Enterprise Security";
+        const brandEmail = document.getElementById("brand-email")?.value || "audit-contact@xyz-enterprise.com";
 
         // Standards Rule: Exclude pure INFO items from Executive Audit Evaluation details table!
         const reportFindings = findings.filter(f => !isFindingInformational(f));
