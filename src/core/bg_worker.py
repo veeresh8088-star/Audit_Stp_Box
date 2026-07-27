@@ -502,7 +502,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
 
         with _bg_lock:
             _bg_store["progress"][bg_key] = {
-                "text": f"🤖 Scanning controls with {ai_model.split(' - ')[0]}...",
+                "text": f"Scanning controls with {ai_model.split(' - ')[0]}...",
                 "percent": 0
             }
 
