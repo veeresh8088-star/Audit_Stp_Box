@@ -1147,11 +1147,29 @@ def api_export_docx(session_id: str, saved_only: bool = False):
                     "status": f.status or "Non-Compliant",
                     "severity": f.severity or "Medium",
                     "severity_score": sev_score,
-"auditor_comments": fb.auditor_comments,
-                "confidence": fb.confidence,
-                "hallucination_check": fb.hallucination_check
-            })
-        return data
+                    "business_impact": f.reasoning or "Compliance verification pending.",
+                    "recommendation": f.recommendation or "",
+                    "evidence_snippet": f.evidence_snippet or "",
+                    "evidence_quote": f.evidence_snippet or "",
+                    "source_files": f.source_files or ""
+                })
+                if f.status == "Compliant":
+                    resolved_list.append(f.control_id)
+                    
+            docx_bytes = export_docx_report(
+                session_title=report.framework,
+                findings=findings_mapped,
+                resolved_list=resolved_list,
+                status=report.status or "Draft",
+                comments="Lead auditor generated report"
+            )
+            
+            import io
+            return StreamingResponse(
+                io.BytesIO(docx_bytes),
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={"Content-Disposition": f"attachment; filename={report.framework.replace(' ', '_')}_Report.docx"}
+            )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
