@@ -936,8 +936,7 @@ class NativeOllamaChain:
                     f"Manual document validation required for control {control_id_str}."
                 ]
                 recommendation = (
-                    f"Manually review the policy document for references to control {control_id_str}, "
-                    "or upload a revised version containing explicit statements regarding this control."
+                    "Upload a revised version containing explicit statements regarding this control."
                 )
 
             # Map severity_score based on default severity for fallback
