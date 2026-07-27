@@ -2002,13 +2002,18 @@ function calculateSeverityStats() {
 }
 
 function toggleComplianceFilter(statusType) {
+    document.querySelectorAll(".kpi-box").forEach(b => b.style.outline = "none");
+    activeSeverityFilter = ""; // Reset severity filter when switching status KPI cards
+
     const select = document.getElementById("status-filter");
     if (select) {
-        // Toggle: if already on this filter, click again to go back to All
         if (select.value === statusType) {
             select.value = "All";
         } else {
             select.value = statusType;
+            let selector = statusType === "Compliant" ? ".compliant-box" : ".noncompliant-box";
+            const box = document.querySelector(selector);
+            if (box) box.style.outline = "2px solid #3b82f6";
         }
         renderFindingsList();
     }
@@ -2020,16 +2025,16 @@ function matchesSeverityFilter(fSeverity, activeFilter) {
     const filter = activeFilter.toLowerCase();
 
     if (filter.includes("p1") || filter.includes("critical")) {
-        return sev.includes("p1") || sev.includes("critical");
+        return sev.includes("p1") || sev.includes("critical") || sev.includes("9.") || sev.includes("10.");
     }
     if (filter.includes("p2") || filter.includes("high")) {
-        return sev.includes("p2") || sev.includes("high");
+        return sev.includes("p2") || sev.includes("high") || sev.includes("7.") || sev.includes("8.");
     }
     if (filter.includes("p3") || filter.includes("medium")) {
-        return sev.includes("p3") || sev.includes("medium");
+        return sev.includes("p3") || sev.includes("medium") || sev.includes("4.") || sev.includes("5.") || sev.includes("6.");
     }
     if (filter.includes("p4") || filter.includes("low")) {
-        return sev.includes("p4") || sev.includes("low");
+        return sev.includes("p4") || sev.includes("low") || sev.includes("0.") || sev.includes("1.") || sev.includes("2.") || sev.includes("3.");
     }
     if (filter.includes("info")) {
         return sev.includes("info");
@@ -2039,6 +2044,10 @@ function matchesSeverityFilter(fSeverity, activeFilter) {
 
 function toggleSeverityFilter(sev) {
     document.querySelectorAll(".kpi-box").forEach(b => b.style.outline = "none");
+    
+    // Reset status filter dropdown to "All" so status doesn't block severity matching
+    const select = document.getElementById("status-filter");
+    if (select) select.value = "All";
 
     if (activeSeverityFilter === sev) {
         activeSeverityFilter = ""; // Clear filter
