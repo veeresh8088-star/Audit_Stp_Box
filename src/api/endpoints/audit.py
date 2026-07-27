@@ -1157,51 +1157,6 @@ def api_export_docx(session_id: str, saved_only: bool = False):
     finally:
         db.close()
 
-@router.post("/feedback/import")
-def api_import_feedback(file: UploadFile = File(...)):
-    """Imports AuditorFeedback records from uploaded JSON file."""
-    db = SessionLocal()
-    try:
-        import json
-        file_bytes = file.file.read()
-        feedbacks_data = json.loads(file_bytes)
-        
-        from src.db.database import AuditorFeedback
-        imported_count = 0
-        with force_master():
-            for item in feedbacks_data:
-                control_id = item.get("control_id")
-                evidence_snippet = item.get("evidence_snippet")
-                corrected_status = item.get("corrected_status")
-                finding = item.get("finding")
-                
-                # Prevent duplication
-                dup = db.query(AuditorFeedback).filter(
-                    AuditorFeedback.control_id == control_id,
-                    AuditorFeedback.evidence_snippet == evidence_snippet,
-                    AuditorFeedback.corrected_status == corrected_status,
-                    AuditorFeedback.finding == finding
-                ).first()
-                if not dup:
-                    db.add(AuditorFeedback(
-                        control_id=control_id,
-                        evidence_snippet=evidence_snippet,
-                        corrected_status=corrected_status,
-                        finding=finding,
-                        recommendation=item.get("recommendation"),
-                        auditor_comments=item.get("auditor_comments"),
-                        confidence=item.get("confidence", 10),
-                        hallucination_check=item.get("hallucination_check")
-                    ))
-                    imported_count += 1
-            db.commit()
-            
-        return {"success": True, "message": f"Successfully imported {imported_count} feedback records."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
 @router.post("/chats/send")
 def api_send_chat_message(req: ChatSendRequest):
     """
