@@ -1319,7 +1319,7 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
                     
             is_vapt = (
                 "VAPT" in (report.framework or "").upper() or
-                any("VAPT" in str(f.control_id or "").upper() or "VAPT" in str(f.category or "").upper() for f in db_findings)
+                any("VAPT" in str(f.control_id or "").upper() or "VAPT" in str(getattr(f, "category", "") or "").upper() for f in db_findings)
             )
             if is_vapt:
                 from src.core.report_exporter import _export_vapt_pdf

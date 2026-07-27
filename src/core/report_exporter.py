@@ -2467,7 +2467,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     pdf.cell(0, 6, clean_text("Audit Conducted By:"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 5, clean_text(st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
+    pdf.cell(0, 5, clean_text("Mr. Subhash Rao & Mr. Mahaveer Rajannavar"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.cell(0, 5, clean_text("Mr. Mahaveer Rajannavar BE.CEH, ISO 27001 LA"), new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="C")
     pdf.ln(20)
     
