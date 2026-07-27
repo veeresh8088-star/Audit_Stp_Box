@@ -1298,6 +1298,10 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
                 else:
                     c_sev, sev_score = "MEDIUM", 5.5
                     
+                pol_pres = f.policy_present or ("Compliant" if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") else "No")
+                ev_pres = f.evidence_present or ("Compliant" if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") else "No")
+                is_comp = (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") or (pol_pres == "Compliant" and ev_pres == "Compliant")
+
                 findings_mapped.append({
                     "control_id": f.control_id,
                     "title": f.control_name or f.control_id,
@@ -1305,9 +1309,11 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
                     "control": f.control_name or f.control_id,
                     "clause": "ISO 27001 Annex A",
                     "description": f.description or f.gap_detected or "",
-                    "status": f.status or "Non-Compliant",
-                    "severity": c_sev,
-                    "severity_score": sev_score,
+                    "status": "Compliant" if is_comp else (f.status or "Non-Compliant"),
+                    "policy_present": pol_pres,
+                    "evidence_present": ev_pres,
+                    "severity": "N/A" if is_comp else c_sev,
+                    "severity_score": 0.0 if is_comp else sev_score,
                     "target": f.source_files or "Scoped Target Systems",
                     "business_impact": f.reasoning or "Compliance verification pending.",
                     "recommendation": f.recommendation or "",
@@ -1315,7 +1321,7 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
                     "evidence_quote": f.evidence_snippet or "",
                     "source_files": f.source_files or ""
                 })
-                if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS"):
+                if is_comp:
                     resolved_list.append(f.control_id)
                     
             is_vapt = (

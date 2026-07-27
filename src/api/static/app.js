@@ -1950,19 +1950,19 @@ function isFindingCompliant(f) {
     const isPolCompliant = (polRaw === "yes" || polRaw === "compliant" || polRaw === "true");
     const isEvCompliant = (evRaw === "yes" || evRaw === "compliant" || evRaw === "true");
 
-    // Both Policy AND Evidence MUST be Compliant for the finding to be Compliant!
-    if (!isPolCompliant || !isEvCompliant) {
-        return false;
+    // If both Policy AND Evidence are Compliant, the finding is COMPLIANT!
+    if (isPolCompliant && isEvCompliant) {
+        return true;
     }
 
-    // MUST check NON-COMPLIANT / GAP / FAIL / NOT FIRST so NON-COMPLIANT is never matched as COMPLIANT!
+    if (st === "COMPLIANT" || st === "PASS" || st === "SATISFIED" || st === "ACCEPTED" || wf === "ACCEPTED") {
+        return true;
+    }
+    
     if (st.includes("NON") || st.includes("NOT") || st.includes("GAP") || st.includes("FAIL") || st.includes("PARTIAL") || st.includes("UNSATISFIED")) {
         return false;
     }
     
-    if (st === "COMPLIANT" || st === "PASS" || st === "SATISFIED" || st === "ACCEPTED" || wf === "ACCEPTED") {
-        return true;
-    }
     return false;
 }
 
@@ -2199,8 +2199,8 @@ function renderFindingsList() {
             </div>
 
             <div class="finding-actions" style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.15);">
-                <div class="auditor-notes" style="font-size: 0.78rem; color: var(--text-muted);">
-                    <span>Reasoning: <i>${f.reasoning || 'Semantic similarity evaluation.'}</i></span>
+                <div class="auditor-notes" style="font-size: 0.78rem; color: #2563eb; font-weight: 600;">
+                    <span>📁 Evidence Source Location: <i style="color: var(--text-muted); font-weight: 400;">${f.source_files || f.evidence_found || 'Uploaded Policy Document & Evidence Files'}</i></span>
                 </div>
                 <div class="btn-card-group" style="display: flex; gap: 8px;">
                     <button class="btn-secondary" style="color: #10b981; font-weight: 700; border-color: rgba(16, 185, 129, 0.4);" onclick="updateFindingWorkflowStatus(${f.id}, 'Accepted')">✓ Accept</button>

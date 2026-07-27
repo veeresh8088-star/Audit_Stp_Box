@@ -2715,7 +2715,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     pdf.set_font("Helvetica", "", 7.5)
     with pdf.table(col_widths=(6, 24, 15, 50, 12, 25, 33, 25), text_align="L") as table:
         hdr = table.row()
-        hdr_titles = ['S.No.', 'Control points', 'Policy Reference', 'Observations', 'Risk', 'Impact', 'Suggestion', 'Evidence']
+        hdr_titles = ['S.No.', 'Control points', 'Policy Reference', 'Observations', 'Risk', 'Impact', 'Recommendation', 'Evidence']
         for title in hdr_titles:
             hdr.cell(title, style=hdr_style)
             
@@ -2723,11 +2723,15 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
             r = table.row()
             
             # Map risk
-            st_val = f.get("status", "Non-Compliant")
+            st_val = str(f.get("status") or "").upper()
+            pol_raw = str(f.get("policy_present") or "").upper()
+            ev_raw = str(f.get("evidence_present") or "").upper()
+            is_comp = st_val in ("COMPLIANT", "ACCEPTED", "PASS") or (pol_raw in ("YES", "COMPLIANT") and ev_raw in ("YES", "COMPLIANT"))
+
             sev_score = f.get("severity_score", 0.0) or 0.0
-            if st_val == "Compliant":
+            if is_comp:
                 mapped_risk = "Accepted"
-                risk_text = "Accepted"
+                risk_text = "N/A"
             else:
                 sev = f.get("severity", "P3 Medium")
                 if "1" in sev or "Critical" in sev or "High" in sev:
