@@ -322,7 +322,7 @@ function setupTabs(role) {
         tabs = [
             { id: "tab-scan-workspace", label: "Scan Workspace" },
             { id: "tab-audit-records", label: "Audit Records & Findings" },
-            { id: "tab-audit-report", label: "PDF Report Exporter" },
+            { id: "tab-audit-report", label: "Report Exporter" },
             { id: "tab-auditee-docs", label: "Auditee Submissions" },
             { id: "tab-manage-controls", label: "Manage & Add Controls" },
             { id: "tab-admin-logs", label: "System & Auditor Logs" }
@@ -332,7 +332,7 @@ function setupTabs(role) {
         tabs = [
             { id: "tab-scan-workspace", label: "Scan Workspace" },
             { id: "tab-audit-records", label: "Audit Records & Findings" },
-            { id: "tab-audit-report", label: "PDF Report Exporter" },
+            { id: "tab-audit-report", label: "Report Exporter" },
             { id: "tab-auditee-docs", label: "Auditee Submissions" },
             { id: "tab-manage-controls", label: "Manage & Add Controls" }
         ];
