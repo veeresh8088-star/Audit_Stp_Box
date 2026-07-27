@@ -1424,7 +1424,10 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
                 if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS"):
                     resolved_list.append(f.control_id)
                     
-            is_vapt = report.framework in ("VAPT Framework Controls", "VAPT") or "VAPT" in (report.framework or "").upper()
+            is_vapt = (
+                "VAPT" in (report.framework or "").upper() or
+                any("VAPT" in str(f.control_id or "").upper() or "VAPT" in str(f.category or "").upper() for f in db_findings)
+            )
             if is_vapt:
                 from src.core.report_exporter import _export_vapt_pdf
                 pdf_bytes = _export_vapt_pdf(

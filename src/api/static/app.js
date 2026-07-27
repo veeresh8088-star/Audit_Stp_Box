@@ -324,8 +324,8 @@ function setupTabs(role) {
             { id: "tab-audit-records", label: "Audit Records & Findings" },
             { id: "tab-audit-report", label: "PDF Report Exporter" },
             { id: "tab-auditee-docs", label: "Auditee Submissions" },
-            { id: "tab-manage-controls", label: "✨ Manage & Add Controls" },
-            { id: "tab-admin-logs", label: "📜 System & Auditor Logs" }
+            { id: "tab-manage-controls", label: "Manage & Add Controls" },
+            { id: "tab-admin-logs", label: "System & Auditor Logs" }
         ];
     } else {
         // Auditor Role
@@ -334,7 +334,7 @@ function setupTabs(role) {
             { id: "tab-audit-records", label: "Audit Records & Findings" },
             { id: "tab-audit-report", label: "PDF Report Exporter" },
             { id: "tab-auditee-docs", label: "Auditee Submissions" },
-            { id: "tab-manage-controls", label: "✨ Manage & Add Controls" }
+            { id: "tab-manage-controls", label: "Manage & Add Controls" }
         ];
     }
     
@@ -1031,7 +1031,7 @@ async function loadFrameworkControls() {
             "Clause 7 — Physical Controls": [],
             "Clause 8 — Technological Controls": [],
             "VAPT Framework Controls": [],
-            "✨ Custom Controls": []
+            "Custom Controls": []
         };
 
         filtered.forEach(c => {
@@ -1049,7 +1049,7 @@ async function loadFrameworkControls() {
             } else if (cid.includes("VAPT") || cat.includes("VAPT")) {
                 clauseMap["VAPT Framework Controls"].push(c);
             } else {
-                clauseMap["✨ Custom Controls"].push(c);
+                clauseMap["Custom Controls"].push(c);
             }
         });
 
@@ -1943,6 +1943,18 @@ function isFindingCompliant(f) {
     const st = (f.status || "").toUpperCase().trim();
     const wf = (f.workflow_status || f.display_status || "").toUpperCase().trim();
 
+    // Check policy and evidence presence/compliance
+    const polRaw = String(f.policy_present || "No").trim().toLowerCase();
+    const evRaw = String(f.evidence_present || "No").trim().toLowerCase();
+
+    const isPolCompliant = (polRaw === "yes" || polRaw === "compliant" || polRaw === "true");
+    const isEvCompliant = (evRaw === "yes" || evRaw === "compliant" || evRaw === "true");
+
+    // Both Policy AND Evidence MUST be Compliant for the finding to be Compliant!
+    if (!isPolCompliant || !isEvCompliant) {
+        return false;
+    }
+
     // MUST check NON-COMPLIANT / GAP / FAIL / NOT FIRST so NON-COMPLIANT is never matched as COMPLIANT!
     if (st.includes("NON") || st.includes("NOT") || st.includes("GAP") || st.includes("FAIL") || st.includes("PARTIAL") || st.includes("UNSATISFIED")) {
         return false;
@@ -2078,7 +2090,6 @@ function renderFindingsList() {
         container.innerHTML = `
             <div class="empty-state" style="padding: 24px; text-align: center;">
                 <div style="font-size: 0.92rem; font-weight: 700; color: #fbbf24; margin-bottom: 6px;">⚠️ No matching findings found in "${filterStatus}" filter range</div>
-                <div style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 12px;">Total loaded findings in this audit session: <b>${totalCount}</b></div>
                 <button type="button" class="btn-primary" onclick="document.getElementById('status-filter').value='All'; activeSeverityFilter=''; renderFindingsList();" style="padding: 7px 16px; font-size: 0.78rem; font-weight: 700; background: linear-gradient(135deg, #2563eb, #1d4ed8); cursor: pointer;">
                     🔄 Reset Filter &amp; View All ${totalCount} Findings
                 </button>
@@ -2097,21 +2108,57 @@ function renderFindingsList() {
         card.className = `finding-card ${sevClass}`;
         
         let statusBadgeClass = "non-compliant";
+        let displayStatusText = "NON-COMPLIANT";
+
         if (isFindingCompliant(f)) {
             statusBadgeClass = "compliant";
+            displayStatusText = (f.status && f.status.toUpperCase() === "ACCEPTED") ? "ACCEPTED" : "COMPLIANT";
         } else if (isFindingInformational(f)) {
             statusBadgeClass = "informational";
+            displayStatusText = f.status || "INFO";
         } else if ((f.status || "").toUpperCase().includes("PARTIAL")) {
             statusBadgeClass = "partial";
+            displayStatusText = "PARTIAL";
+        } else if ((f.status || "").toUpperCase() === "ACCEPTED") {
+            statusBadgeClass = "compliant";
+            displayStatusText = "ACCEPTED";
+        } else if ((f.status || "").toUpperCase() === "REJECTED") {
+            statusBadgeClass = "non-compliant";
+            displayStatusText = "REJECTED";
         } else {
             statusBadgeClass = "non-compliant";
+            displayStatusText = "NON-COMPLIANT";
         }
         
         const ctrlTitle = (f.control_name && f.control_name !== "null") ? f.control_name : ((f.control && f.control !== "null") ? f.control : "");
         const displayTitle = ctrlTitle ? `${f.control_id} - ${ctrlTitle}` : f.control_id;
         const findingJsonStr = JSON.stringify(f).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
-        const polBadge = f.policy_present ? `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); font-weight: 600;">📜 Policy: ${f.policy_present}</span>` : '';
-        const evBadge = f.evidence_present ? `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; background: rgba(168,85,247,0.15); color: #c084fc; border: 1px solid rgba(168,85,247,0.3); font-weight: 600;">🔍 Evidence: ${f.evidence_present}</span>` : '';
+        
+        // Format Policy Badge
+        const polRaw = String(f.policy_present || "No").trim().toLowerCase();
+        let polText = "Policy: Not Found";
+        let polStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
+        if (polRaw === "yes" || polRaw === "compliant" || polRaw === "true") {
+            polText = "Policy: Compliant";
+            polStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);";
+        } else if (polRaw === "partial" || polRaw === "non-compliant" || polRaw === "non compliant") {
+            polText = "Policy: Non-Compliant";
+            polStyle = "background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);";
+        }
+        const polBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; ${polStyle} font-weight: 600;">📜 ${polText}</span>`;
+
+        // Format Evidence Badge
+        const evRaw = String(f.evidence_present || "No").trim().toLowerCase();
+        let evText = "Evidence: Not Found";
+        let evStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
+        if (evRaw === "yes" || evRaw === "compliant" || evRaw === "true") {
+            evText = "Evidence: Compliant";
+            evStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);";
+        } else if (evRaw === "partial" || evRaw === "non-compliant" || evRaw === "non compliant") {
+            evText = "Evidence: Non-Compliant";
+            evStyle = "background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);";
+        }
+        const evBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; ${evStyle} font-weight: 600;">🔍 ${evText}</span>`;
 
         card.innerHTML = `
             <div class="finding-card-header">
@@ -2119,6 +2166,12 @@ function renderFindingsList() {
                     <h3>${displayTitle}</h3>
                 </div>
                 <div class="finding-badges" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+                    ${polBadge}
+                    ${evBadge}
+                    <span class="badge-status ${statusBadgeClass}">${displayStatusText}</span>
+                    <span class="badge-pill">${f.severity || 'P3 Medium'}</span>
+                </div>
+            </div>` align-items: center; flex-wrap: wrap;">
                     ${polBadge}
                     ${evBadge}
                     <span class="badge-status ${statusBadgeClass}">${f.status}</span>
@@ -2435,7 +2488,7 @@ async function handleModalCustomControlSubmit(e) {
         const data = await response.json();
         if (data.success) {
             closeAddCustomControlModal();
-            showToast("✨ Custom control saved to Shakthi DB!", "info");
+            showToast("Custom control saved to Shakthi DB!", "info");
             await loadFrameworkControls();
             
             // Auto expand Custom Controls accordion
@@ -2663,7 +2716,7 @@ async function exportFindingsDOCX() {
     }
 }
 
-async function exportFindingsPDF() {
+async function printAuditReportPreview() {
     try {
         await renderAuditReportPreview();
         const previewEl = document.getElementById("report-preview-container");
@@ -3417,13 +3470,19 @@ function getBrandingQueryParams() {
 
 async function exportFindingsDOCX() {
     try {
+        if (!activeSessionId) {
+            alert("No active audit session selected. Please select or start an audit session first.");
+            return;
+        }
         const brandingParams = getBrandingQueryParams();
+        const exportUrl = `${API_BASE}/audit/export/docx?session_id=${encodeURIComponent(activeSessionId)}${brandingParams}`;
         const link = document.createElement("a");
-        link.href = `${API_BASE}/audit/export/docx?session_id=${activeSessionId}${brandingParams}`;
+        link.href = exportUrl;
         link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.docx`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        showToast("Word (.docx) report export triggered", "info");
     } catch (err) {
         alert("Error exporting Word report: " + err.message);
     }
@@ -3431,13 +3490,19 @@ async function exportFindingsDOCX() {
 
 async function exportFindingsPDF() {
     try {
+        if (!activeSessionId) {
+            alert("No active audit session selected. Please select or start an audit session first.");
+            return;
+        }
         const brandingParams = getBrandingQueryParams();
+        const exportUrl = `${API_BASE}/audit/export/pdf?session_id=${encodeURIComponent(activeSessionId)}${brandingParams}`;
         const link = document.createElement("a");
-        link.href = `${API_BASE}/audit/export/pdf?session_id=${activeSessionId}${brandingParams}`;
+        link.href = exportUrl;
         link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.pdf`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        showToast("Formal PDF report export triggered", "info");
     } catch (err) {
         alert("Error exporting PDF report: " + err.message);
     }
@@ -3697,7 +3762,7 @@ async function startNewAuditSession() {
     if (uploadStatus) uploadStatus.innerText = "No files selected";
     
     loadRecentSessionsList();
-    alert(`✨ New Audit Session initialized!\nSession ID: ${activeSessionId.slice(0, 8)}...`);
+    alert(`New Audit Session initialized!\nSession ID: ${activeSessionId.slice(0, 8)}...`);
 }
 
 async function loadRecentSessionsList() {

@@ -36,6 +36,12 @@ function showToast(msg, type = "info") {
 }
 
 function isFindingCompliant(f) {
+    const polRaw = String(f.policy_present || "No").trim().toLowerCase();
+    const evRaw = String(f.evidence_present || "No").trim().toLowerCase();
+    const isPolCompliant = (polRaw === "yes" || polRaw === "compliant" || polRaw === "true");
+    const isEvCompliant = (evRaw === "yes" || evRaw === "compliant" || evRaw === "true");
+    if (!isPolCompliant || !isEvCompliant) return false;
+
     const s = (f.status || "").toUpperCase();
     return s === "COMPLIANT" || s === "ACCEPTED" || s === "PASS" || s === "SUCCESS";
 }

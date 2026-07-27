@@ -854,20 +854,15 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
             finding["review_note"] = "Rule 8 Applied: Evidence in any form (document/screenshot/log) satisfied control objective."
 
     # ── POLICY VS EVIDENCE COMBINATION MATRIX RULE ───────────────────────
-    # Both Policy AND Evidence must be "Yes" for COMPLIANT.
-    # "Partial" is treated as NOT fully present — result is NON_COMPLIANT.
-    # Rule 8 already handled promotion above; skip matrix if Rule 8 was applied.
+    # Both Policy AND Evidence must be Compliant/YES for overall COMPLIANT.
+    # If either Policy or Evidence is missing or non-compliant, result is NON_COMPLIANT.
     pol_pres = str(finding.get("policy_present") or "No").strip().upper()
     ev_pres  = str(finding.get("evidence_present") or "No").strip().upper()
-    rule8_applied = "Rule 8 Applied" in str(finding.get("review_note", ""))
-    current_status_for_matrix = str(finding.get("status") or "").strip().upper()
 
-    if not rule8_applied and current_status_for_matrix == "COMPLIANT":
-        # If either policy or evidence is not fully "YES", downgrade to NON_COMPLIANT
-        if pol_pres != "YES" or ev_pres != "YES":
-            cid = finding.get("control_id") or ""
-            print(f"[POLICY-EVIDENCE MATRIX] Control {cid}: Policy={pol_pres}, Evidence={ev_pres}. Both must be YES for COMPLIANT. Final Verdict: NON_COMPLIANT", flush=True)
-            finding["status"] = "NON_COMPLIANT"
+    if pol_pres not in ("YES", "COMPLIANT") or ev_pres not in ("YES", "COMPLIANT"):
+        cid = finding.get("control_id") or ""
+        print(f"[POLICY-EVIDENCE MATRIX] Control {cid}: Policy={pol_pres}, Evidence={ev_pres}. Both must be COMPLIANT for overall COMPLIANT. Final Verdict: NON_COMPLIANT", flush=True)
+        finding["status"] = "NON_COMPLIANT"
     # ─────────────────────────────────────────────────────────────────────
             
     return finding

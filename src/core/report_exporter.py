@@ -2382,10 +2382,11 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     state_u = str(st_std or "").upper()
     combined_u = f"{title_u} {state_u}"
 
-    is_vapt = ("VAPT" in combined_u or "VULNERABILITY ASSESSMENT" in combined_u or "PENETRATION" in combined_u) and ("ISO 27001" not in combined_u)
+    is_vapt = "VAPT" in combined_u or "VULNERABILITY ASSESSMENT" in combined_u or "PENETRATION" in combined_u
     if not is_vapt and findings:
         for f in findings:
-            if "VAPT" in str(f.get("control_id") or f.get("control") or "").upper():
+            ctrl = str(f.get("control_id") or f.get("control") or f.get("category") or "").upper()
+            if "VAPT" in ctrl:
                 is_vapt = True
                 break
 
