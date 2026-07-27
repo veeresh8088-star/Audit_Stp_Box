@@ -31,30 +31,30 @@ document.addEventListener("DOMContentLoaded", () => {
     // Clock setup
     setInterval(updateHeaderClock, 30000);
     updateHeaderClock();
-    
+
     // Default render tabs & framework controls on page load so they are never blank
     setupTabs(selectedRole || "admin");
     loadFrameworkControls();
-    
+
     // Sync role selection UI and auto-fill credentials for the default role
     selectRole(selectedRole || "admin");
-    
+
     // Auth selectors
     const loginForm = document.getElementById("login-form");
     if (loginForm) loginForm.addEventListener("submit", handleLoginSubmit);
-    
+
     const otpForm = document.getElementById("otp-form");
     if (otpForm) otpForm.addEventListener("submit", handleOTPSubmit);
-    
+
     // Setup File Upload drop zone
     setupFileDropZone();
-    
+
     // Setup Custom Control form
     const createControlForm = document.getElementById("create-control-form");
     if (createControlForm) {
         createControlForm.addEventListener("submit", handleCreateControlSubmit);
     }
-    
+
     // Setup Edit Finding Modal form
     const editForm = document.getElementById("edit-finding-form");
     if (editForm) editForm.addEventListener("submit", handleEditFindingSubmit);
@@ -73,12 +73,12 @@ function updateHeaderClock() {
 
 function selectRole(role) {
     selectedRole = role;
-    
+
     // Update button visual styles
     document.querySelectorAll(".role-btn").forEach(btn => btn.classList.remove("active"));
     const targetBtn = document.getElementById(`role-${role}-btn`);
     if (targetBtn) targetBtn.classList.add("active");
-    
+
     // Keep input fields clean for user manual entry
     const usernameInput = document.getElementById("username-input");
     const passwordInput = document.getElementById("password-input");
@@ -98,7 +98,7 @@ function selectRole(role) {
             descEl.innerText = "AUDITEE • Upload audit evidence documents for the auditor to review";
         }
     }
-    
+
     // Hide register option for Admin (seeded default is login only)
     const toggleRow = document.getElementById("toggle-auth-row");
     if (toggleRow) {
@@ -116,7 +116,7 @@ function resetAuthActionToLogin() {
     const submitBtn = document.getElementById("auth-submit-btn");
     const toggleActionBtn = document.getElementById("toggle-action-btn");
     const toggleLabel = document.getElementById("toggle-label");
-    
+
     submitBtn.innerText = "Secure Sign In";
     toggleActionBtn.innerText = "Create Account";
     toggleLabel.innerText = "NEW USER?";
@@ -126,7 +126,7 @@ function toggleAuthAction() {
     const submitBtn = document.getElementById("auth-submit-btn");
     const toggleActionBtn = document.getElementById("toggle-action-btn");
     const toggleLabel = document.getElementById("toggle-label");
-    
+
     if (submitBtn.innerText === "Secure Sign In") {
         submitBtn.innerText = "Create Secure Account";
         toggleActionBtn.innerText = "Back to Login";
@@ -140,13 +140,13 @@ function toggleAuthAction() {
 async function handleLoginSubmit(e) {
     e.preventDefault();
     showError("");
-    
+
     const username = document.getElementById("username-input").value.trim();
     const password = document.getElementById("password-input").value;
     const submitBtn = document.getElementById("auth-submit-btn");
-    
+
     const isRegister = submitBtn.innerText.includes("Create");
-    
+
     try {
         if (isRegister) {
             // Register Action
@@ -155,10 +155,10 @@ async function handleLoginSubmit(e) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ username, password, role: selectedRole })
             });
-            
+
             const data = await response.json();
             if (!response.ok) throw new Error(data.detail || "Registration failed.");
-            
+
             // Show QR Setup
             document.getElementById("login-form").style.display = "none";
             document.getElementById("register-setup-form").style.display = "block";
@@ -171,16 +171,16 @@ async function handleLoginSubmit(e) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ username, password })
             });
-            
+
             const data = await response.json();
             if (!response.ok) throw new Error(data.detail || "Authentication failed.");
-            
+
             // Switch to OTP verify
             document.getElementById("login-form").style.display = "none";
             document.getElementById("otp-form").style.display = "block";
             document.getElementById("otp-input").value = "";
             document.getElementById("otp-input").focus();
-            
+
             // Display 2FA TOTP QR code for authenticator apps
             if (data.qr_code_base64) {
                 document.getElementById("admin-qr-container").style.display = "block";
@@ -189,7 +189,7 @@ async function handleLoginSubmit(e) {
             } else {
                 document.getElementById("admin-qr-container").style.display = "none";
             }
-            
+
             // Stash user detail temporarily
             currentUser = { username: data.username, role: data.role };
         }
@@ -201,26 +201,26 @@ async function handleLoginSubmit(e) {
 async function handleOTPSubmit(e) {
     e.preventDefault();
     showError("");
-    
+
     const otpCode = document.getElementById("otp-input").value.trim();
     if (!currentUser) return;
-    
+
     try {
         const response = await fetch(`${API_BASE}/auth/verify-otp`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ username: currentUser.username, otp_code: otpCode })
         });
-        
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Invalid code.");
-        
+
         currentUser.token = data.token;
-        
+
         // Login Successful
         document.getElementById("auth-overlay").classList.remove("active");
         document.getElementById("app-shell").style.display = "grid";
-        
+
         initializeDashboard(currentUser);
     } catch (err) {
         showError(err.message);
@@ -268,12 +268,12 @@ async function initializeDashboard(user) {
     // Set Profile Info
     document.getElementById("profile-name").innerText = user.username;
     document.getElementById("profile-role").innerText = user.role.toUpperCase();
-    document.getElementById("profile-initials").innerText = user.username.slice(0,2).toUpperCase();
-    
+    document.getElementById("profile-initials").innerText = user.username.slice(0, 2).toUpperCase();
+
     // Role permissions toggle
     const isAdmin = user.role === "admin";
     const isAuditor = user.role === "auditor";
-    
+
     // Hide/show sidebar panels (safe null-check in case some panels are absent)
     const setDisplay = (id, val) => { const el = document.getElementById(id); if (el) el.style.display = val; };
     setDisplay("sidebar-ai-setup", isAdmin ? "block" : "none");
@@ -284,22 +284,22 @@ async function initializeDashboard(user) {
     setDisplay("sidebar-action-setup", (isAdmin || isAuditor) ? "block" : "none");
     setDisplay("sidebar-admin-tools", isAdmin ? "block" : "none");
     setDisplay("sidebar-auditee-submissions", (isAdmin || isAuditor) ? "block" : "none");
-    
+
     // Setup Tabs Bar
     setupTabs(user.role);
-    
+
     // Initialize standard checklist
     if (isAdmin || isAuditor) {
         loadFrameworkControls();
     }
-    
+
     // Resolve Active Audit Session ID
     await loadOrCreateSession(user);
     loadRecentSessions();
     if (!window._recentSessionsInterval) {
         window._recentSessionsInterval = setInterval(loadRecentSessions, 10000);
     }
-    
+
     // Load Chat History list
     if (user.role !== "auditee") {
         loadChatSessions();
@@ -310,7 +310,7 @@ function setupTabs(role) {
     const tabsBar = document.getElementById("tabs-bar");
     if (!tabsBar) return;
     tabsBar.innerHTML = "";
-    
+
     let tabs = [];
     if (role === "auditee") {
         tabs = [
@@ -337,7 +337,7 @@ function setupTabs(role) {
             { id: "tab-manage-controls", label: "Manage Controls and Backup" }
         ];
     }
-    
+
     tabs.forEach((tab, index) => {
         const btn = document.createElement("button");
         btn.className = `tab-link ${index === 0 ? 'active' : ''}`;
@@ -345,7 +345,7 @@ function setupTabs(role) {
         btn.onclick = () => switchTab(tab.id, btn);
         tabsBar.appendChild(btn);
     });
-    
+
     if (tabsBar.firstChild) {
         switchTab(tabs[0].id, tabsBar.firstChild);
     }
@@ -353,16 +353,16 @@ function setupTabs(role) {
 
 function switchTab(tabId, tabBtn) {
     activeTab = tabId;
-    
+
     // Active tabs navigation state
     document.querySelectorAll(".tab-link").forEach(btn => btn.classList.remove("active"));
     if (tabBtn) tabBtn.classList.add("active");
-    
+
     // Show active tab panel
     document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.remove("active"));
     const targetPanel = document.getElementById(tabId);
     if (targetPanel) targetPanel.classList.add("active");
-    
+
     // Update workspace title header based on active tab
     const wsTitle = document.getElementById("workspace-title");
     if (wsTitle) {
@@ -371,7 +371,7 @@ function switchTab(tabId, tabBtn) {
         else if (tabId === "tab-auditee-docs") wsTitle.innerText = "Auditee Evidence Documents";
         else if (tabId === "tab-audit-report") wsTitle.innerText = "Audit Report & Delivery Center";
         else if (tabId === "tab-submitted-reports") wsTitle.innerText = "Submitted Audit Reports";
-        else if (tabId === "tab-manage-controls") wsTitle.innerText = "Manage ISO 27001 / VAPT Framework Controls";
+        else if (tabId === "tab-manage-controls") wsTitle.innerText = "Manage Framework Controls";
         else if (tabId === "tab-admin-logs") wsTitle.innerText = "System Event & Developer Logs";
     }
 
@@ -401,7 +401,7 @@ function toggleCollapsible(contentId) {
     if (!el) return;
     const parent = el.parentElement;
     if (parent) parent.classList.toggle("open");
-    
+
     if (el.style.display === "none" || !el.style.display) {
         el.style.display = "block";
         if (contentId === "recent-sessions-container") {
@@ -415,7 +415,7 @@ function toggleCollapsible(contentId) {
 async function loadRecentSessions() {
     const container = document.getElementById("recent-sessions-list");
     if (!container) return;
-    
+
     try {
         let url = `${API_BASE}/audit/sessions`;
         if (currentUser && currentUser.role === "auditee") {
@@ -423,7 +423,7 @@ async function loadRecentSessions() {
         }
         const response = await fetch(url);
         const data = await response.json();
-        
+
         if (data.success && data.sessions.length > 0) {
             container.innerHTML = "";
             const seen = new Set();
@@ -449,19 +449,19 @@ async function loadRecentSessions() {
                 if (activeSessionId === s.session_id) btn.classList.add("active-session");
 
                 btn.onclick = () => switchRecentSession(s.session_id, s.session_title);
-                
+
                 const isFinal = (s.status || "").toLowerCase().includes("final") || (s.status || "").toLowerCase().includes("review");
-                const statusPill = isFinal 
+                const statusPill = isFinal
                     ? `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:800;">FINAL</span>`
                     : `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:800;">OPEN</span>`;
 
-                const shortTitle = s.session_title || `Audit Session (${s.session_id.slice(0,6)})`;
+                const shortTitle = s.session_title || `Audit Session (${s.session_id.slice(0, 6)})`;
                 const dateStr = s.created_at ? s.created_at.slice(0, 10) : "";
 
                 btn.style.cssText = "display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 9px 11px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; color: var(--text-main); font-size: 0.78rem; text-align: left; cursor: pointer; margin-bottom: 6px; transition: all 0.15s ease;";
                 btn.onmouseover = () => { btn.style.background = "rgba(37, 99, 235, 0.1)"; btn.style.borderColor = "rgba(37, 99, 235, 0.4)"; };
                 btn.onmouseout = () => { btn.style.background = "var(--bg-card)"; btn.style.borderColor = "var(--border-color)"; };
-                
+
                 btn.innerHTML = `
                     <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
                         <span style="font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;" title="${shortTitle}">📌 ${shortTitle}</span>
@@ -485,7 +485,7 @@ async function loadRecentSessions() {
 async function switchRecentSession(sessionId, sessionTitle) {
     activeSessionId = sessionId;
     if (sessionTitle) activeSessionTitle = sessionTitle;
-    
+
     const badge = document.getElementById("active-session-badge");
     const wsTitle = document.getElementById("workspace-title");
     if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
@@ -521,7 +521,7 @@ async function loadOrCreateSession(user) {
     try {
         const response = await fetch(`${API_BASE}/audit/sessions?role=${user.role}&username=${user.username}`);
         const data = await response.json();
-        
+
         if (data.success && data.sessions.length > 0) {
             // Prefer session that has findings (Pending Review / Reviewed & Finalized)
             // over a blank newly created session with no findings
@@ -537,7 +537,7 @@ async function loadOrCreateSession(user) {
             body.append("session_title", "ISO 27001 Local Compliance Audit");
             body.append("framework", "ISO 27001");
             body.append("username", user.username);
-            
+
             const createRes = await fetch(`${API_BASE}/audit/sessions`, {
                 method: "POST",
                 body: body
@@ -548,13 +548,13 @@ async function loadOrCreateSession(user) {
                 activeSessionTitle = createData.session_title;
             }
         }
-        
+
         document.getElementById("active-session-badge").innerText = `Session ID: ${activeSessionId}`;
         document.getElementById("workspace-title").innerText = activeSessionTitle;
-        
+
         // Refresh evidence files list
         loadEvidenceFileList();
-        
+
         // Populate Target Auditee selector
         if (user.role !== "auditee") {
             populateAuditeeSelector();
@@ -568,12 +568,12 @@ async function populateAuditeeSelector() {
     const select = document.getElementById("report-target-auditee");
     if (!select) return;
     select.innerHTML = "";
-    
+
     try {
         // Fetch registered Auditee User Accounts
         const userRes = await fetch(`${API_BASE}/auth/auditees`);
         const userData = await userRes.json();
-        
+
         if (userData.success && userData.auditees && userData.auditees.length > 0) {
             const userGroup = document.createElement("optgroup");
             userGroup.label = "Registered Client / Auditee Accounts";
@@ -589,11 +589,11 @@ async function populateAuditeeSelector() {
         // Fetch Audit Sessions
         const response = await fetch(`${API_BASE}/audit/sessions`);
         const data = await response.json();
-        
+
         if (data.success && data.sessions.length > 0) {
             const sessionGroup = document.createElement("optgroup");
             sessionGroup.label = "Active Audit Sessions";
-            
+
             // Filter out repetitive test sessions if clean sessions exist
             const filteredSessions = data.sessions.filter(s => {
                 const title = (s.session_title || "").toLowerCase();
@@ -604,7 +604,7 @@ async function populateAuditeeSelector() {
             displayList.forEach(s => {
                 const opt = document.createElement("option");
                 opt.value = `session:${s.id}`;
-                opt.innerText = `📋 ${s.session_title} (ID: ${s.session_id.slice(0,6)})`;
+                opt.innerText = `📋 ${s.session_title} (ID: ${s.session_id.slice(0, 6)})`;
                 sessionGroup.appendChild(opt);
             });
             select.appendChild(sessionGroup);
@@ -657,7 +657,7 @@ async function processEvidenceFiles(files) {
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        
+
         let sizeStr = "";
         if (file.size < 1024 * 1024) {
             sizeStr = `${(file.size / 1024).toFixed(1)} KB`;
@@ -668,7 +668,7 @@ async function processEvidenceFiles(files) {
         const ext = file.name.split('.').pop().toLowerCase();
         let fileType = "DOC";
         let iconClass = "file-type-doc";
-        
+
         if (["pdf"].includes(ext)) { fileType = "PDF"; iconClass = "file-type-pdf"; }
         else if (["xls", "xlsx", "csv"].includes(ext)) { fileType = "XLS"; iconClass = "file-type-xls"; }
         else if (["xml", "json", "txt", "html", "htm"].includes(ext)) { fileType = "XML"; iconClass = "file-type-xml"; }
@@ -806,7 +806,7 @@ function setAnalysisMode(mode) {
 async function triggerAuditAnalysis() {
     const runBtn = document.getElementById("run-analysis-btn");
     const stopBtn = document.getElementById("stop-analysis-btn");
-    
+
     if (!activeSessionId) {
         alert("⚠️ Please create or select an Audit Session first.");
         return;
@@ -820,7 +820,7 @@ async function triggerAuditAnalysis() {
     // Determine target framework
     const fwSelect = document.getElementById("framework-select");
     const targetFramework = fwSelect ? fwSelect.value : "All Standards";
-    
+
     // Check if VAPT framework is selected -> Bypass LLM and use fast technical parser!
     let effectiveAuditMode = selectedAnalysisMode;
     if (targetFramework === "VAPT" || targetFramework.includes("VAPT")) {
@@ -895,7 +895,7 @@ async function pollAuditResults() {
                 findingsList = data.findings;
                 renderFindingsList();
                 updateKPICounters();
-                
+
                 if (runBtn) {
                     runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
                     runBtn.disabled = false;
@@ -937,7 +937,7 @@ function setScopingMode(mode) {
     const aiBtn = document.getElementById("btn-ai-scoping");
     const chkBtn = document.getElementById("btn-checklist-scoping");
     const excelBtn = document.getElementById("btn-excel-scoping");
-    
+
     const excelDropzone = document.getElementById("scoping-excel-dropzone");
     const statusNote = document.getElementById("scoping-mode-status-note");
     const checklistBox = document.getElementById("target-controls-container-box");
@@ -991,19 +991,19 @@ async function loadFrameworkControls() {
     const container = document.getElementById("controls-checkbox-container");
     if (!container) return;
     container.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;'>Loading controls checklist...</div>";
-    
+
     try {
         const response = await fetch(`${API_BASE}/controls/framework`);
         const data = await response.json();
-        
+
         let controlsToRender = DEFAULT_FRAMEWORK_CONTROLS;
         if (data.success && data.controls && data.controls.length > 0) {
             controlsToRender = data.controls;
         }
-        
+
         container.innerHTML = "";
         const selectedStd = select ? select.value : "ISO 27001";
-        
+
         const filtered = controlsToRender.filter(c => {
             const cat = (c.category || "").toUpperCase();
             const useCase = (c.use_case || "").toUpperCase();
@@ -1037,7 +1037,7 @@ async function loadFrameworkControls() {
         filtered.forEach(c => {
             const cid = (c.control_id || c.use_case || c.sl || "").toString().toUpperCase();
             const cat = (c.category || "").toUpperCase();
-            
+
             if (cid.startsWith("5.") || cat.includes("ORGANIZATIONAL")) {
                 clauseMap["Clause 5 — Organizational Controls"].push(c);
             } else if (cid.startsWith("6.") || cat.includes("PEOPLE")) {
@@ -1063,7 +1063,7 @@ async function loadFrameworkControls() {
             accordionCard.style.cssText = "margin-bottom: 8px; border-radius: 10px; overflow: hidden;";
 
             const contentId = `clause_body_${idx}`;
-            
+
             const header = document.createElement("div");
             header.className = "clause-header";
             header.style.cssText = "padding: 10px 12px; font-size: 0.82rem; font-weight: 700; display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none;";
@@ -1099,7 +1099,7 @@ async function loadFrameworkControls() {
                 const label = document.createElement("label");
                 label.htmlFor = `ctrl_chk_${c.sl}`;
                 label.style.cssText = "cursor: pointer; font-size: 0.82rem; color: var(--text-main); font-weight: 600; text-transform: none; white-space: normal; word-break: break-word; line-height: 1.35; margin: 0; flex: 1;";
-                
+
                 const ctrlId = c.control_id || c.sl;
                 const ctrlName = c.label || c.control_name || "";
                 label.innerText = `${ctrlName} (${ctrlId})`;
@@ -1124,7 +1124,7 @@ async function loadFrameworkControls() {
 function updateSelectedScopeCount() {
     const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
     const selected = Array.from(checkboxes).filter(cb => cb.checked);
-    
+
     const countBadge = document.getElementById("sidebar-scope-count-badge");
     if (countBadge) countBadge.innerText = `${selected.length}/${checkboxes.length} · Edit`;
 
@@ -1137,7 +1137,7 @@ function updateSelectedScopeCount() {
         const badge = acc.querySelector(".clause-count-badge");
         const cbs = acc.querySelectorAll(".clause-body input[type='checkbox']");
         const selCbs = Array.from(cbs).filter(cb => cb.checked);
-        
+
         if (badge && cbs.length > 0) {
             if (selCbs.length === cbs.length) {
                 badge.innerText = `[${selCbs.length}/${cbs.length} All]`;
@@ -1166,7 +1166,7 @@ function filterCheckboxList() {
     const input = document.getElementById("controls-search-input");
     if (!input) return;
     const query = input.value.toLowerCase().trim();
-    
+
     const accordions = document.querySelectorAll(".clause-accordion-card");
     accordions.forEach(acc => {
         let hasMatch = false;
@@ -1180,7 +1180,7 @@ function filterCheckboxList() {
                 item.style.display = "none";
             }
         });
-        
+
         if (query) {
             acc.style.display = hasMatch ? "block" : "none";
             const body = acc.querySelector(".clause-body");
@@ -1195,7 +1195,7 @@ async function handleExcelScopeUpload(e) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     const file = files[0];
-    
+
     const badge = document.getElementById("scoping-file-name");
     if (badge) {
         badge.innerText = `📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
@@ -1204,27 +1204,27 @@ async function handleExcelScopeUpload(e) {
 
     const formData = new FormData();
     formData.append("file", file);
-    
+
     try {
         const response = await fetch(`${API_BASE}/controls/parse-scope-excel`, {
             method: "POST",
             body: formData
         });
-        
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Failed to parse Excel file.");
-        
+
         customEvidenceMappings = data.custom_evidence || null;
         customControlDocuments = data.custom_documents || null;
         const matchedSls = new Set(data.matched_sls || []);
-        
+
         // Auto-check mapped controls in checklist, uncheck unmapped
         const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
         checkboxes.forEach(cb => {
             const slNum = parseInt(cb.value);
             cb.checked = matchedSls.has(slNum);
         });
-        
+
         updateSelectedScopeCount();
         alert(`✅ ${data.message || 'Loaded checklist items successfully!'}`);
     } catch (err) {
@@ -1257,20 +1257,20 @@ function selectAllCheckboxes(checked) {
 function setupFileDropZone() {
     const dropZone = document.getElementById("drop-zone");
     if (!dropZone) return;
-    
+
     dropZone.addEventListener("dragover", e => {
         e.preventDefault();
         dropZone.style.borderColor = "var(--primary)";
     });
-    
+
     dropZone.addEventListener("dragleave", () => {
         dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
     });
-    
+
     dropZone.addEventListener("drop", e => {
         e.preventDefault();
         dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
-        
+
         const files = e.dataTransfer.files;
         if (files.length > 0) {
             uploadFiles(files);
@@ -1335,31 +1335,31 @@ async function uploadFiles(files) {
     if (!activeSessionId && currentUser) {
         await loadOrCreateSession(currentUser);
     }
-    
+
     if (!activeSessionId) {
         resetDropZoneUI();
         alert("⚠️ Active session missing. Please create or select an audit session first.");
         return;
     }
-    
+
     const isAuditor = currentUser ? currentUser.role !== "auditee" : true;
     const body = new FormData();
     body.append("session_id", activeSessionId);
     body.append("is_auditor_uploaded", isAuditor ? "true" : "false");
-    
+
     for (let i = 0; i < files.length; i++) {
         body.append("files", files[i]);
     }
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/upload`, {
             method: "POST",
             body: body
         });
-        
+
         const data = await response.json();
         if (!response.ok) throw new Error(formatApiError(data.detail, "Upload failed."));
-        
+
         showToastBanner(`✅ ${files.length} Evidence File(s) successfully uploaded and indexed into RAG memory!`);
         await loadEvidenceFileList();
         setTimeout(loadEvidenceFileList, 600);
@@ -1403,20 +1403,20 @@ async function loadEvidenceFileList() {
     const registries = document.querySelectorAll("#uploaded-files-registry, #auditee-files-registry");
     const countBadge = document.getElementById("evidence-count-badge");
     if (!registries || registries.length === 0) return;
-    
+
     if (!activeSessionId && currentUser) {
         await loadOrCreateSession(currentUser);
     }
-    
+
     if (!activeSessionId) return;
 
     try {
         const response = await fetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
         const data = await response.json();
-        
+
         const files = (data.success && data.files) ? data.files : [];
         if (countBadge) countBadge.innerText = `${files.length} files`;
-        
+
         registries.forEach(registry => {
             registry.innerHTML = "";
             if (files.length === 0) {
@@ -1427,11 +1427,11 @@ async function loadEvidenceFileList() {
                     const ext = fn.split('.').pop().toLowerCase();
                     let fileClass = "file-type-xml";
                     let fileIconText = "XML";
-                    
+
                     if (ext === "pdf") { fileClass = "file-type-pdf"; fileIconText = "PDF"; }
                     else if (["doc", "docx"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "DOC"; }
                     else if (["xls", "xlsx", "csv"].includes(ext)) { fileClass = "file-type-xls"; fileIconText = "XLS"; }
-                    
+
                     const card = document.createElement("div");
                     card.className = "modern-file-card";
                     card.innerHTML = `
@@ -1460,10 +1460,10 @@ async function triggerAuditAnalysis() {
     btn.disabled = true;
     btn.innerText = "⏳ Running Scan (0%)...";
     if (stopBtn) stopBtn.style.display = "block";
-    
+
     const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
     const selectedSls = Array.from(checkboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
-    
+
     if (selectedSls.length === 0) {
         alert("⚠️ Please select at least one control to analyze.");
         btn.disabled = false;
@@ -1471,14 +1471,14 @@ async function triggerAuditAnalysis() {
         if (stopBtn) stopBtn.style.display = "none";
         return;
     }
-    
+
     const frameworkSelect = document.getElementById("framework-select");
     const isVaptFramework = frameworkSelect ? frameworkSelect.value.toUpperCase().includes("VAPT") : false;
     const modelEl = document.getElementById("llm-model-select");
     const model = modelEl ? modelEl.value : "Gemma 4 (e4b)";
     const modeEl = document.querySelector("input[name='audit-mode']:checked");
     const mode = isVaptFramework ? "VAPT validation" : (modeEl ? modeEl.value : "Deep");
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/start`, {
             method: "POST",
@@ -1492,10 +1492,10 @@ async function triggerAuditAnalysis() {
                 custom_documents: customControlDocuments
             })
         });
-        
+
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Failed to trigger scan.");
-        
+
         // Start high-frequency progress polling (every 1 second)
         if (progressInterval) clearInterval(progressInterval);
         progressInterval = setInterval(pollAuditProgress, 1000);
@@ -1517,18 +1517,18 @@ async function pollAuditProgress() {
     try {
         const response = await fetch(`${API_BASE}/audit/status/${activeSessionId}`);
         const data = await response.json();
-        
+
         if (data.status === "running") {
             const p = data.progress || {};
             const pct = typeof p.percent === "number" ? Math.min(100, Math.max(0, p.percent)) : 0;
             const txt = p.text || 'Scanning...';
-            
+
             if (txt && (txt.includes("Scanning") || txt.includes("evaluating"))) {
                 btn.innerText = `⏳ ${pct}% • ${txt}`;
             } else {
                 btn.innerText = `⏳ Running Scan (${pct}%)...`;
             }
-            
+
             if (progressBar) progressBar.style.width = `${pct}%`;
             if (progressPercent) progressPercent.innerText = `${pct}%`;
             if (progressStatus) progressStatus.innerText = `${txt} (${pct}%)`;
@@ -1540,16 +1540,16 @@ async function pollAuditProgress() {
             if (progressBar) progressBar.style.width = `100%`;
             if (progressPercent) progressPercent.innerText = `100%`;
             if (progressStatus) progressStatus.innerText = `Scan completed successfully`;
-            
+
             // Auto-load audit records findings and switch to records view
             await loadFindings();
-            
+
             // Switch to Audit Records tab if not already open
             if (typeof activeTab !== "undefined" && activeTab !== "tab-audit-records") {
                 const recordsTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Records") || b.innerText.includes("Scan workspace"));
                 if (recordsTabBtn) switchTab("tab-audit-records", recordsTabBtn);
             }
-            
+
             alert("✅ Local audit RAG scan completed successfully! Review records below and click 'Save to Shakthi DB' to commit.");
         } else if (data.status === "idle" && data.checkpoint && data.checkpoint.status === "failed") {
             clearInterval(progressInterval);
@@ -1583,7 +1583,7 @@ function showToast(message, type = "info") {
         toast.style.cssText = "position: fixed; bottom: 24px; right: 24px; z-index: 9999; padding: 12px 20px; border-radius: 10px; font-size: 0.85rem; font-weight: 600; color: #ffffff; background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(148, 163, 184, 0.2); box-shadow: 0 10px 25px rgba(0,0,0,0.4); transition: all 0.3s ease; transform: translateY(100px); opacity: 0;";
         document.body.appendChild(toast);
     }
-    
+
     if (type === "warning") {
         toast.style.borderColor = "rgba(245, 158, 11, 0.6)";
         toast.style.boxShadow = "0 4px 20px rgba(245, 158, 11, 0.2)";
@@ -1594,11 +1594,11 @@ function showToast(message, type = "info") {
         toast.style.borderColor = "rgba(59, 130, 246, 0.6)";
         toast.style.boxShadow = "0 4px 20px rgba(59, 130, 246, 0.2)";
     }
-    
+
     toast.innerText = message;
     toast.style.transform = "translateY(0)";
     toast.style.opacity = "1";
-    
+
     setTimeout(() => {
         toast.style.transform = "translateY(100px)";
         toast.style.opacity = "0";
@@ -1609,16 +1609,16 @@ async function stopAuditAnalysis() {
     const stopBtn = document.getElementById("stop-analysis-btn");
     const btn = document.getElementById("run-analysis-btn");
     if (!activeSessionId) return;
-    
+
     if (stopBtn) {
         stopBtn.disabled = true;
         stopBtn.innerText = "⏳ Stopping...";
     }
-    
+
     try {
         const res = await fetch(`${API_BASE}/audit/stop/${activeSessionId}`, { method: "POST" });
         const data = await res.json();
-        
+
         if (data.success) {
             btn.innerText = "⏳ Stopping Scan...";
             showToast("⛔ Stop signal sent — scan will stop after the current control.", "warning");
@@ -1654,13 +1654,13 @@ async function loadFindings() {
     const container = document.getElementById("findings-container");
     if (!container) return;
     container.innerHTML = `<div class="empty-state">Loading findings from Shakthi DB...</div>`;
-    
+
     const userRole = currentUser ? currentUser.role : (selectedRole || "auditor");
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${userRole}`);
         const data = await response.json();
-        
+
         const banner = document.getElementById("shakti-commit-banner");
         const bannerText = document.getElementById("shakti-banner-text");
         if (banner) {
@@ -1676,8 +1676,8 @@ async function loadFindings() {
                 calculateSeverityStats();
 
                 const isFinalized = (data.session_status && data.session_status.includes("Finalized")) ||
-                                    (data.session_title && data.session_title.includes("Finalized")) ||
-                                    (findingsList.length > 0 && findingsList.every(f => f.is_saved_to_shakthi));
+                    (data.session_title && data.session_title.includes("Finalized")) ||
+                    (findingsList.length > 0 && findingsList.every(f => f.is_saved_to_shakthi));
 
                 if (isFinalized) {
                     banner.style.background = "rgba(16, 185, 129, 0.12)";
@@ -1743,7 +1743,7 @@ async function commitSessionToShaktiDB(force = false) {
             showToast(data.message || "Session committed to Shakthi DB!", "info");
             closeUnreviewedWarningModal();
             await loadFindings();
-            
+
             // Switch to Report tab and render real-time review report (only saved findings)
             await renderAuditReportPreview();
             const reportTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Report"));
@@ -1863,7 +1863,7 @@ async function renderAuditReportPreview() {
                 const ctrlTitle = (rawCtrlName && rawCtrlName !== 'null' && rawCtrlName !== 'undefined')
                     ? rawCtrlName
                     : f.control_id;
-                
+
                 const polSub = f.policy_present ? `<div style="font-size:0.68rem; color:#60a5fa; margin-top:2px;">📜 Policy: ${f.policy_present}</div>` : '';
                 const evSub = f.evidence_present ? `<div style="font-size:0.68rem; color:#c084fc; margin-top:1px;">🔍 Evidence: ${f.evidence_present}</div>` : '';
 
@@ -1958,11 +1958,11 @@ function isFindingCompliant(f) {
     if (st === "COMPLIANT" || st === "PASS" || st === "SATISFIED" || st === "ACCEPTED" || wf === "ACCEPTED") {
         return true;
     }
-    
+
     if (st.includes("NON") || st.includes("NOT") || st.includes("GAP") || st.includes("FAIL") || st.includes("PARTIAL") || st.includes("UNSATISFIED")) {
         return false;
     }
-    
+
     return false;
 }
 
@@ -1992,7 +1992,7 @@ function calculateSeverityStats() {
             nonCompliant++;
         }
     });
-    
+
     if (document.getElementById("count-p1")) document.getElementById("count-p1").innerText = p1;
     if (document.getElementById("count-p2")) document.getElementById("count-p2").innerText = p2;
     if (document.getElementById("count-p3")) document.getElementById("count-p3").innerText = p3;
@@ -2044,7 +2044,7 @@ function matchesSeverityFilter(fSeverity, activeFilter) {
 
 function toggleSeverityFilter(sev) {
     document.querySelectorAll(".kpi-box").forEach(b => b.style.outline = "none");
-    
+
     // Reset status filter dropdown to "All" so status doesn't block severity matching
     const select = document.getElementById("status-filter");
     if (select) select.value = "All";
@@ -2058,7 +2058,7 @@ function toggleSeverityFilter(sev) {
         else if (sev.includes("P2")) selector = ".p2-box";
         else if (sev.includes("P3")) selector = ".p3-box";
         else if (sev.includes("P4")) selector = ".p4-box";
-        
+
         if (selector) {
             const box = document.querySelector(selector);
             if (box) box.style.outline = "2px solid #3b82f6";
@@ -2071,10 +2071,10 @@ function renderFindingsList() {
     const container = document.getElementById("findings-container");
     if (!container) return;
     container.innerHTML = "";
-    
+
     const filterStatusElement = document.getElementById("status-filter");
     const filterStatus = filterStatusElement ? filterStatusElement.value : "All";
-    
+
     const filtered = findingsList.filter(f => {
         const isCompliant = isFindingCompliant(f);
         const isInfo = isFindingInformational(f);
@@ -2086,14 +2086,14 @@ function renderFindingsList() {
         if (filterStatus === "Open" && (isCompliant || isInfo || f.status === "Accepted" || f.status === "Rejected")) return false;
         if (filterStatus === "Accepted" && f.status !== "Accepted") return false;
         if (filterStatus === "Rejected" && f.status !== "Rejected") return false;
-        
+
         // Severity level filter (P1, P2, P3, P4)
         if (activeSeverityFilter && !matchesSeverityFilter(f.severity, activeSeverityFilter)) {
             return false;
         }
         return true;
     });
-    
+
     if (filtered.length === 0) {
         const totalCount = findingsList ? findingsList.length : 0;
         container.innerHTML = `
@@ -2105,7 +2105,7 @@ function renderFindingsList() {
             </div>`;
         return;
     }
-    
+
     filtered.forEach(f => {
         const card = document.createElement("div");
         let sevClass = "p3";
@@ -2113,9 +2113,9 @@ function renderFindingsList() {
         if (f_sev.includes("p1") || f_sev.includes("critical")) sevClass = "p1";
         else if (f_sev.includes("p2") || f_sev.includes("high")) sevClass = "p2";
         else if (f_sev.includes("p4") || f_sev.includes("low")) sevClass = "p4";
-        
+
         card.className = `finding-card ${sevClass}`;
-        
+
         let statusBadgeClass = "non-compliant";
         let displayStatusText = "NON-COMPLIANT";
 
@@ -2138,11 +2138,11 @@ function renderFindingsList() {
             statusBadgeClass = "non-compliant";
             displayStatusText = "NON-COMPLIANT";
         }
-        
+
         const ctrlTitle = (f.control_name && f.control_name !== "null") ? f.control_name : ((f.control && f.control !== "null") ? f.control : "");
         const displayTitle = ctrlTitle ? `${f.control_id} - ${ctrlTitle}` : f.control_id;
         const findingJsonStr = JSON.stringify(f).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
-        
+
         // Format Policy Badge
         const polRaw = String(f.policy_present || "No").trim().toLowerCase();
         let polText = "Policy: Not Found";
@@ -2200,7 +2200,7 @@ function renderFindingsList() {
 
             <div class="finding-actions" style="display: flex; justify-content: space-between; align-items: center; margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(148, 163, 184, 0.15);">
                 <div class="auditor-notes" style="font-size: 0.78rem; color: #2563eb; font-weight: 600;">
-                    <span>📁 Evidence Source Location: <i style="color: var(--text-muted); font-weight: 400;">${f.source_files || f.evidence_found || 'Uploaded Policy Document & Evidence Files'}</i></span>
+                    <span>📁 Evidence Source Location: <i style="color: var(--text-muted); font-weight: 400;">${f.source_files || f.evidence_location || f.evidence_source_file || (f.evidence_snippet ? `Evidence Excerpt: "${f.evidence_snippet.slice(0, 45)}..."` : 'Uploaded Policy Document & Evidence Files')}</i></span>
                 </div>
                 <div class="btn-card-group" style="display: flex; gap: 8px;">
                     <button class="btn-secondary" style="color: #10b981; font-weight: 700; border-color: rgba(16, 185, 129, 0.4);" onclick="updateFindingWorkflowStatus(${f.id}, 'Accepted')">✓ Accept</button>
@@ -2329,12 +2329,12 @@ function openEditFindingModal(finding) {
 
     const descElem = document.getElementById("edit-finding-desc");
     if (descElem) descElem.value = finding.description || finding.gap_detected || "";
-    
+
     const srcElem = document.getElementById("edit-finding-source-files");
     if (srcElem) {
         srcElem.value = finding.source_files || finding.evidence_source_file || "";
     }
-    
+
     document.getElementById("edit-finding-snippet").value = finding.evidence_snippet || "";
     document.getElementById("edit-finding-recommendation").value = finding.recommendation || "";
     document.getElementById("edit-finding-reasoning").value = finding.reasoning || finding.description || finding.gap_detected || "";
@@ -2351,7 +2351,7 @@ async function handleEditFindingSubmit(e) {
     const id = document.getElementById("edit-finding-id").value;
     const descValue = document.getElementById("edit-finding-reasoning").value;
     const srcFileValue = document.getElementById("edit-finding-source-files") ? document.getElementById("edit-finding-source-files").value : "";
-    
+
     const body = {
         status: document.getElementById("edit-finding-status").value,
         policy_present: document.getElementById("edit-finding-policy").value,
@@ -2363,7 +2363,7 @@ async function handleEditFindingSubmit(e) {
         recommendation: document.getElementById("edit-finding-recommendation").value,
         reasoning: descValue
     };
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/findings/${id}`, {
             method: "PUT",
@@ -2371,7 +2371,7 @@ async function handleEditFindingSubmit(e) {
             body: JSON.stringify(body)
         });
         const data = await response.json();
-        
+
         if (data.success) {
             closeEditFindingModal();
             loadFindings(); // Reload list
@@ -2387,24 +2387,24 @@ async function sendChatMessage() {
     const input = document.getElementById("chat-input");
     const msg = input.value.trim();
     if (!msg) return;
-    
+
     input.value = "";
-    
+
     const feed = document.getElementById("chat-feed-box");
-    
+
     // Append User Message
     const userDiv = document.createElement("div");
     userDiv.className = "chat-bubble user";
     userDiv.innerHTML = `<p>${msg}</p>`;
     feed.appendChild(userDiv);
     feed.scrollTop = feed.scrollHeight;
-    
+
     // Show Thinking indicator
     const indicator = document.getElementById("chat-generating-indicator");
     indicator.style.display = "block";
-    
+
     const model = document.getElementById("llm-model-select").value;
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/chats/send`, {
             method: "POST",
@@ -2416,10 +2416,10 @@ async function sendChatMessage() {
                 username: currentUser.username
             })
         });
-        
+
         const data = await response.json();
         indicator.style.display = "none";
-        
+
         if (data.success) {
             const aiDiv = document.createElement("div");
             aiDiv.className = "chat-bubble assistant";
@@ -2444,11 +2444,11 @@ async function loadCustomControlsTable() {
     const tbody = document.getElementById("custom-controls-table-body");
     if (!tbody) return;
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Loading custom controls from ShaktiDB...</td></tr>`;
-    
+
     try {
         const response = await fetch(`${API_BASE}/controls?active_only=false`);
         const data = await response.json();
-        
+
         if (data.success && data.controls.length > 0) {
             tbody.innerHTML = "";
             data.controls.forEach(c => {
@@ -2475,7 +2475,7 @@ async function loadCustomControlsTable() {
 
 async function handleCreateControlSubmit(e) {
     e.preventDefault();
-    
+
     const body = {
         control_id: document.getElementById("new-ctrl-id").value.trim(),
         control_name: document.getElementById("new-ctrl-name").value.trim(),
@@ -2483,14 +2483,14 @@ async function handleCreateControlSubmit(e) {
         keywords: document.getElementById("new-ctrl-kws").value.split(",").map(k => k.trim()).filter(k => k),
         description: document.getElementById("new-ctrl-desc").value.trim()
     };
-    
+
     try {
         const response = await fetch(`${API_BASE}/controls`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
         });
-        
+
         const data = await response.json();
         if (data.success) {
             // Reset form
@@ -2507,15 +2507,15 @@ async function handleCreateControlSubmit(e) {
 async function autogenerateKeywords() {
     const name = document.getElementById("new-ctrl-name").value.trim();
     const desc = document.getElementById("new-ctrl-desc").value.trim();
-    
+
     if (!name) {
         alert("⚠️ Please enter a Control Name first.");
         return;
     }
-    
+
     const kwField = document.getElementById("new-ctrl-kws");
     kwField.placeholder = "🧠 AI is generating regex keywords...";
-    
+
     try {
         const response = await fetch(`${API_BASE}/controls/autogen-keywords`, {
             method: "POST",
@@ -2589,7 +2589,7 @@ async function handleModalCustomControlSubmit(e) {
             closeAddCustomControlModal();
             showToast("Custom control saved to Shakthi DB!", "info");
             await loadFrameworkControls();
-            
+
             // Auto expand Custom Controls accordion
             setTimeout(() => {
                 const customHeader = Array.from(document.querySelectorAll(".clause-header")).find(h => h.innerText.includes("Custom Controls"));
@@ -2609,27 +2609,27 @@ async function loadSystemEvents() {
     const tbody = document.getElementById("system-events-table-body");
     const indicator = document.getElementById("logs-page-indicator");
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Loading logs...</td></tr>`;
-    
+
     const severity = document.getElementById("log-severity-filter").value;
-    
+
     try {
         const response = await fetch(`${API_BASE}/logs/system?severity=${severity}&page=${logsPage}&page_size=15`);
         const data = await response.json();
-        
+
         if (data.success && data.events.length > 0) {
             tbody.innerHTML = "";
             logsTotalPages = data.total_pages;
             indicator.innerText = `Page ${logsPage + 1} of ${logsTotalPages}`;
-            
+
             data.events.forEach(e => {
                 const tr = document.createElement("tr");
                 let color = "#aaa";
                 if (e.severity === "ERROR") color = "var(--error)";
                 else if (e.severity === "WARNING") color = "var(--warning)";
                 else if (e.severity === "CRITICAL") color = "#f43f5e";
-                
+
                 tr.innerHTML = `
-                    <td style="color:#64748b; font-family:var(--font-mono);">${e.created_at.slice(0,19)}</td>
+                    <td style="color:#64748b; font-family:var(--font-mono);">${e.created_at.slice(0, 19)}</td>
                     <td><b>${e.event_type}</b></td>
                     <td>${e.actor}</td>
                     <td><span style="color:${color}; font-weight:700;">${e.severity}</span></td>
@@ -2637,7 +2637,7 @@ async function loadSystemEvents() {
                 `;
                 tbody.appendChild(tr);
             });
-            
+
             // Toggle paginator buttons
             document.getElementById("logs-prev-btn").disabled = logsPage === 0;
             document.getElementById("logs-next-btn").disabled = logsPage >= logsTotalPages - 1;
@@ -2721,11 +2721,11 @@ async function exportFindingsCSV() {
                 const reason = `"${(f.reasoning || '').replace(/"/g, '""')}"`;
                 csv += `${f.control_id},"${f.control_name}",${f.severity},${f.status},${desc},${rec},${reason},"${f.source_files}"\n`;
             });
-            
+
             const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.csv`);
+            link.setAttribute("download", `audit_report_${activeSessionId.slice(0, 6)}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -2742,7 +2742,7 @@ async function exportFindingsDOCX() {
         const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser ? currentUser.role : 'auditor'}`);
         const data = await response.json();
         const findings = (data.success && data.findings) ? data.findings : findingsList;
-        
+
         if (!findings || findings.length === 0) {
             alert("⚠️ No findings records to export. Please run an audit scan first.");
             return;
@@ -2854,9 +2854,9 @@ async function triggerDeleteAllRecords() {
         alert("⚠️ Access Denied: Only system administrators can clear database records.");
         return;
     }
-    
+
     if (!confirm("🚨 WARNING: Wiping all database records is irreversible and clears everything. Continue?")) return;
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/clear-records`, {
             method: "DELETE"
@@ -2877,11 +2877,11 @@ async function loadAuditeeSessionsList() {
     const select = document.getElementById("auditee-session-selector");
     if (!select) return;
     select.innerHTML = `<option value="">— Select Auditee Submission —</option>`;
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/auditee-sessions`);
         const data = await response.json();
-        
+
         if (data.success && data.sessions && data.sessions.length > 0) {
             data.sessions.forEach(s => {
                 const opt = document.createElement("option");
@@ -2904,36 +2904,36 @@ async function loadAuditeeEvidenceDocs() {
     const selector = document.getElementById("auditee-session-selector");
     const container = document.getElementById("auditee-evidence-files-box");
     if (!selector || !container) return;
-    
+
     const sessId = selector.value;
     if (!sessId) {
         container.innerHTML = `<div class="empty-state">Select an auditee account above to inspect submitted evidence documents.</div>`;
         return;
     }
-    
+
     container.innerHTML = `<div class="empty-state">Loading evidence documents...</div>`;
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/evidence?session_id=${sessId}`);
         const data = await response.json();
-        
+
         const files = (data.success && data.files) ? data.files : [];
         if (files.length === 0) {
             container.innerHTML = `<div class="empty-state">No uploaded evidence documents found for this auditee session.</div>`;
             return;
         }
-        
+
         container.innerHTML = "";
         files.forEach((f, idx) => {
             const fn = f.filename;
             const ext = fn.split('.').pop().toLowerCase();
             let fileClass = "file-type-xml";
             let fileIconText = "XML";
-            
+
             if (ext === "pdf") { fileClass = "file-type-pdf"; fileIconText = "PDF"; }
             else if (["doc", "docx"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "DOC"; }
             else if (["xls", "xlsx", "csv"].includes(ext)) { fileClass = "file-type-xls"; fileIconText = "XLS"; }
-            
+
             const card = document.createElement("div");
             card.className = "modern-file-card";
             card.style.cssText = "display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px; margin-bottom: 10px;";
@@ -2986,7 +2986,7 @@ async function loadSidebarAuditeeFiles() {
             fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">No auditee submissions found yet.</div>`;
             return;
         }
-    } catch(e) { console.error(e); }
+    } catch (e) { console.error(e); }
 
     const sessId = sessionSelect.value;
     if (!sessId) {
@@ -3029,7 +3029,7 @@ async function loadSidebarAuditeeFiles() {
             `;
             fileList.appendChild(row);
         });
-    } catch(e) {
+    } catch (e) {
         fileList.innerHTML = `<div style="font-size:0.74rem;color:#ef4444;padding:8px;">Error: ${e.message}</div>`;
     }
 }
@@ -3101,24 +3101,24 @@ async function runAnalysisOnSelectedAuditeeDocs() {
         alert("⚠️ Please select an auditee session first.");
         return;
     }
-    
+
     const checkedDocs = Array.from(document.querySelectorAll(".auditee-doc-checkbox:checked")).map(cb => cb.value);
     if (checkedDocs.length === 0) {
         alert("⚠️ Please select at least one document to analyze.");
         return;
     }
-    
+
     // Set active session to target auditee session
     activeSessionId = selector.value;
     document.getElementById("active-session-badge").innerText = `Session ID: ${activeSessionId}`;
-    
+
     // Refresh evidence files list in main workspace
     await loadEvidenceFileList();
-    
+
     // Switch to Scan workspace tab
     const scanTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Scan workspace"));
     if (scanTabBtn) switchTab("tab-scan-workspace", scanTabBtn);
-    
+
     // Trigger RAG Audit Scan
     alert(`🚀 Starting RAG analysis on ${checkedDocs.length} selected document(s) for session ${activeSessionId.slice(0, 8)}...`);
     triggerAuditAnalysis();
@@ -3127,14 +3127,14 @@ async function runAnalysisOnSelectedAuditeeDocs() {
 async function handleScopingUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
-    
+
     const fileBadge = document.getElementById("scoping-file-name");
     fileBadge.innerText = "Parsing excel checklist...";
     fileBadge.style.display = "block";
-    
+
     const body = new FormData();
     body.append("file", file);
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/upload-scope-excel`, {
             method: "POST",
@@ -3142,20 +3142,20 @@ async function handleScopingUpload(event) {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.detail || "Failed to parse checklist.");
-        
+
         fileBadge.innerText = `Checked: ${file.name}`;
-        
+
         // Save mappings globally
         customEvidenceMappings = data.custom_evidence;
         customControlDocuments = data.custom_documents;
-        
+
         // Auto select matched checkboxes in UI checklist
         const matchedSet = new Set(data.matched_sls);
         const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
         checkboxes.forEach(cb => {
             cb.checked = matchedSet.has(parseInt(cb.value));
         });
-        
+
         updateSelectedScopeCount();
         alert(`✅ Loaded checklist items across ${data.matched_sls.length} unique standard controls!`);
     } catch (err) {
@@ -3179,29 +3179,29 @@ function formatApiError(detail, fallbackMsg = "Operation failed.") {
 async function handleSidebarUpload(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
-    
+
     const statusDiv = document.getElementById("sidebar-upload-status");
     if (statusDiv) statusDiv.innerText = "⏳ Uploading files...";
-    
+
     // Ensure active session is loaded
     if (!activeSessionId && currentUser) {
         await loadOrCreateSession(currentUser);
     }
-    
+
     if (!activeSessionId) {
         if (statusDiv) statusDiv.innerText = "❌ Error: Active session missing. Please start a session first.";
         alert("⚠️ Active session missing. Please create or select an audit session first.");
         return;
     }
-    
+
     const body = new FormData();
     body.append("session_id", activeSessionId);
     body.append("is_auditor_uploaded", "true");
-    
+
     for (let i = 0; i < files.length; i++) {
         body.append("files", files[i]);
     }
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/upload`, {
             method: "POST",
@@ -3209,7 +3209,7 @@ async function handleSidebarUpload(event) {
         });
         const data = await response.json();
         if (!response.ok) throw new Error(formatApiError(data.detail, "Upload failed."));
-        
+
         if (statusDiv) statusDiv.innerText = `Successfully uploaded ${files.length} file(s)!`;
         loadEvidenceFileList();
         setTimeout(() => { if (statusDiv) statusDiv.innerText = ""; }, 4000);
@@ -3226,14 +3226,14 @@ async function deliverReportToAuditee() {
         alert("⚠️ Please select a target auditee account first.");
         return;
     }
-    
+
     if (!confirm("Are you sure you want to finalize and send these audit findings to the auditee?")) return;
-    
+
     const body = new FormData();
     body.append("session_id", activeSessionId);
     body.append("auditee_id", auditeeId);
     body.append("username", currentUser ? currentUser.username : "auditor@24");
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/deliver`, {
             method: "POST",
@@ -3242,7 +3242,7 @@ async function deliverReportToAuditee() {
         const data = await response.json();
         if (data.success) {
             alert("✅ Report successfully published and recorded in the Submitted tab!");
-            
+
             // Switch to Submitted Reports tab and refresh list
             const submittedTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Submitted"));
             if (submittedTabBtn) switchTab("tab-submitted-reports", submittedTabBtn);
@@ -3259,33 +3259,33 @@ async function loadSubmittedReports() {
     const container = document.getElementById("submitted-reports-container");
     if (!container) return;
     container.innerHTML = `<div class="empty-state">Loading submitted reports from Shakthi DB...</div>`;
-    
+
     try {
         let url = `${API_BASE}/audit/sessions`;
         if (currentUser && currentUser.role === "auditee") {
             url += `?role=auditee&username=${currentUser.username}`;
         }
-        
+
         const response = await fetch(url);
         const data = await response.json();
-        
+
         if (data.success && data.sessions.length > 0) {
             container.innerHTML = "";
             const seen = new Set();
             const reports = data.sessions.filter(s => {
                 if (!s.session_id || seen.has(s.session_id)) return false;
-                
+
                 const title = (s.session_title || "").toLowerCase();
                 const st = (s.status || "Draft").toLowerCase();
-                
+
                 // Exclude chat sessions and error logs
                 if (title.includes("chat") || title.includes("error")) return false;
-                
+
                 // For auditee, only show sent/delivered/completed reports
                 if (currentUser && currentUser.role === "auditee") {
                     return st.includes("sent") || st.includes("deliver") || st.includes("complet") || st.includes("submit");
                 }
-                
+
                 // For auditor/admin, show non-draft submitted/delivered or finalized reports
                 const isSubmitted = st.includes("sent") || st.includes("deliver") || st.includes("complet") || st.includes("submit") || st.includes("pending") || title.includes("finalized");
                 if (isSubmitted) {
@@ -3294,17 +3294,17 @@ async function loadSubmittedReports() {
                 }
                 return false;
             });
-            
+
             if (reports.length === 0) {
                 container.innerHTML = `<div class="empty-state">No submitted audit reports available yet. Publish a report from the <b>Report</b> tab to view it here.</div>`;
                 return;
             }
-            
+
             reports.forEach(r => {
                 const card = document.createElement("div");
                 card.className = "report-card";
                 card.style.cssText = "background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px; padding: 16px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;";
-                
+
                 let badgeColor = "var(--text-muted)";
                 let badgeBorder = "rgba(148, 163, 184, 0.2)";
                 const statusStr = (r.status || "Submitted").toUpperCase();
@@ -3315,7 +3315,7 @@ async function loadSubmittedReports() {
                     badgeColor = "#f59e0b";
                     badgeBorder = "rgba(245, 158, 11, 0.4)";
                 }
-                
+
                 card.innerHTML = `
                     <div>
                         <h4 style="margin: 0 0 6px 0; color: var(--text-main); font-size: 1.05rem; font-weight: 700;">${r.session_title}</h4>
@@ -3352,11 +3352,11 @@ async function exportReportCSV(sessId) {
                 const reason = `"${(f.reasoning || '').replace(/"/g, '""')}"`;
                 csv += `${f.control_id},"${f.control_name}",${f.severity},${f.status},${desc},${rec},${reason},"${f.source_files}"\n`;
             });
-            
+
             const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
             const link = document.createElement("a");
             link.href = URL.createObjectURL(blob);
-            link.setAttribute("download", `audit_report_${sessId.slice(0,6)}.csv`);
+            link.setAttribute("download", `audit_report_${sessId.slice(0, 6)}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -3372,7 +3372,7 @@ async function exportFeedbackBackup() {
     try {
         const response = await fetch(`${API_BASE}/audit/feedback/export`);
         const data = await response.json();
-        
+
         if (response.ok) {
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
             const link = document.createElement("a");
@@ -3392,12 +3392,12 @@ async function exportFeedbackBackup() {
 async function importFeedbackBackup(event) {
     const file = event.target.files[0];
     if (!file) return;
-    
+
     if (!confirm(`Are you sure you want to import feedback records from ${file.name}?`)) return;
-    
+
     const body = new FormData();
     body.append("file", file);
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/feedback/import`, {
             method: "POST",
@@ -3418,23 +3418,23 @@ async function loadChatSessions() {
     const sidebar = document.getElementById("chat-history-sidebar");
     if (!sidebar) return;
     sidebar.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;'>Loading history...</div>";
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/chats/sessions?role=${currentUser.role}&username=${encodeURIComponent(currentUser.username || '')}`);
         const data = await response.json();
-        
+
         if (data.success) {
             sidebar.innerHTML = "";
             if (data.sessions.length === 0) {
                 sidebar.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;text-align:center;'>No conversations yet.</div>";
                 return;
             }
-            
+
             data.sessions.forEach(s => {
                 const item = document.createElement("div");
                 item.className = `chat-session-item ${s.session_id === activeSessionId ? 'active' : ''}`;
                 item.onclick = () => selectChatSession(s.session_id);
-                
+
                 item.innerHTML = `
                     <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
                         <span>💬</span>
@@ -3454,25 +3454,25 @@ async function loadChatSessions() {
 
 async function selectChatSession(sessionId) {
     activeSessionId = sessionId;
-    
+
     // Refresh active session badge and workspace details
     document.getElementById("active-session-badge").innerText = `Session ID: ${activeSessionId}`;
-    
+
     // Highlight active chat session card
     document.querySelectorAll(".chat-session-item").forEach(item => item.classList.remove("active"));
     loadChatSessions(); // will refresh active class list
-    
+
     // Reload relevant evidence files & findings for the selected conversation context
     loadEvidenceFileList();
     loadFindings();
-    
+
     const feed = document.getElementById("chat-feed-box");
     feed.innerHTML = "<div class='empty-state'>Loading conversation...</div>";
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/chats/history?session_id=${sessionId}&username=${encodeURIComponent(currentUser.username || '')}`);
         const data = await response.json();
-        
+
         if (data.success) {
             feed.innerHTML = "";
             if (data.messages.length === 0) {
@@ -3483,7 +3483,7 @@ async function selectChatSession(sessionId) {
                 `;
                 return;
             }
-            
+
             data.messages.forEach(m => {
                 if (m.role === "findings_snapshot") return; // skip internal snapshots
                 const bubble = document.createElement("div");
@@ -3501,13 +3501,13 @@ async function selectChatSession(sessionId) {
 async function startNewChatSession() {
     // Generate a fresh session ID
     const newSessionId = 'chat_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-    
+
     // Post to register audit report session on backend
     const body = new FormData();
     body.append("session_title", "Custom AI Chat Conversation");
     body.append("framework", "ISO 27001");
     body.append("username", currentUser.username);
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/sessions`, {
             method: "POST",
@@ -3517,7 +3517,7 @@ async function startNewChatSession() {
         if (data.success) {
             // Override report session ID
             activeSessionId = data.session_id;
-            
+
             // Reload sidebar list and select the new blank session
             await selectChatSession(activeSessionId);
             alert("✅ Switched to a fresh new AI conversation session!");
@@ -3529,13 +3529,13 @@ async function startNewChatSession() {
 
 async function clearChatSession(sessionId, event) {
     if (event) event.stopPropagation(); // prevent clicking session activation
-    
+
     if (!confirm("Are you sure you want to clear conversation messages and checkpoints for this session?")) return;
-    
+
     const body = new FormData();
     body.append("session_id", sessionId);
     if (currentUser && currentUser.username) body.append("username", currentUser.username);
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/chats/clear`, {
             method: "POST",
@@ -3576,7 +3576,7 @@ async function exportFindingsDOCX() {
         const exportUrl = `${API_BASE}/audit/export/docx?session_id=${encodeURIComponent(activeSessionId)}${brandingParams}`;
         const link = document.createElement("a");
         link.href = exportUrl;
-        link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.docx`);
+        link.setAttribute("download", `audit_report_${activeSessionId.slice(0, 6)}.docx`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -3596,7 +3596,7 @@ async function exportFindingsPDF() {
         const exportUrl = `${API_BASE}/audit/export/pdf?session_id=${encodeURIComponent(activeSessionId)}${brandingParams}`;
         const link = document.createElement("a");
         link.href = exportUrl;
-        link.setAttribute("download", `audit_report_${activeSessionId.slice(0,6)}.pdf`);
+        link.setAttribute("download", `audit_report_${activeSessionId.slice(0, 6)}.pdf`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -3610,7 +3610,7 @@ function toggleChatSidebar() {
     const sidebar = document.querySelector(".chat-sidebar");
     const toggleText = document.getElementById("toggle-sidebar-text");
     const container = document.querySelector(".chat-container");
-    
+
     if (sidebar.style.display === "none") {
         sidebar.style.display = "flex";
         container.style.gridTemplateColumns = "240px 1fr";
@@ -3626,7 +3626,7 @@ function toggleChatSidebar() {
 function toggleAppTheme() {
     const currentTheme = document.documentElement.getAttribute("data-theme") || (document.body.classList.contains("light-theme") ? "light" : "dark");
     const newTheme = currentTheme === "dark" ? "light" : "dark";
-    
+
     document.documentElement.setAttribute("data-theme", newTheme);
     if (newTheme === "light") {
         document.body.classList.remove("dark-theme");
@@ -3636,7 +3636,7 @@ function toggleAppTheme() {
         document.body.classList.add("dark-theme");
     }
     localStorage.setItem("aicyber_theme", newTheme);
-    
+
     updateThemeToggleUI(newTheme);
 }
 
@@ -3644,7 +3644,7 @@ function updateThemeToggleUI(theme) {
     const icon = document.getElementById("theme-toggle-icon");
     const text = document.getElementById("theme-toggle-text");
     const btn = document.getElementById("theme-toggle-btn");
-    
+
     if (icon && text) {
         if (theme === "light") {
             icon.innerText = "☀️";
@@ -3678,7 +3678,7 @@ function updateThemeToggleUI(theme) {
 function toggleCopilotDrawer() {
     const drawer = document.getElementById("ai-copilot-drawer");
     if (!drawer) return;
-    
+
     if (drawer.style.display === "none" || !drawer.style.display) {
         drawer.style.display = "flex";
         updateCopilotContextBadge();
@@ -3690,14 +3690,14 @@ function toggleCopilotDrawer() {
 function updateCopilotContextBadge() {
     const badge = document.getElementById("copilot-page-context");
     if (!badge) return;
-    
+
     let tabName = "Audit Workspace";
     if (activeTab === "tab-audit-records") tabName = "Audit Records Findings";
     else if (activeTab === "tab-upload-evidence") tabName = "Auditee Document Uploads";
     else if (activeTab === "tab-audit-report") tabName = "Audit Delivery Report";
     else if (activeTab === "tab-manage-controls") tabName = "Controls Management";
     else if (activeTab === "tab-ai-chat") tabName = "Full AI Chat Assistant";
-    
+
     badge.innerText = `📍 Active Context: ${tabName}`;
 }
 
@@ -3719,25 +3719,25 @@ async function sendCopilotMessage() {
     const input = document.getElementById("copilot-input");
     const feed = document.getElementById("copilot-chat-feed");
     const indicator = document.getElementById("copilot-thinking-indicator");
-    
+
     if (!input || !feed) return;
     const msgText = input.value.trim();
     if (!msgText) return;
-    
+
     input.value = "";
-    
+
     // Render user message bubble
     const userBubble = document.createElement("div");
     userBubble.className = "chat-bubble user";
     userBubble.innerHTML = `<p>${escapeHtml(msgText)}</p>`;
     feed.appendChild(userBubble);
     feed.scrollTop = feed.scrollHeight;
-    
+
     if (indicator) indicator.style.display = "block";
-    
+
     const selectedModel = document.getElementById("llm-model-select")?.value || "Gemma 4 (e4b)";
     const uName = currentUser ? currentUser.username : "auditor";
-    
+
     try {
         let activeContext = `[Context: Active Tab = ${activeTab}, Session = ${activeSessionId}]`;
         const response = await fetch(`${API_BASE}/audit/chats/send`, {
@@ -3750,14 +3750,14 @@ async function sendCopilotMessage() {
                 model_choice: selectedModel
             })
         });
-        
+
         const data = await response.json();
         if (indicator) indicator.style.display = "none";
-        
+
         if (!response.ok) throw new Error(data.detail || "Copilot failed to respond.");
-        
+
         const replyText = data.response || data.reply || "No response received from local AI model.";
-        
+
         const aiBubble = document.createElement("div");
         aiBubble.className = "chat-bubble assistant";
         aiBubble.innerHTML = `<p>${escapeHtml(replyText).replace(/\n/g, '<br>').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</p>`;
@@ -3778,7 +3778,7 @@ function toggleSidebarCollapse() {
     const sidebar = document.getElementById("main-sidebar");
     const toggleBtn = document.getElementById("sidebar-toggle-btn");
     if (!sidebar || !toggleBtn) return;
-    
+
     if (sidebar.classList.contains("collapsed")) {
         sidebar.classList.remove("collapsed");
         sidebar.style.width = "300px";
@@ -3798,7 +3798,7 @@ function generateUUID() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
         return crypto.randomUUID().replace(/-/g, "");
     }
-    return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    return 'xxxxxxxxxxxx4xxxyxxxxxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
         const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
     });
@@ -3808,7 +3808,7 @@ function generateUUID() {
 async function startNewAuditSession() {
     activeSessionId = generateUUID();
     findingsList = [];
-    
+
     // Register fresh session in Shakthi DB
     try {
         const username = currentUser ? currentUser.username : "auditor@24";
@@ -3816,7 +3816,7 @@ async function startNewAuditSession() {
         body.append("session_title", `Local Compliance Audit (${activeSessionId.slice(0, 6)})`);
         body.append("framework", "ISO 27001");
         body.append("username", username);
-        
+
         const res = await fetch(`${API_BASE}/audit/sessions`, { method: "POST", body });
         const data = await res.json();
         if (data.success && data.session_id) {
@@ -3830,7 +3830,7 @@ async function startNewAuditSession() {
     if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
     const wsTitle = document.getElementById("workspace-title");
     if (wsTitle) wsTitle.innerText = "Audit Records Workspace";
-    
+
     // Clear evidence files display immediately
     const evidenceRegistry = document.getElementById("uploaded-files-registry");
     const auditeeRegistry = document.getElementById("auditee-files-registry");
@@ -3839,7 +3839,7 @@ async function startNewAuditSession() {
     if (evidenceRegistry) evidenceRegistry.innerHTML = emptyMsg;
     if (auditeeRegistry) auditeeRegistry.innerHTML = emptyMsg;
     if (countBadge) countBadge.innerText = "0 files";
-    
+
     // Clear findings panel
     const findingsContainer = document.getElementById("findings-container");
     if (findingsContainer) {
@@ -3847,18 +3847,18 @@ async function startNewAuditSession() {
     }
 
     // Clear KPI counters
-    ["count-compliant","count-noncompliant","count-p1","count-p2","count-p3","count-p4"].forEach(id => {
+    ["count-compliant", "count-noncompliant", "count-p1", "count-p2", "count-p3", "count-p4"].forEach(id => {
         const el = document.getElementById(id); if (el) el.innerText = "0";
     });
-    
+
     // Hide Shakthi DB banner
     const banner = document.getElementById("shakti-commit-banner");
     if (banner) banner.style.display = "none";
-    
+
     // Reset upload status label
     const uploadStatus = document.getElementById("sidebar-upload-status");
     if (uploadStatus) uploadStatus.innerText = "No files selected";
-    
+
     loadRecentSessionsList();
     alert(`New Audit Session initialized!\nSession ID: ${activeSessionId.slice(0, 8)}...`);
 }
@@ -3866,11 +3866,11 @@ async function startNewAuditSession() {
 async function loadRecentSessionsList() {
     const container = document.getElementById("recent-sessions-list");
     if (!container) return;
-    
+
     try {
         const response = await fetch(`${API_BASE}/audit/sessions`);
         const data = await response.json();
-        
+
         if (data.success && data.sessions.length > 0) {
             container.innerHTML = "";
             data.sessions.slice(0, 8).forEach(sess => {
@@ -3878,7 +3878,7 @@ async function loadRecentSessionsList() {
                 item.className = "recent-session-item";
                 item.style.cssText = "display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; background: rgba(255,255,255,0.05); border-radius: 6px; cursor: pointer; font-size: 0.73rem; transition: background 0.2s;";
                 item.onclick = () => switchActiveAuditSession(sess.session_id);
-                
+
                 const isCurrent = sess.session_id === activeSessionId;
                 item.innerHTML = `
                     <div style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 140px;">
@@ -3917,10 +3917,10 @@ async function fetchLicenseStatus() {
         const res = await fetch(`${API_BASE}/license/wallet`);
         if (!res.ok) return;
         const data = await res.json();
-        
+
         const widgetText = document.getElementById("license-widget-text");
         const widgetBtn = document.getElementById("license-widget-btn");
-        
+
         if (widgetText && widgetBtn) {
             if (data.is_expired) {
                 widgetText.innerText = "Trial Expired [Renew]";
@@ -3934,7 +3934,7 @@ async function fetchLicenseStatus() {
                 widgetBtn.style.color = "#10b981";
             }
         }
-        
+
         if (document.getElementById("lic-group")) document.getElementById("lic-group").innerText = data.auditor_group;
         if (document.getElementById("lic-status-badge")) {
             document.getElementById("lic-status-badge").innerText = data.status;
@@ -3963,7 +3963,7 @@ async function handleActivateLicenseSubmit(e) {
     e.preventDefault();
     const key = document.getElementById("lic-key-input").value.trim();
     if (!key) return;
-    
+
     try {
         const res = await fetch(`${API_BASE}/license/activate`, {
             method: "POST",
@@ -4142,7 +4142,7 @@ async function selectRecentSessionScope() {
     try {
         const response = await fetch(`${API_BASE}/audit/sessions`);
         const data = await response.json();
-        
+
         if (data.success && data.sessions && data.sessions.length > 0) {
             const recent = data.sessions[0];
             activeSessionId = recent.session_id;
@@ -4219,7 +4219,7 @@ function toggleRecentSessionsSidebar() {
     const container = document.getElementById("recent-sessions-container");
     const arrow = document.getElementById("recent-sessions-arrow");
     const btn = document.getElementById("btn-toggle-recent-sidebar");
-    
+
     if (container) {
         const isHidden = (container.style.display === "none" || !container.style.display);
         container.style.display = isHidden ? "block" : "none";
@@ -4236,35 +4236,35 @@ function toggleRecentSessionsSidebar() {
 async function handleScopingExcelUpload(event) {
     const fileInput = event.target;
     if (!fileInput.files || fileInput.files.length === 0) return;
-    
+
     const file = fileInput.files[0];
     const excelBtn = document.getElementById("btn-excel-scoping");
     if (excelBtn) {
         excelBtn.innerText = "📊 Parsing Excel...";
         excelBtn.style.opacity = "0.7";
     }
-    
+
     try {
         const formData = new FormData();
         formData.append("file", file);
-        
+
         const res = await fetch(`${API_BASE}/controls/parse-scope-excel`, {
             method: "POST",
             body: formData
         });
-        
+
         const data = await res.json();
-        
+
         if (data.success && data.matched_sls && data.matched_sls.length > 0) {
             // Uncheck all first
             selectAllCheckboxes(false);
-            
+
             // Check only matched SLs from Excel
             data.matched_sls.forEach(sl => {
                 const chk = document.getElementById(`ctrl_chk_${sl}`);
                 if (chk) chk.checked = true;
             });
-            
+
             updateSelectedScopeCount();
             setScopingMode('Excel Scoping');
             showToastBanner(`📊 EXCEL SCOPING APPLIED: ${data.matched_sls.length} Controls Scoped from Excel ("${file.name}")`);
@@ -4284,23 +4284,23 @@ async function handleScopingExcelUpload(event) {
 
 function parseClientSideCsvScope(file) {
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = function (e) {
         const text = e.target.result;
         const lines = text.split(/\r?\n/);
-        
+
         selectAllCheckboxes(false);
         let count = 0;
-        
+
         allControlsData.forEach(c => {
             const ctrlId = (c.control_id || c.sl || "").toString().toLowerCase();
             const sl = String(c.sl);
-            
+
             let matched = false;
             lines.forEach(line => {
                 const lLower = line.toLowerCase();
                 if (ctrlId && lLower.includes(ctrlId)) matched = true;
             });
-            
+
             if (matched) {
                 const chk = document.getElementById(`ctrl_chk_${sl}`);
                 if (chk) {
@@ -4309,7 +4309,7 @@ function parseClientSideCsvScope(file) {
                 }
             }
         });
-        
+
         if (count === 0) {
             // Default 5 control selection if generic sheet
             for (let i = 1; i <= 5; i++) {
@@ -4318,7 +4318,7 @@ function parseClientSideCsvScope(file) {
             }
             count = 5;
         }
-        
+
         updateSelectedScopeCount();
         setScopingMode('Excel Scoping');
         showToastBanner(`📊 EXCEL SCOPING APPLIED: ${count} Controls Scoped from "${file.name}"`);

@@ -511,6 +511,17 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
                 
             findings = query.order_by(Finding.control_id).all()
+            
+            # Query evidence file names as fallback source document location
+            fallback_source = None
+            try:
+                ev_files = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id).all()
+                ev_names = [ef.filename or (os.path.basename(ef.file_path) if getattr(ef, "file_path", None) else None) for ef in ev_files]
+                ev_names_clean = [name for name in ev_names if name]
+                if ev_names_clean:
+                    fallback_source = ", ".join(ev_names_clean)
+            except Exception:
+                fallback_source = None
         
         result = []
         for f in findings:
@@ -552,6 +563,11 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 raw_sev = (uc_info.get("severity") or "MEDIUM").upper()
                 sev = {"CRITICAL": "P1 Critical", "HIGH": "P2 High", "MEDIUM": "P3 Medium", "LOW": "P4 Low"}.get(raw_sev, "P3 Medium")
 
+            # Resolve exact evidence document source location
+            loc_src = f.source_files or getattr(f, "evidence_location", None) or getattr(f, "evidence_source_file", None)
+            if not loc_src or loc_src in ("null", "undefined", "None", ""):
+                loc_src = fallback_source or "Uploaded Policy Document & Evidence Files"
+
             result.append({
                 "id": f.id,
                 "control_id": f.control_id,
@@ -563,7 +579,8 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 "recommendation": recom,
                 "reasoning": f.reasoning or "Semantic RAG compliance evaluation.",
                 "status": f.status,
-                "source_files": f.source_files,
+                "source_files": loc_src,
+                "evidence_location": loc_src,
                 "policy_present": f.policy_present,
                 "evidence_present": f.evidence_present,
                 "is_saved_to_shakthi": bool(f.is_saved_to_shakthi or f.human_verified),
