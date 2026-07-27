@@ -2184,7 +2184,7 @@ function renderFindingsList() {
             
             <div class="finding-detail-row">
                 <label>Finding Description</label>
-                <p>${f.description || f.gap_detected || f.reasoning || 'Evaluated against ISO 27001 / VAPT compliance standards.'}</p>
+                <p>${f.reasoning || f.description || f.gap_detected || 'Evaluated against ISO 27001 / VAPT compliance standards.'}</p>
             </div>
             
             ${f.evidence_snippet ? `
@@ -2337,7 +2337,7 @@ function openEditFindingModal(finding) {
     
     document.getElementById("edit-finding-snippet").value = finding.evidence_snippet || "";
     document.getElementById("edit-finding-recommendation").value = finding.recommendation || "";
-    document.getElementById("edit-finding-reasoning").value = finding.description || finding.gap_detected || finding.reasoning || "";
+    document.getElementById("edit-finding-reasoning").value = finding.reasoning || finding.description || finding.gap_detected || "";
 
     document.getElementById("edit-finding-modal").classList.add("active");
 }

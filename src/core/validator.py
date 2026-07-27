@@ -849,6 +849,8 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
             cid = finding.get("control_id") or ""
             print(f"[RULE 8 GUARDRAIL] Control {cid}: Evidence present in any form (quote: '{quote[:40]}...'). Upgrading from NON_COMPLIANT to COMPLIANT under Workspace Audit Rule 8.", flush=True)
             finding["status"] = "COMPLIANT"
+            finding["policy_present"] = "Compliant"
+            finding["evidence_present"] = "Compliant"
             finding["severity"] = "N/A"
             finding["recommendation"] = "No action required. Evidence satisfies the control objective. Continue periodic evidence review."
             finding["review_note"] = "Rule 8 Applied: Evidence in any form (document/screenshot/log) satisfied control objective."
@@ -856,13 +858,28 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
     # ── POLICY VS EVIDENCE COMBINATION MATRIX RULE ───────────────────────
     # Both Policy AND Evidence must be Compliant/YES for overall COMPLIANT.
     # If either Policy or Evidence is missing or non-compliant, result is NON_COMPLIANT.
-    pol_pres = str(finding.get("policy_present") or "No").strip().upper()
-    ev_pres  = str(finding.get("evidence_present") or "No").strip().upper()
+    if finding.get("status") == "COMPLIANT":
+        finding["policy_present"] = "Compliant"
+        finding["evidence_present"] = "Compliant"
+        finding["severity"] = "N/A"
+        if finding.get("reasoning"):
+            finding["description"] = finding["reasoning"]
+        finding["recommendation"] = finding.get("recommendation") or "No action required. Continue to maintain current procedures and ensure periodic review of compliance evidence."
+    else:
+        pol_pres = str(finding.get("policy_present") or "No").strip().upper()
+        ev_pres  = str(finding.get("evidence_present") or "No").strip().upper()
 
-    if pol_pres not in ("YES", "COMPLIANT") or ev_pres not in ("YES", "COMPLIANT"):
-        cid = finding.get("control_id") or ""
-        print(f"[POLICY-EVIDENCE MATRIX] Control {cid}: Policy={pol_pres}, Evidence={ev_pres}. Both must be COMPLIANT for overall COMPLIANT. Final Verdict: NON_COMPLIANT", flush=True)
-        finding["status"] = "NON_COMPLIANT"
+        if pol_pres in ("YES", "COMPLIANT") and ev_pres in ("YES", "COMPLIANT"):
+            finding["status"] = "COMPLIANT"
+            finding["policy_present"] = "Compliant"
+            finding["evidence_present"] = "Compliant"
+            finding["severity"] = "N/A"
+            if finding.get("reasoning"):
+                finding["description"] = finding["reasoning"]
+        else:
+            cid = finding.get("control_id") or ""
+            print(f"[POLICY-EVIDENCE MATRIX] Control {cid}: Policy={pol_pres}, Evidence={ev_pres}. Both must be COMPLIANT for overall COMPLIANT. Final Verdict: NON_COMPLIANT", flush=True)
+            finding["status"] = "NON_COMPLIANT"
     # ─────────────────────────────────────────────────────────────────────
             
     return finding
