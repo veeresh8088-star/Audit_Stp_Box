@@ -1671,6 +1671,24 @@ button {
     background: #f1f5f9 !important;
 }
 
+[data-theme="light"] .copilot-quick-prompts {
+    background: #f8fafc !important;
+    border-top-color: #e2e8f0 !important;
+}
+
+[data-theme="light"] .copilot-quick-prompts button {
+    background: #eff6ff !important;
+    border-color: #93c5fd !important;
+    color: #1d4ed8 !important;
+    font-weight: 700 !important;
+}
+
+[data-theme="light"] .copilot-quick-prompts button:hover {
+    background: #2563eb !important;
+    color: #ffffff !important;
+    border-color: #2563eb !important;
+}
+
 [data-theme="light"] .copilot-footer {
     background: #ffffff !important;
     border-top-color: #e2e8f0 !important;
@@ -2054,28 +2072,31 @@ button {
 
 .copilot-quick-prompts {
     display: flex;
-    gap: 6px;
-    padding: 8px 12px;
+    gap: 8px;
+    padding: 10px 14px;
     overflow-x: auto;
-    background: rgba(15, 23, 42, 0.4);
+    background: rgba(15, 23, 42, 0.7);
     border-top: 1px solid var(--border-color);
 }
 
 .copilot-quick-prompts button {
-    background: rgba(37, 99, 235, 0.12);
-    border: 1px solid rgba(37, 99, 235, 0.3);
-    color: #60a5fa;
-    padding: 4px 10px;
-    border-radius: 14px;
-    font-size: 0.72rem;
+    background: rgba(30, 58, 138, 0.45);
+    border: 1px solid rgba(96, 165, 250, 0.5);
+    color: #93c5fd;
+    padding: 5px 12px;
+    border-radius: 16px;
+    font-size: 0.75rem;
+    font-weight: 600;
     white-space: nowrap;
     cursor: pointer;
-    transition: background 0.2s ease;
+    transition: all 0.2s ease;
 }
 
 .copilot-quick-prompts button:hover {
-    background: rgba(37, 99, 235, 0.25);
+    background: #2563eb;
     color: #ffffff;
+    border-color: #2563eb;
+    box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
 }
 
 .copilot-footer {
