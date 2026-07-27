@@ -2504,7 +2504,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         ["Date of the Agreement", "[Date of Agreement]"],
         ["Date of Document", datetime.now().strftime("%dth %B %Y")],
         ["Version", "1.0"],
-        ["Prepared By", st.session_state.get("auditor_firm", "Digital Age Strategies")]
+        ["Prepared By", "Digital Age Strategies"]
     ]
     with pdf.table(col_widths=(60, 130), text_align="L") as table:
         for row in prep_data:
@@ -2543,7 +2543,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     # Details of Auditee (Table 4)
     section_title("Details of Auditee:")
     auditee_data = [
-        ["1", "Name of Organization", st.session_state.get("target_entity", "the Organization")],
+        ["1", "Name of Organization", "the Organization"],
         ["2", "Audit Area", f"IS Audit of {session_title}"],
         ["3", "Location", "Mumbai, India"]
     ]
@@ -2557,7 +2557,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     # Details of Auditor (Table 5)
     section_title("Details of Auditor:")
     auditor_data = [
-        ["1", "Auditor", st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")],
+        ["1", "Auditor", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"],
         ["2", "Auditor", "Mr. Mahaveer Rajannavar BE.CEH, ISO 27001 LA"]
     ]
     with pdf.table(col_widths=(20, 40, 130), text_align="L") as table:
