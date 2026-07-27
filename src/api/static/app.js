@@ -2234,15 +2234,101 @@ async function updateFindingWorkflowStatus(id, status) {
 
 function openEditFindingModal(finding) {
     document.getElementById("edit-finding-id").value = finding.id;
-    document.getElementById("edit-finding-status").value = finding.status;
-    document.getElementById("edit-finding-policy").value = finding.policy_present || "No";
-    document.getElementById("edit-finding-evidence").value = finding.evidence_present || "No";
-    document.getElementById("edit-finding-severity").value = finding.severity || "P3 Medium";
-    document.getElementById("edit-finding-desc").value = finding.description;
+
+    // 1. Normalize and pre-select Compliance Status
+    const statusSelect = document.getElementById("edit-finding-status");
+    const rawStatus = (finding.status || "").toUpperCase().trim();
+    let targetStatusVal = "Non-Compliant";
+
+    if (rawStatus.includes("NON") || rawStatus.includes("GAP") || rawStatus.includes("FAIL")) {
+        targetStatusVal = "Non-Compliant";
+    } else if (rawStatus.includes("PARTIAL")) {
+        targetStatusVal = "Partially Compliant";
+    } else if (rawStatus.includes("OUT") || rawStatus.includes("SCOPE")) {
+        targetStatusVal = "Out Of Scope";
+    } else if (rawStatus.includes("COMPLIANT") || rawStatus.includes("PASS") || rawStatus.includes("SATISFIED") || rawStatus.includes("ACCEPTED")) {
+        targetStatusVal = "Compliant";
+    } else {
+        targetStatusVal = "Non-Compliant";
+    }
+    statusSelect.value = targetStatusVal;
+
+    // 2. Normalize and pre-select Policy Present
+    const polSelect = document.getElementById("edit-finding-policy");
+    const rawPol = String(finding.policy_present || "No").trim().toLowerCase();
+    if (rawPol === "yes" || rawPol === "compliant" || rawPol === "true") {
+        polSelect.value = "Yes";
+    } else if (rawPol === "partial" || rawPol === "non-compliant") {
+        polSelect.value = "Partial";
+    } else {
+        polSelect.value = "No";
+    }
+
+    // 3. Normalize and pre-select Evidence Present
+    const evSelect = document.getElementById("edit-finding-evidence");
+    const rawEv = String(finding.evidence_present || "No").trim().toLowerCase();
+    if (rawEv === "yes" || rawEv === "compliant" || rawEv === "true") {
+        evSelect.value = "Yes";
+    } else if (rawEv === "partial" || rawEv === "non-compliant") {
+        evSelect.value = "Partial";
+    } else {
+        evSelect.value = "No";
+    }
+
+    // 4. Determine Session Type (VAPT vs ISO) & populate Severity Options
+    const isVapt = (
+        (finding.control_id && String(finding.control_id).toUpperCase().includes("VAPT")) ||
+        (finding.category && String(finding.category).toUpperCase().includes("VAPT")) ||
+        (typeof activeSessionTitle !== "undefined" && activeSessionTitle && String(activeSessionTitle).toUpperCase().includes("VAPT"))
+    );
+
+    const sevSelect = document.getElementById("edit-finding-severity");
+    const rawSev = (finding.severity || "").toUpperCase().trim();
+
+    if (isVapt) {
+        // VAPT CVSS v3.1 Score Scale
+        sevSelect.innerHTML = `
+            <option value="Critical (CVSS 9.0-10.0)">Critical (CVSS 9.0 - 10.0)</option>
+            <option value="High (CVSS 7.0-8.9)">High (CVSS 7.0 - 8.9)</option>
+            <option value="Medium (CVSS 4.0-6.9)">Medium (CVSS 4.0 - 6.9)</option>
+            <option value="Low (CVSS 0.1-3.9)">Low (CVSS 0.1 - 3.9)</option>
+            <option value="Informational (CVSS 0.0)">Informational (CVSS 0.0)</option>
+        `;
+        if (rawSev.includes("CRIT") || rawSev.includes("9.") || rawSev.includes("10.")) {
+            sevSelect.value = "Critical (CVSS 9.0-10.0)";
+        } else if (rawSev.includes("HIGH") || rawSev.includes("7.") || rawSev.includes("8.")) {
+            sevSelect.value = "High (CVSS 7.0-8.9)";
+        } else if (rawSev.includes("LOW") || rawSev.includes("1.") || rawSev.includes("2.") || rawSev.includes("3.")) {
+            sevSelect.value = "Low (CVSS 0.1-3.9)";
+        } else if (rawSev.includes("INFO") || rawSev.includes("0.0")) {
+            sevSelect.value = "Informational (CVSS 0.0)";
+        } else {
+            sevSelect.value = "Medium (CVSS 4.0-6.9)";
+        }
+    } else {
+        // ISO NIST Priority Scale (P1-P4)
+        sevSelect.innerHTML = `
+            <option value="P1 Critical">P1 Critical (Critical Gap)</option>
+            <option value="P2 High">P2 High (Major Non-Compliance)</option>
+            <option value="P3 Medium">P3 Medium (Minor Non-Compliance)</option>
+            <option value="P4 Low">P4 Low (Opportunity for Improvement)</option>
+        `;
+        if (rawSev.includes("P1") || rawSev.includes("CRITICAL")) {
+            sevSelect.value = "P1 Critical";
+        } else if (rawSev.includes("P2") || rawSev.includes("HIGH")) {
+            sevSelect.value = "P2 High";
+        } else if (rawSev.includes("P4") || rawSev.includes("LOW")) {
+            sevSelect.value = "P4 Low";
+        } else {
+            sevSelect.value = "P3 Medium";
+        }
+    }
+
+    document.getElementById("edit-finding-desc").value = finding.description || finding.gap_detected || "";
     document.getElementById("edit-finding-snippet").value = finding.evidence_snippet || "";
     document.getElementById("edit-finding-recommendation").value = finding.recommendation || "";
     document.getElementById("edit-finding-reasoning").value = finding.reasoning || "";
-    
+
     document.getElementById("edit-finding-modal").classList.add("active");
 }
 
