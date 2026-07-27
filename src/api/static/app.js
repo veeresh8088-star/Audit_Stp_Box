@@ -2942,20 +2942,19 @@ async function loadAuditeeEvidenceDocs() {
             
             const card = document.createElement("div");
             card.className = "modern-file-card";
-            card.style.cssText = "display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px;";
+            card.style.cssText = "display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px; margin-bottom: 10px;";
             card.innerHTML = `
-                <input type="checkbox" class="auditee-doc-checkbox" value="${fn}" id="auditee_doc_${idx}" checked style="width: 18px; height: 18px; cursor: pointer;">
-                <div class="file-icon-badge ${fileClass}">${fileIconText}</div>
+                <div class="file-icon-badge ${fileClass}" style="width: 36px; height: 36px; font-weight: 800;">${fileIconText}</div>
                 <div class="file-details" style="flex: 1; min-width: 0;">
-                    <label for="auditee_doc_${idx}" class="file-title" style="cursor: pointer; display: block; font-weight: 600; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${fn}">${fn}</label>
-                    <span class="file-meta" style="font-size: 0.72rem; color: var(--text-muted);">${f.size_str || 'Submitted Evidence'}</span>
+                    <div class="file-title" style="font-weight: 600; font-size: 0.9rem; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; color: #f8fafc;" title="${fn}">${fn}</div>
+                    <div class="file-meta" style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">📍 Path: <code style="color: #60a5fa;">${f.filepath || f.path || fn}</code> • ${f.size_str || 'Submitted Evidence'}</div>
                 </div>
-                <span class="badge-pill" style="color:var(--success); border-color:rgba(34,197,94,0.3); font-size: 0.7rem;">SUBMITTED</span>
+                <span class="badge-pill" style="color: #34d399; background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.3); font-size: 0.72rem; padding: 4px 10px; border-radius: 6px; font-weight: 600;">✓ AUDITEE EVIDENCE</span>
             `;
             container.appendChild(card);
         });
     } catch (err) {
-        container.innerHTML = `<div class="error-msg">Error: ${err.message}</div>`;
+        container.innerHTML = `<div class="error-msg">Error loading documents: ${err.message}</div>`;
     }
 }
 

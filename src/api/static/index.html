@@ -776,24 +776,13 @@
                     <div class="auditee-docs-explorer">
                         <div class="auditee-docs-header-card"
                             style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; background: var(--bg-card); border: 1px solid var(--border-color); padding: 16px; border-radius: 14px;">
-                            <div class="form-group" style="margin: 0; min-width: 280px; flex: 1;">
+                            <div class="form-group" style="margin: 0; width: 100%;">
                                 <label
-                                    style="font-weight: 700; font-size: 0.82rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Choose
-                                    Auditee Session to Inspect</label>
+                                    style="font-weight: 700; font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Choose Auditee Session to Inspect Documents</label>
                                 <select id="auditee-session-selector" onchange="loadAuditeeEvidenceDocs()"
-                                    style="width: 100%; padding: 8px 12px; font-size: 0.85rem;">
+                                    style="width: 100%; padding: 10px 14px; font-size: 0.88rem; border-radius: 8px;">
                                     <!-- Loaded dynamically -->
                                 </select>
-                            </div>
-                            <div style="display: flex; align-items: center; gap: 10px;">
-                                <button class="btn-secondary" style="padding: 8px 12px; font-size: 0.78rem;"
-                                    onclick="selectAllAuditeeDocs(true)">Select All</button>
-                                <button class="btn-secondary" style="padding: 8px 12px; font-size: 0.78rem;"
-                                    onclick="selectAllAuditeeDocs(false)">Deselect All</button>
-                                <button class="btn-primary pulse-glowing-btn"
-                                    style="padding: 9px 18px; font-size: 0.84rem; border-radius: 10px;"
-                                    onclick="runAnalysisOnSelectedAuditeeDocs()">▶ Run Analysis on Selected
-                                    Docs</button>
                             </div>
                         </div>
                         <div class="modern-evidence-grid" id="auditee-evidence-files-box">
