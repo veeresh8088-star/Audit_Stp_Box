@@ -324,7 +324,7 @@ function setupTabs(role) {
             { id: "tab-audit-records", label: "Audit Records & Findings" },
             { id: "tab-audit-report", label: "Report Exporter" },
             { id: "tab-auditee-docs", label: "Auditee Submissions" },
-            { id: "tab-manage-controls", label: "Manage & Add Controls" },
+            { id: "tab-manage-controls", label: "Manage Controls and Backup" },
             { id: "tab-admin-logs", label: "System & Auditor Logs" }
         ];
     } else {
@@ -334,7 +334,7 @@ function setupTabs(role) {
             { id: "tab-audit-records", label: "Audit Records & Findings" },
             { id: "tab-audit-report", label: "Report Exporter" },
             { id: "tab-auditee-docs", label: "Auditee Submissions" },
-            { id: "tab-manage-controls", label: "Manage & Add Controls" }
+            { id: "tab-manage-controls", label: "Manage Controls and Backup" }
         ];
     }
     
