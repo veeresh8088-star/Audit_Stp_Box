@@ -1156,8 +1156,9 @@ def api_export_docx(session_id: str, saved_only: bool = False):
                 if f.status == "Compliant":
                     resolved_list.append(f.control_id)
                     
+            fw_name = (report.framework or "Audit_Report").replace(" ", "_").replace("/", "_")
             docx_bytes = export_docx_report(
-                session_title=report.framework,
+                session_title=report.framework or "Audit Report",
                 findings=findings_mapped,
                 resolved_list=resolved_list,
                 status=report.status or "Draft",
@@ -1168,7 +1169,7 @@ def api_export_docx(session_id: str, saved_only: bool = False):
             return StreamingResponse(
                 io.BytesIO(docx_bytes),
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                headers={"Content-Disposition": f"attachment; filename={report.framework.replace(' ', '_')}_Report.docx"}
+                headers={"Content-Disposition": f"attachment; filename={fw_name}_Report.docx"}
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1321,10 +1322,11 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
                 "VAPT" in (report.framework or "").upper() or
                 any("VAPT" in str(f.control_id or "").upper() or "VAPT" in str(getattr(f, "category", "") or "").upper() for f in db_findings)
             )
+            fw_name = (report.framework or "Audit_Report").replace(" ", "_").replace("/", "_")
             if is_vapt:
                 from src.core.report_exporter import _export_vapt_pdf
                 pdf_bytes = _export_vapt_pdf(
-                    session_title=report.framework,
+                    session_title=report.framework or "VAPT Audit Report",
                     findings=findings_mapped,
                     resolved_list=resolved_list,
                     status=report.status or "Completed",
@@ -1333,7 +1335,7 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
             else:
                 from src.core.report_exporter import export_pdf_report
                 pdf_bytes = export_pdf_report(
-                    session_title=report.framework,
+                    session_title=report.framework or "ISO 27001 Audit Report",
                     findings=findings_mapped,
                     resolved_list=resolved_list,
                     status=report.status or "Draft",
@@ -1343,7 +1345,7 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
             return StreamingResponse(
                 io.BytesIO(pdf_bytes),
                 media_type="application/pdf",
-                headers={"Content-Disposition": f"attachment; filename={report.framework.replace(' ', '_')}_Report.pdf"}
+                headers={"Content-Disposition": f"attachment; filename={fw_name}_Report.pdf"}
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
