@@ -2180,12 +2180,6 @@ function renderFindingsList() {
                     <span class="badge-status ${statusBadgeClass}">${displayStatusText}</span>
                     <span class="badge-pill">${f.severity || 'P3 Medium'}</span>
                 </div>
-            </div>` align-items: center; flex-wrap: wrap;">
-                    ${polBadge}
-                    ${evBadge}
-                    <span class="badge-status ${statusBadgeClass}">${f.status}</span>
-                    <span class="badge-pill">${f.severity || 'P3 Medium'}</span>
-                </div>
             </div>
             
             <div class="finding-detail-row">
