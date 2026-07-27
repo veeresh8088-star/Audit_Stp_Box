@@ -2324,10 +2324,11 @@ function openEditFindingModal(finding) {
         }
     }
 
-    document.getElementById("edit-finding-desc").value = finding.description || finding.gap_detected || "";
+    const descElem = document.getElementById("edit-finding-desc");
+    if (descElem) descElem.value = finding.description || finding.gap_detected || "";
     document.getElementById("edit-finding-snippet").value = finding.evidence_snippet || "";
     document.getElementById("edit-finding-recommendation").value = finding.recommendation || "";
-    document.getElementById("edit-finding-reasoning").value = finding.reasoning || "";
+    document.getElementById("edit-finding-reasoning").value = finding.description || finding.gap_detected || finding.reasoning || "";
 
     document.getElementById("edit-finding-modal").classList.add("active");
 }
@@ -2339,16 +2340,17 @@ function closeEditFindingModal() {
 async function handleEditFindingSubmit(e) {
     e.preventDefault();
     const id = document.getElementById("edit-finding-id").value;
+    const descValue = document.getElementById("edit-finding-reasoning").value;
     
     const body = {
         status: document.getElementById("edit-finding-status").value,
         policy_present: document.getElementById("edit-finding-policy").value,
         evidence_present: document.getElementById("edit-finding-evidence").value,
         severity: document.getElementById("edit-finding-severity").value,
-        description: document.getElementById("edit-finding-desc").value,
+        description: descValue,
         evidence_snippet: document.getElementById("edit-finding-snippet").value,
         recommendation: document.getElementById("edit-finding-recommendation").value,
-        reasoning: document.getElementById("edit-finding-reasoning").value
+        reasoning: descValue
     };
     
     try {
