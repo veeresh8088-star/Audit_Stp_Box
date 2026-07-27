@@ -1202,6 +1202,91 @@ def api_import_feedback(file: UploadFile = File(...)):
     finally:
         db.close()
 
+@router.post("/chats/send")
+def api_send_chat_message(req: ChatSendRequest):
+    """
+    Real-time AI Compliance Assistant chat endpoint.
+    Retrieves real-time session audit findings, evidence policies, and control gaps
+    to answer questions in real-time.
+    """
+    db = SessionLocal()
+    try:
+        session_id = req.session_id
+        user_message = req.message
+        username = req.username or "auditor"
+
+        # 1. Save user message to database
+        with force_master():
+            u_msg = ChatMessage(
+                session_id=session_id,
+                role="user",
+                content=user_message,
+                username=username
+            )
+            db.add(u_msg)
+            db.commit()
+
+        # 2. Gather real-time context from active session findings in DB
+        findings_summary = []
+        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+        if report:
+            findings = db.query(Finding).filter(Finding.report_id == report.id).all()
+            for f in findings:
+                findings_summary.append(
+                    f"• [{f.control_id} - {f.control_name or 'Control'}]: Status={f.status}, Severity={f.severity or 'N/A'}, Policy={f.policy_present}, Evidence={f.evidence_present}. Description: {f.description or f.reasoning or 'No details'}"
+                )
+
+        session_context_str = "\n".join(findings_summary) if findings_summary else "No active audit findings recorded yet for this session."
+
+        # 3. Formulate prompt & invoke local AI model
+        prompt_with_context = f"""You are the Lead Cyber Security Auditor AI Compliance Assistant for Shakthi Audit DB.
+Active Audit Session ID: {session_id}
+Real-Time Audit Findings & Evidence Status:
+{session_context_str}
+
+User Question: {user_message}
+
+Answer the user's question concisely, professionally, and accurately based on the active audit session evidence and ISO 27001 / VAPT standards."""
+
+        assistant_reply = ""
+        try:
+            from src.ai.audit_chains import run_ad_hoc_chat
+            assistant_reply = run_ad_hoc_chat(prompt_with_context, model_choice=req.model_choice)
+        except Exception:
+            # Context-aware fallback response if LLM offline
+            msg_lower = user_message.lower()
+            if "gap" in msg_lower or "summarize" in msg_lower or "non-compliant" in msg_lower:
+                gaps = [f for f in findings_summary if "NON_COMPLIANT" in f or "Non-Compliant" in f]
+                if gaps:
+                    assistant_reply = f"Here is the real-time summary of non-compliant gaps ({len(gaps)} total):\n" + "\n".join(gaps[:5])
+                else:
+                    assistant_reply = "Great news! All evaluated controls in this session are currently COMPLIANT."
+            elif "hi" in msg_lower or "hello" in msg_lower or "hey" in msg_lower:
+                assistant_reply = f"Hello! I am your real-time AI Compliance Assistant for session `{session_id}`. I am actively monitoring {len(findings_summary)} control records in real-time. How can I assist you with audit evidence or controls?"
+            else:
+                assistant_reply = f"Based on real-time audit data for session `{session_id}`:\n• Total Findings Tracked: {len(findings_summary)}\n" + (findings_summary[0] if findings_summary else "No findings loaded yet.")
+
+        # 4. Save AI assistant reply to database
+        with force_master():
+            a_msg = ChatMessage(
+                session_id=session_id,
+                role="assistant",
+                content=assistant_reply,
+                username=username
+            )
+            db.add(a_msg)
+            db.commit()
+
+        return {
+            "success": True,
+            "reply": assistant_reply,
+            "response": assistant_reply
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 @router.get("/chats/sessions")
 def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = None):
     """Retrieves list of active compliance sessions scoped to the logged-in user."""
