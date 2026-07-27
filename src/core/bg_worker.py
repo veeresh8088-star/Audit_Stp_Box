@@ -410,8 +410,8 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             completed_batches = (idx + 1) // batch_size
             _checkpoint_update(checkpoint_session_id, completed_batches, all_results)
 
-    resolved_list = [r["control_id"] for r in all_results if r.get("status") == "Compliant"]
-    findings_list = [r for r in all_results if r.get("status") != "Compliant"]
+    resolved_list = [r["control_id"] for r in all_results if (r.get("status") or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")]
+    findings_list = [r for r in all_results if (r.get("status") or "").upper() not in ("COMPLIANT", "ACCEPTED", "PASS")]
     
     end_msg = f"[AUDIT COMPLETE] Evaluated {total} controls in {time.time() - overall_start_time:.1f}s. Compliant: {len(resolved_list)}, Gaps: {len(findings_list)}"
     print(f"[{time.strftime('%H:%M:%S')}] {end_msg}\n", flush=True)
@@ -439,17 +439,16 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         except Exception as _hc_err:
             _backend_label = "llama.cpp" if _is_llamacpp else "Ollama"
             _err_msg = (
-                f"❌ {_backend_label} server is not reachable at {_llm_host}. "
-                f"Please start your LLM server and try again. ({_hc_err})"
+                f"Cannot connect to {_backend_label} server at {_llm_host}. "
+                "Please start the service before running audits."
             )
-            print(f"[_run_ollama_bg] Pre-flight FAILED: {_err_msg}", flush=True)
+            print(f"[_run_ollama_bg ERROR] {_err_msg}", flush=True)
             with _bg_lock:
-                _bg_results[bg_key] = {"error": _err_msg}
-                _bg_store["progress"].pop(bg_key, None)
+                _bg_store["progress"][bg_key] = {"text": f"Error: {_backend_label} offline", "percent": 0}
             _checkpoint_finish(_sid, "failed")
             return
-        # ─────────────────────────────────────────────────────────────────────
 
+        print(f"[_run_ollama_bg] Pipeline executing for session {_sid}...", flush=True)
         with _bg_lock:
             _bg_store["progress"][bg_key] = {
                 "text": "🔍 Scanning file security...",
@@ -486,7 +485,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 db_write = SessionLocal()
                 db_write.query(EvidenceFile).filter(
                     EvidenceFile.filename.in_(file_names_list)
-                ).update({EvidenceFile.status: "Reviewing"}, synchronize_session=False)
+                ).update({EvidenceFile.status: "Processing"}, synchronize_session=False)
                 db_write.commit()
                 db_write.close()
         except Exception as e:
@@ -554,7 +553,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                             report_id=report.id,
                             control_id=f.get("control_id"),
                             control_name=f.get("control_label") or f.get("control"),
-                            severity=f.get("severity", "P3 Medium"),
+                            severity="N/A" if is_comp else f.get("severity", "P3 Medium"),
                             description=f_desc,
                             gap_detected=f_desc,
                             relevance_score=f.get("relevance_score", 0),
@@ -562,14 +561,16 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                             evidence_snippet=f.get("evidence_snippet", ""),
                             recommendation=f_recom,
                             reasoning=f.get("reasoning", "Semantic RAG compliance evaluation."),
-                            status=f_status,
+                            status="COMPLIANT" if is_comp else f_status,
+                            policy_present=f.get("policy_present") or ("Compliant" if is_comp else "No"),
+                            evidence_present=f.get("evidence_present") or ("Compliant" if is_comp else "No"),
                             source_files=f.get("source_files", "")
                         ))
                     
                     # 3. Calculate score and update ComplianceScore
                     db_write.query(ComplianceScore).filter(ComplianceScore.report_id == report.id).delete()
-                    in_scope = [f for f in all_results_combined if f.get("status") in ("Compliant", "Partially Compliant", "Non-Compliant")]
-                    compliant = [f for f in in_scope if f.get("status") == "Compliant"]
+                    in_scope = [f for f in all_results_combined if f.get("status")]
+                    compliant = [f for f in in_scope if (f.get("status") or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")]
                     score_pct = int(len(compliant) / max(len(in_scope), 1) * 100) if in_scope else 0
                     db_write.add(ComplianceScore(
                         report_id=report.id,
