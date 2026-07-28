@@ -624,17 +624,39 @@ async function resumeAuditFromCheckpoint() {
 
 // ── SESSION MANAGEMENT ──
 
-async function startNewAuditSession(skipPrompt = false) {
+function openNewSessionModal() {
+    const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const defaultTitle = `ISO 27001 Audit — ${todayStr}`;
+    const modal = document.getElementById("new-session-modal");
+    const input = document.getElementById("new-session-title-input");
+    if (input) input.value = defaultTitle;
+    if (modal) modal.style.display = "flex";
+    if (input) setTimeout(() => { input.focus(); input.select(); }, 50);
+}
+
+function closeNewSessionModal() {
+    const modal = document.getElementById("new-session-modal");
+    if (modal) modal.style.display = "none";
+}
+
+function handleNewSessionSubmit(e) {
+    e.preventDefault();
+    const input = document.getElementById("new-session-title-input");
+    const title = input ? input.value.trim() : "";
+    closeNewSessionModal();
+    startNewAuditSession(false, title);
+}
+
+async function startNewAuditSession(skipPrompt = false, customTitle = null) {
     if (!currentUser) return;
     try {
         const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         const defaultTitle = `ISO 27001 Audit — ${todayStr}`;
-        let finalTitle = defaultTitle;
+        let finalTitle = customTitle || defaultTitle;
 
-        if (!skipPrompt) {
-            const userTitle = prompt("Enter Audit Session Title / Scope Name:", defaultTitle);
-            if (userTitle === null) return; // User pressed Cancel
-            finalTitle = userTitle.trim() || defaultTitle;
+        if (!skipPrompt && customTitle === null) {
+            openNewSessionModal();
+            return;
         }
 
         const shortId = Math.random().toString(36).substring(2, 8);
