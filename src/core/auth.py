@@ -16,16 +16,17 @@ def _hash_pw(pw: str) -> str:
 
 def validate_username(username: str) -> tuple[bool, str]:
     """
-    Enforces Gmail address rule:
-    Usernames must be a valid @gmail.com email address (e.g. user@gmail.com).
-    Admin account ('admin') and legacy test accounts are explicitly exempt.
+    Enforces Universal Email Address rule:
+    Usernames must be a valid email address with any valid domain extension (e.g. user@gmail.com, user@company.com, user@college.ac.in).
+    Admin ('admin') and system test accounts are explicitly exempt.
     """
     uname = (username or "").strip().lower()
     if uname in ("admin", "auditor@24", "auditee2@organization.com"):
         return True, ""
     
-    if not uname.endswith("@gmail.com") or len(uname) <= 10 or "@" not in uname:
-        return False, "Username must be a valid Gmail address (e.g., user@gmail.com)."
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+    if not re.match(pattern, uname, re.IGNORECASE):
+        return False, "Username must be a valid email address (e.g., user@gmail.com, user@company.com, or user@college.ac.in)."
     return True, ""
 
 def validate_iso_password(password: str) -> tuple[bool, str]:

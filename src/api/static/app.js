@@ -4763,3 +4763,89 @@ async function populateBenchmarkSessionSelector() {
         console.error("Failed to populate benchmark session selector:", err);
     }
 }
+
+// ── FORGOT PASSWORD TOTP RECOVERY ENGINE ──
+function openForgotPasswordModal() {
+    const modal = document.getElementById("forgot-password-modal");
+    if (!modal) return;
+    document.getElementById("fp-step-1").style.display = "block";
+    document.getElementById("fp-step-2").style.display = "none";
+    document.getElementById("fp-username-input").value = "";
+    document.getElementById("fp-otp-input").value = "";
+    document.getElementById("fp-new-password-input").value = "";
+    modal.style.display = "flex";
+}
+
+function closeForgotPasswordModal() {
+    const modal = document.getElementById("forgot-password-modal");
+    if (modal) modal.style.display = "none";
+}
+
+async function requestForgotPasswordTOTP() {
+    const username = (document.getElementById("fp-username-input").value || "").trim();
+    if (!username) {
+        alert("Please enter your registered username.");
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/forgot-password/request`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: username })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            alert(data.detail || data.message || "Failed to find account username.");
+            return;
+        }
+
+        document.getElementById("fp-qr-img").src = data.qr_code_base64;
+        document.getElementById("fp-qr-secret").innerText = data.totp_secret;
+        document.getElementById("fp-step-1").style.display = "none";
+        document.getElementById("fp-step-2").style.display = "block";
+        showToast("Authenticator QR loaded! Enter 6-digit code to reset password.", "info");
+    } catch (err) {
+        console.error("Forgot password error:", err);
+        alert("Error connecting to server.");
+    }
+}
+
+async function submitResetPasswordTOTP() {
+    const username = (document.getElementById("fp-username-input").value || "").trim();
+    const otpCode = (document.getElementById("fp-otp-input").value || "").trim();
+    const newPassword = (document.getElementById("fp-new-password-input").value || "").trim();
+
+    if (!otpCode || otpCode.length < 6) {
+        alert("Please enter a valid 6-digit TOTP code from Google Authenticator.");
+        return;
+    }
+    if (!newPassword || newPassword.length < 8) {
+        alert("New password must be at least 8 characters long under ISO 27001 policy.");
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/forgot-password/reset`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                username: username,
+                otp_code: otpCode,
+                new_password: newPassword
+            })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            alert(data.detail || data.message || "Failed to reset password. Check your TOTP code.");
+            return;
+        }
+
+        closeForgotPasswordModal();
+        alert(`✅ Password successfully reset for '${username}'! You can now sign in with your new password.`);
+        showToast("Password reset successful!", "success");
+    } catch (err) {
+        console.error("Password reset error:", err);
+        alert("Error resetting password.");
+    }
+}
