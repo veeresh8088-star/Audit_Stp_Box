@@ -1577,9 +1577,9 @@ def api_export_token_benchmark(session_id: Optional[str] = None):
                             tot_lat += l_s
 
                             ctrls_detail.append({
-                                "control_id": f.control_id,
-                                "control_name": f.title or f.control_name or f.control_id,
-                                "status": f.status or "COMPLIANT",
+                                "control_id": getattr(f, "control_id", "") or "",
+                                "control_name": getattr(f, "control_name", None) or getattr(f, "title", None) or getattr(f, "control_id", ""),
+                                "status": getattr(f, "status", None) or "COMPLIANT",
                                 "prompt_tokens": p_t,
                                 "completion_tokens": c_t,
                                 "latency_sec": l_s

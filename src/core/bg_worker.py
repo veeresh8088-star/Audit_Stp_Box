@@ -111,11 +111,11 @@ def _get_expected_evidence(uc, custom_evidence=None):
         return custom_evidence.get(uc["use_case"], uc["expected"])
     return uc["expected"]
 
-def _build_controls_for_audit(selected_sls, custom_evidence=None):
+def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
     all_ucs = list(USE_CASES) + _load_custom_use_cases()
     controls = []
     for uc in all_ucs:
-        if uc["sl"] in selected_sls:
+        if selected_sls is None or uc["sl"] in selected_sls:
             controls.append({
                 "control": uc["use_case"],
                 "label": uc["label"],
@@ -294,32 +294,93 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
         not custom_docs
     )
     if is_auto_scoping:
-        from src.core.retrieval import _retrieve_rag_context
+        import re
+        import math
+
+        # ── STEP 1: KEYWORD PRE-SCORE ────────────────────────────────────
+        stopwords = {
+            "whether", "is", "are", "the", "and", "for", "with", "available", "enabled",
+            "done", "used", "audit", "evidence", "check", "system", "information", "security",
+            "management", "policies", "policy", "shall", "should", "must", "will", "has",
+            "have", "been", "that", "this", "also", "from", "into", "their", "which",
+            "data", "user", "users", "access", "control", "controls", "process", "processes",
+            "document", "documents", "record", "records", "activity", "activities", "include",
+            "including", "ensure", "required", "requirement", "requirements", "related", "relevant",
+            "review", "reviews", "update", "updates", "implement", "implementation", "define",
+            "defined", "maintain", "maintained", "establish", "established", "appropriate",
+            "effective", "internal", "external", "based", "provide", "provided", "all",
+            "each", "other", "any", "not", "only", "such", "may", "its", "use", "organization",
+            "asset", "assets", "risk", "risks", "measure", "measures", "protect", "protection"
+        }
+        full_text = (str(context or "") + " " + " ".join(file_names_list or [])).lower()
         filtered_controls = []
         out_of_scope_results = []
 
+        def _kw_score(c):
+            combined = (c.get("label","") + " " + c.get("expected","") + " " + c.get("prompt_hint","")).lower()
+            phrases = re.findall(r'\b[a-z]{5,}(?:\s+[a-z]{4,}){1,3}\b', combined)
+            phrases = [p for p in phrases if not any(w in stopwords for w in p.split())]
+            single_kw = [w for w in set(re.findall(r'\b[a-z]{7,}\b', combined)) if w not in stopwords]
+            return sum(3 for p in phrases if p in full_text) + sum(1 for w in single_kw if w in full_text)
+
+        kw_scores = {c["control"]: _kw_score(c) for c in controls}
+
+        # ── STEP 2: EMBEDDING SIMILARITY (batch, 2 calls total) ──────────
+        # Get one representative embedding for the whole evidence package
+        from src.core.llm_client import get_embedding
+        evidence_summary = (context or "")[:4000]  # First 4000 chars as evidence representative
+        emb_evidence = None
+        try:
+            emb_evidence = get_embedding(evidence_summary)
+        except Exception as _emb_err:
+            print(f"[AI AUTO-SCOPE] Embedding call failed, using keyword-only: {_emb_err}", flush=True)
+
+        def _cosine(v1, v2):
+            if not v1 or not v2:
+                return 0.0
+            dot = sum(a * b for a, b in zip(v1, v2))
+            n1 = math.sqrt(sum(a * a for a in v1))
+            n2 = math.sqrt(sum(b * b for b in v2))
+            return dot / (n1 * n2) if n1 and n2 else 0.0
+
+        # Embed all control labels+expected evidence in ONE call each (using file name hinting)
+        control_sims = {}
+        if emb_evidence:
+            for c in controls:
+                ctrl_text = f"{c['label']}. {c.get('expected','')}"[:500]
+                try:
+                    emb_ctrl = get_embedding(ctrl_text)
+                    control_sims[c["control"]] = _cosine(emb_evidence, emb_ctrl)
+                except Exception:
+                    control_sims[c["control"]] = 0.0
+        else:
+            control_sims = {c["control"]: 0.0 for c in controls}
+
+        print(f"[AI AUTO-SCOPE] Hybrid scoring: keyword + embedding for {len(controls)} controls", flush=True)
+
+        # ── STEP 3: HYBRID SCORE & THRESHOLD ─────────────────────────────
+        # keyword_score (0-∞) + embedding_similarity (0.0-1.0, scaled to 0-10)
+        # Accept if hybrid_score >= 5 OR cosine_similarity >= 0.35 (strong semantic match)
         for c in controls:
-            condensed, _, _ = _retrieve_rag_context(
-                context=context,
-                controls_batch=[c],
-                file_names_list=file_names_list,
-                ollama_model=ollama_model,
-                KEYWORD_SYNONYMS={}
-            )
-            if condensed and len(condensed.strip()) >= 15:
+            ks = kw_scores.get(c["control"], 0)
+            cos = control_sims.get(c["control"], 0.0)
+            hybrid = ks + (cos * 10)  # Scale cosine 0-1 → 0-10
+
+            if hybrid >= 5 or cos >= 0.35:
                 filtered_controls.append(c)
+                print(f"[SCOPE MATCH] {c['control']}: {c['label']} | kw={ks} emb={cos:.3f} hybrid={hybrid:.2f}", flush=True)
             else:
                 out_of_scope_results.append({
                     "control_id": c["control"],
                     "control": c["label"],
-                    "relevance_score": 0,
+                    "relevance_score": round(hybrid, 2),
                     "evidence_found": "Not Relevant",
                     "evidence_snippet": "",
                     "status": "Out of Scope",
                     "severity": "N/A",
                     "finding": "Control does not apply to this document scope",
                     "recommendation": "",
-                    "reasoning": "AI Auto-Scoping pre-filter determined control is out of scope for uploaded documents.",
+                    "reasoning": f"AI Hybrid Auto-Scoping: keyword={ks}, embedding_sim={cos:.3f}, hybrid={hybrid:.2f} (below threshold). Control is out of scope.",
                     "source_files": scanned_files_str,
                 })
 
