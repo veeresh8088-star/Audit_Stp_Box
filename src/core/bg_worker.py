@@ -30,6 +30,79 @@ _CUSTOM_USE_CASES_CACHE = []
 _CUSTOM_UC_CACHE_TS = 0
 BACKEND_NAME = "Ollama"
 
+# ── GLOBAL TOPIC → ISO CONTROL MAPPING TABLE ─────────────────────────────
+TOPIC_CONTROL_MAP = {
+    # Authentication & Identity
+    "multi-factor authentication": ["8.5", "5.17", "5.16"],
+    "mfa": ["8.5", "5.17"], "otp": ["8.5", "5.17"], "2fa": ["8.5", "5.17"],
+    "two-factor": ["8.5", "5.17"], "password": ["8.5", "5.17"],
+    "authentication": ["8.5", "5.17", "5.15"], "authentication process": ["8.5", "5.17"],
+    "authentication information": ["5.17"], "identity management": ["5.16", "5.15"],
+    "iam": ["5.16", "5.15", "8.2", "5.18"], "idam": ["5.16", "5.15", "8.2", "5.18"],
+    "single sign-on": ["8.5", "5.16"], "sso": ["8.5", "5.16"],
+    # Privileged Access / PAM
+    "privileged access": ["8.2", "5.15", "5.18"], "pam": ["8.2", "5.15", "5.18"],
+    "pim": ["8.2", "5.15"], "admin access": ["8.2", "5.18"],
+    "root access": ["8.2", "5.18"], "role based access": ["5.15", "5.18", "8.2"],
+    "rbac": ["5.15", "5.18"], "access rights": ["5.18", "5.15"],
+    "access control": ["5.15", "5.18", "8.3"], "access management": ["5.15", "5.18"],
+    # Monitoring & Logging
+    "monitoring": ["8.16", "7.4", "5.22"], "cloudwatch": ["8.16", "7.4"],
+    "aws cloudwatch": ["8.16", "7.4", "5.23"], "cloud monitoring": ["8.16", "5.23", "5.22", "7.4"],
+    "siem": ["8.16", "8.15"], "alerting": ["8.16", "5.25"],
+    "logging": ["8.15", "8.16", "5.28"], "log management": ["8.15", "5.28"],
+    "log archival": ["8.15", "5.28"], "log archive": ["8.15", "5.28"],
+    "archived log": ["8.15", "5.28"], "audit log": ["8.15", "5.28"],
+    "prod log": ["8.15", "5.28"], "syslog": ["8.15"], "event logs": ["8.15"],
+    "collection of evidence": ["5.28"], "evidence collection": ["5.28"],
+    # NTP / Clock
+    "ntp": ["8.17"], "ntp server": ["8.17"], "clock synchronization": ["8.17"],
+    "clock sync": ["8.17"], "ntp clock sync": ["8.17"],
+    "time sync": ["8.17"], "time server": ["8.17"], "timestamp": ["8.17"],
+    # Cloud Services
+    "cloud": ["5.23", "8.16"], "aws": ["5.23", "8.16"], "azure": ["5.23"], "gcp": ["5.23"],
+    "cloud services": ["5.23"], "cloud security": ["5.23"],
+    # Network Security
+    "network security": ["8.20", "8.21", "8.22"], "firewall": ["8.20", "VAPT-13"],
+    "network segmentation": ["8.22", "VAPT-13"], "vpn": ["6.7", "8.20"],
+    "remote working": ["6.7"], "remote access": ["6.7", "8.20"],
+    # Vulnerability & Patch
+    "vulnerability": ["8.8", "VAPT-11"], "patch": ["VAPT-12", "8.8"],
+    "patch management": ["VAPT-12", "8.8"], "vulnerability scan": ["8.8", "VAPT-3"],
+    "penetration test": ["VAPT-5", "VAPT-6", "8.29"],
+    "pentest": ["VAPT-5", "VAPT-6"], "vapt": ["VAPT-5", "VAPT-6", "8.29"],
+    # Operations & Procedures
+    "operating procedures": ["5.37"], "documented procedures": ["5.37"],
+    "sop": ["5.37"], "operational procedure": ["5.37"],
+    "standard operating procedure": ["5.37"],
+    # Business Continuity
+    "business continuity": ["5.29", "5.30"], "bcp": ["5.29", "5.30"],
+    "disaster recovery": ["5.29", "5.30"], "dr": ["5.29", "5.30"],
+    "backup": ["8.13"], "data backup": ["8.13"], "backup policy": ["8.13"],
+    # HR & Personnel
+    "hr security": ["5.1", "5.37"], "background check": ["5.1"],
+    "screening": ["5.1"], "onboarding": ["5.1"], "offboarding": ["5.1"],
+    "terms of employment": ["5.1"],
+    # Physical Security
+    "physical security": ["7.1", "7.2", "7.4"], "visitor": ["7.2"],
+    "visitor log": ["7.2"], "cctv": ["7.4"], "badge": ["7.2"],
+    "physical access": ["7.1", "7.2"],
+    # Supplier / Vendor
+    "supplier": ["5.19", "5.21", "5.22"], "vendor": ["5.19", "5.21", "5.22"],
+    "third party": ["5.19", "5.22"], "supplier security": ["5.19", "5.21", "5.22"],
+    # Application & Software
+    "software development": ["8.25", "8.28"], "sdlc": ["8.25", "8.28"],
+    "secure coding": ["8.28"], "code review": ["8.28"],
+    "api security": ["8.26"], "fraud analytics": ["8.26"],
+    # Cryptography & Key Management
+    "encryption": ["8.24"], "cryptography": ["8.24"],
+    "kms": ["8.24"], "ssl": ["8.24"], "tls": ["8.24"], "key management": ["8.24"],
+    # Incident & Risk
+    "incident": ["5.24", "5.25", "5.26"], "incident response": ["5.24", "5.25"],
+    "security incident": ["5.24"], "incident management": ["5.24", "5.25"],
+    "risk assessment": ["5.12"], "risk management": ["5.12"], "risk": ["5.12"]
+}
+
 def log_dev_latency(message: str):
     """Appends performance and execution log entries for developer latency tracking."""
     try:
