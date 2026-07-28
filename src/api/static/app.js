@@ -4624,7 +4624,7 @@ async function handleScopingExcelUpload(event) {
 
             updateSelectedScopeCount();
             setScopingMode('Excel Scoping');
-            showToastBanner(`📊 EXCEL SCOPING APPLIED: ${data.matched_sls.length} Controls Scoped from Excel ("${file.name}")`);
+            showToastBanner(`EXCEL SCOPING APPLIED: ${data.matched_sls.length} Controls Scoped from Excel ("${file.name}")`);
         } else {
             parseClientSideCsvScope(file);
         }
@@ -4632,7 +4632,7 @@ async function handleScopingExcelUpload(event) {
         parseClientSideCsvScope(file);
     } finally {
         if (excelBtn) {
-            excelBtn.innerText = "📊 Excel Scoping";
+            excelBtn.innerText = "Excel Scoping";
             excelBtn.style.opacity = "1";
         }
         fileInput.value = "";
@@ -4678,7 +4678,7 @@ function parseClientSideCsvScope(file) {
 
         updateSelectedScopeCount();
         setScopingMode('Excel Scoping');
-        showToastBanner(`📊 EXCEL SCOPING APPLIED: ${count} Controls Scoped from "${file.name}"`);
+        showToastBanner(`EXCEL SCOPING APPLIED: ${count} Controls Scoped from "${file.name}"`);
     };
     reader.readAsText(file);
 }
