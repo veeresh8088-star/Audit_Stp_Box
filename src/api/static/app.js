@@ -608,18 +608,23 @@ async function resumeAuditFromCheckpoint() {
 
 // ── SESSION MANAGEMENT ──
 
-async function startNewAuditSession() {
+async function startNewAuditSession(skipPrompt = false) {
     if (!currentUser) return;
     try {
         const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
         const defaultTitle = `ISO 27001 Audit — ${todayStr}`;
-        const userTitle = prompt("Enter Audit Session Title / Scope Name:", defaultTitle);
-        if (userTitle === null) return; // User pressed Cancel
-        const finalTitle = userTitle.trim() || defaultTitle;
+        let finalTitle = defaultTitle;
+
+        if (!skipPrompt) {
+            const userTitle = prompt("Enter Audit Session Title / Scope Name:", defaultTitle);
+            if (userTitle === null) return; // User pressed Cancel
+            finalTitle = userTitle.trim() || defaultTitle;
+        }
 
         const shortId = Math.random().toString(36).substring(2, 8);
         activeSessionId = `session-${Date.now()}-${shortId}`;
         activeSessionTitle = finalTitle;
+        findingsList = [];
 
         const badgeEl = document.getElementById("active-session-badge");
         const titleEl = document.getElementById("workspace-title");
@@ -627,15 +632,16 @@ async function startNewAuditSession() {
         if (titleEl) titleEl.innerText = activeSessionTitle;
 
         // Reset workspace UI for fresh session
-        const uploadedRegistry = document.getElementById("uploaded-files-registry");
-        if (uploadedRegistry) {
-            uploadedRegistry.innerHTML = `<div class="empty-state">No files uploaded yet. Upload files to verify compliance.</div>`;
-        }
+        const emptyMsg = `<div class="empty-state">No files uploaded yet. Upload files to verify compliance.</div>`;
+        const evidenceRegistry = document.getElementById("uploaded-files-registry");
+        const auditeeRegistry = document.getElementById("auditee-files-registry");
+        const countBadge = document.getElementById("evidence-count-badge");
+        if (evidenceRegistry) evidenceRegistry.innerHTML = emptyMsg;
+        if (auditeeRegistry) auditeeRegistry.innerHTML = emptyMsg;
+        if (countBadge) countBadge.innerText = "0 files";
 
         const previewContainer = document.getElementById("report-preview-container");
-        if (previewContainer) {
-            previewContainer.innerHTML = "";
-        }
+        if (previewContainer) previewContainer.innerHTML = "";
 
         // Clear findings list
         const container = document.getElementById("findings-container");
@@ -643,20 +649,31 @@ async function startNewAuditSession() {
             container.innerHTML = `<div class="empty-state">No audit findings generated yet. Upload evidence documents and click Run Audit.</div>`;
         }
 
+        // Clear KPI counters
+        ["count-compliant", "count-noncompliant", "count-p1", "count-p2", "count-p3", "count-p4"].forEach(id => {
+            const el = document.getElementById(id); if (el) el.innerText = "0";
+        });
+
+        // Hide commit banner
+        const banner = document.getElementById("shakti-commit-banner");
+        if (banner) banner.style.display = "none";
+
         // Refresh UI components
         loadEvidenceFileList();
         populateAuditeeSelector();
         loadRecentSessions();
 
-        showToast(`Started fresh new audit session: "${finalTitle}"`, "info");
+        if (!skipPrompt) {
+            showToast(`Started fresh new audit session: "${finalTitle}"`, "info");
+        }
     } catch (err) {
         console.error("Error starting new session:", err);
     }
 }
 
 async function loadOrCreateSession(user) {
-    // When newly opening the app, automatically start a fresh new session!
-    await startNewAuditSession();
+    // When newly opening the app, initialize a fresh session without prompt!
+    await startNewAuditSession(true);
 }
 
 async function populateAuditeeSelector() {
@@ -4160,64 +4177,7 @@ function generateUUID() {
     });
 }
 
-/* ── AUDIT SESSION MANAGER (+ New Session & Recent Sessions) ── */
-async function startNewAuditSession() {
-    activeSessionId = generateUUID();
-    findingsList = [];
-
-    // Register fresh session in Shakthi DB
-    try {
-        const username = currentUser ? currentUser.username : "auditor@24";
-        const body = new FormData();
-        body.append("session_title", `Local Compliance Audit (${activeSessionId.slice(0, 6)})`);
-        body.append("framework", "ISO 27001");
-        body.append("username", username);
-
-        const res = await fetch(`${API_BASE}/audit/sessions`, { method: "POST", body });
-        const data = await res.json();
-        if (data.success && data.session_id) {
-            activeSessionId = data.session_id;
-        }
-    } catch (e) {
-        console.warn("Session creation API fallback:", e);
-    }
-
-    const badge = document.getElementById("active-session-badge");
-    if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
-    const wsTitle = document.getElementById("workspace-title");
-    if (wsTitle) wsTitle.innerText = "Audit Records Workspace";
-
-    // Clear evidence files display immediately
-    const evidenceRegistry = document.getElementById("uploaded-files-registry");
-    const auditeeRegistry = document.getElementById("auditee-files-registry");
-    const countBadge = document.getElementById("evidence-count-badge");
-    const emptyMsg = `<div class="empty-state">No files uploaded yet. Drag files to begin audit.</div>`;
-    if (evidenceRegistry) evidenceRegistry.innerHTML = emptyMsg;
-    if (auditeeRegistry) auditeeRegistry.innerHTML = emptyMsg;
-    if (countBadge) countBadge.innerText = "0 files";
-
-    // Clear findings panel
-    const findingsContainer = document.getElementById("findings-container");
-    if (findingsContainer) {
-        findingsContainer.innerHTML = `<div class="empty-state">New session started. Upload evidence files and click "▶ Step 3: Run RAG Scan".</div>`;
-    }
-
-    // Clear KPI counters
-    ["count-compliant", "count-noncompliant", "count-p1", "count-p2", "count-p3", "count-p4"].forEach(id => {
-        const el = document.getElementById(id); if (el) el.innerText = "0";
-    });
-
-    // Hide Shakthi DB banner
-    const banner = document.getElementById("shakti-commit-banner");
-    if (banner) banner.style.display = "none";
-
-    // Reset upload status label
-    const uploadStatus = document.getElementById("sidebar-upload-status");
-    if (uploadStatus) uploadStatus.innerText = "No files selected";
-
-    loadRecentSessionsList();
-    showToast(`New Audit Session initialized: ${activeSessionId.slice(0, 8)}`, "info");
-}
+/* ── AUDIT SESSION MANAGER (Recent Sessions) ── */
 
 async function loadRecentSessionsList() {
     const container = document.getElementById("recent-sessions-list");
