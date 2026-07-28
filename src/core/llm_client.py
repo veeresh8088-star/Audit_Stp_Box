@@ -149,6 +149,12 @@ def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=4)
 
 def get_embedding(text, model="nomic-embed-text"):
     """Fetches text embedding vector from the configured embedding backend."""
+    if not text or not str(text).strip():
+        return None
+
+    # Truncate text to 4000 chars to avoid overloading embedding server context
+    text_sample = str(text)[:4000]
+
     backend = os.environ.get("EMBEDDING_BACKEND", get_llm_backend()).lower()
     
     # Resolving hosting ports (Ollama on 11434, llama.cpp embedding server default on 11435)
@@ -160,23 +166,27 @@ def get_embedding(text, model="nomic-embed-text"):
         # native llama.cpp /embedding endpoint
         url = f"{host}/embedding"
         try:
-            r = requests.post(url, json={"content": text}, timeout=60)
+            r = requests.post(url, json={"content": text_sample}, timeout=300)
             if r.status_code == 200:
-                return r.json().get("embedding")
+                emb = r.json().get("embedding")
+                if emb:
+                    return emb
         except Exception:
             # Fallback to OpenAI-compatible /v1/embeddings
             try:
                 url_v1 = f"{host}/v1/embeddings"
-                r = requests.post(url_v1, json={"input": text, "model": model}, timeout=60)
+                r = requests.post(url_v1, json={"input": text_sample, "model": model}, timeout=300)
                 if r.status_code == 200:
-                    return r.json().get("data")[0].get("embedding")
+                    data = r.json().get("data")
+                    if data and isinstance(data, list) and len(data) > 0:
+                        return data[0].get("embedding")
             except Exception as e:
                 print(f"[LLM CLIENT ERROR] Failed to query llama.cpp embeddings: {e}")
     else:
         # Default Ollama
         url = f"{host}/api/embeddings"
         try:
-            r = requests.post(url, json={"model": model, "prompt": text}, timeout=15)
+            r = requests.post(url, json={"model": model, "prompt": text_sample}, timeout=120)
             if r.status_code == 200:
                 return r.json().get("embedding")
         except Exception as e:
