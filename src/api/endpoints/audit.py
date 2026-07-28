@@ -1280,33 +1280,87 @@ def api_send_chat_message(req: ChatSendRequest):
 
         session_context_str = "\n".join(findings_summary) if findings_summary else "No active audit findings recorded yet for this session."
 
-        # 3. Formulate prompt & invoke local AI model
-        prompt_with_context = f"""You are the Lead Cyber Security Auditor AI Compliance Assistant for Shakthi Audit DB.
-Active Audit Session ID: {session_id}
-Real-Time Audit Findings & Evidence Status:
+        # 3. Formulate prompt & invoke AI assistant
+        prompt_with_context = f"""You are the Lead Cyber Security Auditor & AI Personal Assistant for Shakthi Audit DB.
+Your role: Act as a helpful, intelligent personal AI compliance assistant. Help users understand audit concepts, how to use the workspace, upload evidence, interpret ISO 27001 / SOC 2 / VAPT controls, and review real-time findings for active session '{session_id}'.
+
+Active Session Context ({len(findings_summary)} findings recorded):
 {session_context_str}
 
-User Question: {user_message}
+User Query: {user_message}
 
-Answer the user's question concisely, professionally, and accurately based on the active audit session evidence and ISO 27001 / VAPT standards."""
+Provide a clear, helpful, professional, and directly relevant answer as an expert Personal Compliance Assistant."""
 
         assistant_reply = ""
         try:
-            from src.ai.audit_chains import run_ad_hoc_chat
-            assistant_reply = run_ad_hoc_chat(prompt_with_context, model_choice=req.model_choice)
+            from src.core.llm_client import query_llm
+            assistant_reply = query_llm(prompt_with_context, model=req.model_choice or "Gemma 4 (e4b)", timeout=15)
         except Exception:
-            # Context-aware fallback response if LLM offline
-            msg_lower = user_message.lower()
-            if "gap" in msg_lower or "summarize" in msg_lower or "non-compliant" in msg_lower:
+            try:
+                from src.ai.audit_chains import run_ad_hoc_chat
+                assistant_reply = run_ad_hoc_chat(prompt_with_context, model_choice=req.model_choice)
+            except Exception:
+                pass
+
+        if not assistant_reply or len(assistant_reply.strip()) < 5:
+            # Intelligent Personal Assistant Knowledge Engine
+            msg_lower = user_message.lower().strip()
+            
+            if any(q in msg_lower for q in ["what is audit", "define audit", "meaning of audit", "what is an audit"]):
+                assistant_reply = (
+                    "An **Information Security & Compliance Audit** is a systematic, evidence-based evaluation "
+                    "of an organization's security controls, policies, and technical architecture against formal standards "
+                    "such as **ISO/IEC 27001:2022**, **SOC 2 Type II**, or **DPDP/GDPR**.\n\n"
+                    "Its primary goal is to identify compliance gaps, verify evidence, and ensure data protection."
+                )
+            elif any(q in msg_lower for q in ["how to upload", "upload evidence", "how to scan", "where to upload", "how to start"]):
+                assistant_reply = (
+                    "Here is how to upload evidence and execute an audit evaluation in your workspace:\n\n"
+                    "1. **Navigate to Scan Workspace**: Click on the **Scan Workspace** tab in the main header.\n"
+                    "2. **Upload Documents**: Drag and drop policy documents, PDFs, DOCX, or logs into the evidence upload box.\n"
+                    "3. **Run Audit Evaluation**: Select your Target Framework (e.g. ISO 27001:2022) and click **Step 3: Run RAG Scan**.\n"
+                    "4. **Commit Records**: Review generated findings and click **Save to Shakthi DB** to finalize."
+                )
+            elif any(q in msg_lower for q in ["iso 27001", "iso27001", "what is iso"]):
+                assistant_reply = (
+                    "**ISO/IEC 27001:2022** is the global standard for Information Security Management Systems (ISMS).\n\n"
+                    "It comprises **93 security controls** categorized under 4 themes:\n"
+                    "• **Organizational Controls** (A.5: 37 controls)\n"
+                    "• **People Controls** (A.6: 8 controls)\n"
+                    "• **Physical Controls** (A.7: 14 controls)\n"
+                    "• **Technological Controls** (A.8: 34 controls)"
+                )
+            elif any(q in msg_lower for q in ["gap", "summarize", "non-compliant", "finding", "findings", "result"]):
                 gaps = [f for f in findings_summary if "NON_COMPLIANT" in f or "Non-Compliant" in f]
                 if gaps:
-                    assistant_reply = f"Here is the real-time summary of non-compliant gaps ({len(gaps)} total):\n" + "\n".join(gaps[:5])
+                    assistant_reply = f"Here is the real-time summary of non-compliant gaps for session `{session_id}` ({len(gaps)} total):\n\n" + "\n".join(gaps[:5])
+                elif findings_summary:
+                    assistant_reply = f"All {len(findings_summary)} evaluated controls for session `{session_id}` are currently **COMPLIANT**!"
                 else:
-                    assistant_reply = "Great news! All evaluated controls in this session are currently COMPLIANT."
-            elif "hi" in msg_lower or "hello" in msg_lower or "hey" in msg_lower:
-                assistant_reply = f"Hello! I am your real-time AI Compliance Assistant for session `{session_id}`. I am actively monitoring {len(findings_summary)} control records in real-time. How can I assist you with audit evidence or controls?"
+                    assistant_reply = f"No audit findings have been recorded yet for session `{session_id}`. Upload evidence files in the **Scan Workspace** tab to begin evaluation."
+            elif any(q in msg_lower for q in ["hi", "hello", "hey", "help", "who are you"]):
+                assistant_reply = (
+                    f"Hello! I am your **AI Personal Compliance Assistant** for session `{session_id}`.\n\n"
+                    "I am ready to help you with:\n"
+                    "• Explaining compliance standards (ISO 27001, SOC 2, VAPT, DPDP)\n"
+                    "• Guiding you on uploading evidence and running audit scans\n"
+                    "• Answering questions about real-time audit findings in your active workspace\n\n"
+                    "How can I assist you today?"
+                )
             else:
-                assistant_reply = f"Based on real-time audit data for session `{session_id}`:\n• Total Findings Tracked: {len(findings_summary)}\n" + (findings_summary[0] if findings_summary else "No findings loaded yet.")
+                if findings_summary:
+                    assistant_reply = (
+                        f"Active Session: `{session_id}`\n"
+                        f"• Total Findings Evaluated: {len(findings_summary)}\n\n"
+                        f"Latest Finding Context:\n{findings_summary[0]}\n\n"
+                        "Feel free to ask me any specific question about your audit evidence, policies, or compliance standards!"
+                    )
+                else:
+                    assistant_reply = (
+                        f"I am your AI Personal Compliance Assistant for active session `{session_id}`.\n\n"
+                        "Currently, no evidence documents have been scanned for this session yet. "
+                        "You can upload policy documents under the **Scan Workspace** tab or ask me any question about ISO 27001, SOC 2, VAPT, or audit procedures!"
+                    )
 
         # 4. Save AI assistant reply to database
         with force_master():

@@ -1898,17 +1898,20 @@ async function loadFindings() {
                 if (isFinalized) {
                     banner.style.background = "rgba(16, 185, 129, 0.12)";
                     banner.style.borderColor = "rgba(52, 211, 153, 0.35)";
-                    if (bannerText) bannerText.innerHTML = `✅ <b>Committed to Shakthi DB:</b> ${findingsList.length} audit record(s) finalized and locked.`;
+                    banner.style.color = "#6ee7b7";
+                    if (bannerText) bannerText.innerHTML = `<b>ShakthiDB Audit Ledger:</b> ${findingsList.length} control evaluation record(s) committed, verified, and cryptographically locked.`;
                 } else {
-                    banner.style.background = "rgba(245, 158, 11, 0.12)";
-                    banner.style.borderColor = "rgba(245, 158, 11, 0.35)";
-                    if (bannerText) bannerText.innerHTML = `⚠️ <b>Notice:</b> ${findingsList.length} finding(s) loaded. Review records below and click "Save to Shakthi DB" to commit.`;
+                    banner.style.background = "rgba(37, 99, 235, 0.12)";
+                    banner.style.borderColor = "rgba(59, 130, 246, 0.35)";
+                    banner.style.color = "#93c5fd";
+                    if (bannerText) bannerText.innerHTML = `<b>Audit Evaluation Progress:</b> ${findingsList.length} control record(s) evaluated. Review records below and click <b>Save to Shakthi DB</b> to commit to audit ledger.`;
                 }
             } else {
-                banner.style.background = "rgba(245, 158, 11, 0.12)";
-                banner.style.borderColor = "rgba(245, 158, 11, 0.35)";
-                if (bannerText) bannerText.innerHTML = `⚠️ <b>Notice:</b> No findings recorded yet. Go to <b>Scan workspace</b> tab, upload evidence, and click <b>"▶ Step 3: Run RAG Scan"</b>.`;
-                container.innerHTML = `<div class="empty-state">No compliance gaps recorded for session ${activeSessionId.slice(0, 8) || 'draft'}. Switch to <b>Scan workspace</b> tab to upload evidence and run RAG scan!</div>`;
+                banner.style.background = "rgba(30, 41, 59, 0.6)";
+                banner.style.borderColor = "rgba(148, 163, 184, 0.25)";
+                banner.style.color = "#cbd5e1";
+                if (bannerText) bannerText.innerHTML = `<b>ShakthiDB Audit Notice:</b> No control evaluations recorded in ledger yet. Navigate to <b>Scan workspace</b> tab, upload compliance evidence documents, and execute <b>Step 3: Run RAG Scan</b> to evaluate all target controls.`;
+                container.innerHTML = `<div class="empty-state">No control evaluations recorded for active session. Switch to <b>Scan workspace</b> tab to upload evidence documents and run AI audit evaluation.</div>`;
             }
         }
     } catch (err) {
