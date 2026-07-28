@@ -162,8 +162,8 @@ Control Objective & Illustrative Evidence Examples (Do NOT treat as a mandatory 
 
 You MUST respond with findings wrapped in XML tags matching this format:
 <status>COMPLIANT | NON_COMPLIANT | FALSE_POSITIVE</status>
-<policy_present>Yes | No | Partial</policy_present>
-<evidence_present>Yes | No | Partial</evidence_present>
+<policy_present>Compliant | Found | Not Found</policy_present>
+<evidence_present>Compliant | Found | Not Found</evidence_present>
 <severity_score>float_between_0.0_and_10.0</severity_score>
 <evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
 <control_coverage>percentage_integer</control_coverage>
@@ -691,15 +691,29 @@ class NativeOllamaChain:
             normalized["recommendation"] = str(data.get("recommendation") or data.get("suggested_action") or "")
             
             # 12. policy_present
-            p_pres = str(data.get("policy_present") or "No").strip().capitalize()
-            if p_pres not in ("Yes", "No", "Partial"):
-                p_pres = "No"
+            p_pres = str(data.get("policy_present") or "No").strip()
+            p_pres_lower = p_pres.lower()
+            if "found" in p_pres_lower and "not" not in p_pres_lower:
+                p_pres = "Found"
+            elif "not" in p_pres_lower or "absent" in p_pres_lower or "no" in p_pres_lower:
+                p_pres = "Not Found"
+            elif "compliant" in p_pres_lower or "yes" in p_pres_lower or "pass" in p_pres_lower:
+                p_pres = "Compliant"
+            else:
+                p_pres = "Not Found"
             normalized["policy_present"] = p_pres
 
             # 13. evidence_present
-            e_pres = str(data.get("evidence_present") or "No").strip().capitalize()
-            if e_pres not in ("Yes", "No", "Partial"):
-                e_pres = "No"
+            e_pres = str(data.get("evidence_present") or "No").strip()
+            e_pres_lower = e_pres.lower()
+            if "found" in e_pres_lower and "not" not in e_pres_lower:
+                e_pres = "Found"
+            elif "not" in e_pres_lower or "absent" in e_pres_lower or "no" in e_pres_lower:
+                e_pres = "Not Found"
+            elif "compliant" in e_pres_lower or "yes" in e_pres_lower or "pass" in e_pres_lower:
+                e_pres = "Compliant"
+            else:
+                e_pres = "Not Found"
             normalized["evidence_present"] = e_pres
 
             # 14. severity_score

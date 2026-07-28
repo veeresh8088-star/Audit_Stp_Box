@@ -2459,27 +2459,31 @@ function renderFindingsList() {
         let evBadge = "";
         if (!isVapt) {
             const polRaw = String(f.policy_present || "No").trim().toLowerCase();
-            let polText = "Policy: Not Found";
-            let polStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
-            if (polRaw === "yes" || polRaw === "compliant" || polRaw === "true") {
-                polText = "Policy: Compliant";
+            let polText, polStyle;
+            if (polRaw === "compliant" || polRaw === "yes" || polRaw === "true") {
+                polText  = "✅ Policy: Compliant";
                 polStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);";
-            } else if (polRaw === "partial" || polRaw === "non-compliant" || polRaw === "non compliant") {
-                polText = "Policy: Non-Compliant";
+            } else if (polRaw === "found") {
+                polText  = "⚠️ Policy: Found (Non-Compliant)";
                 polStyle = "background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);";
+            } else {
+                polText  = "❌ Policy: Not Found";
+                polStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
             }
             polBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; ${polStyle} font-weight: 600;">${polText}</span>`;
 
             // Format Evidence Badge
             const evRaw = String(f.evidence_present || "No").trim().toLowerCase();
-            let evText = "Evidence: Not Found";
-            let evStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
-            if (evRaw === "yes" || evRaw === "compliant" || evRaw === "true") {
-                evText = "Evidence: Compliant";
+            let evText, evStyle;
+            if (evRaw === "compliant" || evRaw === "yes" || evRaw === "true") {
+                evText  = "✅ Evidence: Compliant";
                 evStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);";
-            } else if (evRaw === "partial" || evRaw === "non-compliant" || evRaw === "non compliant") {
-                evText = "Evidence: Non-Compliant";
+            } else if (evRaw === "found") {
+                evText  = "⚠️ Evidence: Found (Non-Compliant)";
                 evStyle = "background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);";
+            } else {
+                evText  = "❌ Evidence: Not Found";
+                evStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
             }
             evBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; ${evStyle} font-weight: 600;">${evText}</span>`;
         }
@@ -2611,24 +2615,24 @@ function openEditFindingModal(finding) {
 
     // 2. Normalize and pre-select Policy Present
     const polSelect = document.getElementById("edit-finding-policy");
-    const rawPol = String(finding.policy_present || "No").trim().toLowerCase();
-    if (rawPol === "yes" || rawPol === "compliant" || rawPol === "true") {
-        polSelect.value = "Yes";
-    } else if (rawPol === "partial" || rawPol === "non-compliant") {
-        polSelect.value = "Partial";
+    const rawPol = String(finding.policy_present || "Not Found").trim().toLowerCase();
+    if (rawPol === "compliant" || rawPol === "yes" || rawPol === "true") {
+        polSelect.value = "Compliant";
+    } else if (rawPol === "found") {
+        polSelect.value = "Found";
     } else {
-        polSelect.value = "No";
+        polSelect.value = "Not Found";
     }
 
     // 3. Normalize and pre-select Evidence Present
     const evSelect = document.getElementById("edit-finding-evidence");
-    const rawEv = String(finding.evidence_present || "No").trim().toLowerCase();
-    if (rawEv === "yes" || rawEv === "compliant" || rawEv === "true") {
-        evSelect.value = "Yes";
-    } else if (rawEv === "partial" || rawEv === "non-compliant") {
-        evSelect.value = "Partial";
+    const rawEv = String(finding.evidence_present || "Not Found").trim().toLowerCase();
+    if (rawEv === "compliant" || rawEv === "yes" || rawEv === "true") {
+        evSelect.value = "Compliant";
+    } else if (rawEv === "found") {
+        evSelect.value = "Found";
     } else {
-        evSelect.value = "No";
+        evSelect.value = "Not Found";
     }
 
     // 4. Determine Session Type (VAPT vs ISO) & populate Severity Options

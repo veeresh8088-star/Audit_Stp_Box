@@ -32,13 +32,20 @@ if exist "C:\Users\veeresh988V\Desktop\llama\llama-server.exe" (
     set "LLAMA_SERVER_EXE=%~dp0llama-server.exe"
 )
 
-echo.
-echo [2/5] Starting llama.cpp LLM Server (Port 11434)...
-start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 8192 -t 4 -b 512 --flash-attn on
+:: Calculate optimal CPU thread distribution (N-2 for LLM, 2 for Embeddings, OS/Docker reserved)
+set /a LLM_THREADS=%NUMBER_OF_PROCESSORS% - 2
+if %LLM_THREADS% LSS 4 set LLM_THREADS=4
+
+set /a EMBED_THREADS=2
+if %NUMBER_OF_PROCESSORS% GEQ 12 set EMBED_THREADS=4
 
 echo.
-echo [3/5] Starting llama.cpp Embedding Server (Port 11435)...
-start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t 2 --embedding
+echo [2/5] Starting llama.cpp LLM Server (Port 11434 with %LLM_THREADS% of %NUMBER_OF_PROCESSORS% CPU threads)...
+start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 8192 -t %LLM_THREADS% -b 512 --flash-attn on
+
+echo.
+echo [3/5] Starting llama.cpp Embedding Server (Port 11435 with %EMBED_THREADS% threads)...
+start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t %EMBED_THREADS% --embedding
 
 echo.
 echo [4/5] Starting Docker Database Service (ShaktiDB)...

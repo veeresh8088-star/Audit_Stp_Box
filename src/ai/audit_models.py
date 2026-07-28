@@ -60,11 +60,11 @@ class AuditFindingSchema(BaseModel):
         default=[],
         description="List of supporting evidence items."
     )
-    policy_present: Literal["Yes", "No", "Partial", "YES", "NO", "PARTIAL"] = Field(
+    policy_present: Literal["Yes", "No", "Partial", "YES", "NO", "PARTIAL", "Found", "FOUND", "Not Found", "NOT FOUND", "Compliant", "COMPLIANT"] = Field(
         default="No",
         description="Is a documented policy present for this control?"
     )
-    evidence_present: Literal["Yes", "No", "Partial", "YES", "NO", "PARTIAL"] = Field(
+    evidence_present: Literal["Yes", "No", "Partial", "YES", "NO", "PARTIAL", "Found", "FOUND", "Not Found", "NOT FOUND", "Compliant", "COMPLIANT"] = Field(
         default="No",
         description="Is implementation evidence present for this control?"
     )

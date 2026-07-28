@@ -889,15 +889,47 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
             print(f"[POLICY-EVIDENCE MATRIX] Control {cid}: Policy={pol_pres}, Evidence={ev_pres}. Both must be COMPLIANT for overall COMPLIANT. Final Verdict: NON_COMPLIANT", flush=True)
             finding["status"] = "NON_COMPLIANT"
 
-            # Clear evidence snippet ONLY if evidence is NOT FOUND / NO or if snippet is an explanation of absence
-            snip_lower = str(finding.get("evidence_snippet") or "").lower()
-            if ev_pres in ("NO", "NOT FOUND", "FALSE", "") or any(neg in snip_lower for neg in ["no evidence", "not found", "focuses entirely on", "exclusively details"]):
-                finding["evidence_snippet"] = ""
+            # ── FOUND vs NOT FOUND DETERMINATION ──────────────────────────
+            # "Found" = Document was uploaded & read, but fails control requirements
+            # "Not Found" = Document completely missing from uploaded evidence
+            doc_text_present = bool(str(finding.get("condensed_context") or
+                                       finding.get("evidence_snippet") or
+                                       finding.get("justification") or "").strip())
+            pol_val = str(finding.get("policy_present") or "No").strip().upper()
+            ev_val  = str(finding.get("evidence_present") or "No").strip().upper()
 
-            # Ensure recommendation is actionable and NOT "No action required" for Non-Compliant findings
-            rec_str = str(finding.get("recommendation") or "").lower()
-            if not rec_str or "no action required" in rec_str or "evidence satisfies" in rec_str:
-                finding["recommendation"] = f"Formulate and document formally approved policy and procedures for {cname} (ISO 27001 Control {cid}). Establish periodic evidence logging and technical controls to demonstrate compliance."
+            # Determine if document was actually read/present or fully missing
+            pol_found  = pol_val in ("FOUND", "YES", "PARTIAL")
+            ev_found   = ev_val  in ("FOUND", "YES", "PARTIAL")
+
+            if pol_found or ev_found or doc_text_present:
+                # Document uploaded and read, but fails control — orange badge
+                finding["policy_present"]  = "Found"
+                finding["evidence_present"] = "Found"
+                rec_str = str(finding.get("recommendation") or "").lower()
+                if not rec_str or "no action required" in rec_str or "evidence satisfies" in rec_str:
+                    finding["recommendation"] = (
+                        f"The uploaded document was read but does not fully satisfy {cname} "
+                        f"(ISO 27001 Control {cid}). Review and update the existing policy to address "
+                        f"the identified gaps, strengthen evidence logging, and ensure all required "
+                        f"control objectives are explicitly covered."
+                    )
+            else:
+                # Document completely absent — red badge
+                finding["policy_present"]  = "Not Found"
+                finding["evidence_present"] = "Not Found"
+                # Clear misleading snippet if evidence absent
+                snip_lower = str(finding.get("evidence_snippet") or "").lower()
+                if any(neg in snip_lower for neg in ["no evidence", "not found", "focuses entirely on", "exclusively details"]):
+                    finding["evidence_snippet"] = ""
+                rec_str = str(finding.get("recommendation") or "").lower()
+                if not rec_str or "no action required" in rec_str or "evidence satisfies" in rec_str:
+                    finding["recommendation"] = (
+                        f"No policy or evidence document was uploaded for {cname} "
+                        f"(ISO 27001 Control {cid}). Create a formally approved policy document, "
+                        f"implement technical controls, establish evidence logging procedures, "
+                        f"and upload the documentation before the next audit cycle."
+                    )
     # ─────────────────────────────────────────────────────────────────────
             
     return finding

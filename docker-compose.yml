@@ -7,6 +7,11 @@ services:
       - POSTGRES_DB=shakthidb
     ports:
       - "15234:5432"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.00'
+          memory: 1024M
     volumes:
       - pgdata:/var/lib/postgresql
     restart: always
