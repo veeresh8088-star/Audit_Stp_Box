@@ -2111,8 +2111,8 @@ async function renderAuditReportPreview() {
             <div class="report-preview-card" style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 16px; padding: 24px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid rgba(148, 163, 184, 0.2); padding-bottom: 16px; margin-bottom: 20px;">
                     <div>
-                        <h2 style="margin: 0 0 6px 0; font-size: 1.3rem; font-weight: 800;" class="preview-ctrl-title">📋 FINAL EXECUTIVE AUDIT EVALUATION REPORT</h2>
-                        <div style="font-size: 0.82rem; color: #2563eb; font-weight: 700;">ISO 27001 / VAPT Framework Audit • Live Real-Time Record</div>
+                        <h2 style="margin: 0 0 6px 0; font-size: 1.3rem; font-weight: 800;" class="preview-ctrl-title">FINAL EXECUTIVE AUDIT EVALUATION REPORT</h2>
+                        <div style="font-size: 0.82rem; color: #2563eb; font-weight: 700;">Audit Framework Preview</div>
                     </div>
                     <div style="text-align: right; font-size: 0.78rem; line-height: 1.5;" class="preview-meta-block">
                         <div>Auditor Firm: <b class="preview-b-text">${escapeHtml(brandFirm)}</b></div>
@@ -2128,7 +2128,7 @@ async function renderAuditReportPreview() {
                     <div><span style="font-size:0.72rem; opacity:0.8; display:block; margin-bottom: 2px;">Compliance Score</span><b style="font-size:1.1rem; color:${scorePercent >= 70 ? '#10b981' : '#f59e0b'};">${scorePercent}% Compliance</b></div>
                 </div>
 
-                <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom:12px;" class="preview-ctrl-title">📊 Audit Control Evaluation Details (${findings.length} controls evaluated)</h4>
+                <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom:12px;" class="preview-ctrl-title">Audit Control Evaluation Details (${findings.length} controls evaluated)</h4>
                 <div style="overflow-x: auto; margin-bottom: 20px; border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 10px;">
                     <table style="width:100%; border-collapse:collapse; font-size:0.8rem; text-align:left;" class="report-preview-table">
                         <thead>
