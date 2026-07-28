@@ -460,9 +460,14 @@ async function loadRecentSessions() {
             renderFilteredRecentSessionsList();
         } else {
             window._recentSessionsCache = [];
+            const badgeCount = document.getElementById("recent-sessions-count-badge");
+            if (badgeCount) badgeCount.innerText = "(0)";
             container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">No recent sessions found.</div>`;
         }
     } catch (err) {
+        window._recentSessionsCache = [];
+        const badgeCount = document.getElementById("recent-sessions-count-badge");
+        if (badgeCount) badgeCount.innerText = "(0)";
         console.error("Failed to load recent sessions:", err);
     }
 }
