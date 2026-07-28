@@ -1,9 +1,9 @@
 @echo off
 cd /d "%~dp0"
 set "PYTHONPATH=%~dp0;%PYTHONPATH%"
-title AICyberAuditBox llama.cpp Local API Launcher
+title AISecurityAudit llama.cpp Local API Launcher
 echo ==========================================
-echo    AICyberAuditBox - Local Web Dashboard (llama.cpp)
+echo    AISecurityAudit - Local Web Dashboard (llama.cpp)
 echo ==========================================
 
 :: 1. Check local LLM backend & Embeddings
@@ -23,6 +23,12 @@ if %errorlevel% neq 0 (
 )
 
 echo [v] OK: llama.cpp LLM & Embedding services are active.
+
+:: Ensure SSL Certificate Exists
+if not exist cert.pem (
+    echo [SSL] Generating local SSL Certificate...
+    python generate_self_ssl.py
+)
 
 :: 2. Check Docker for ShaktiDB
 echo.
@@ -56,12 +62,12 @@ exit /b 1
 echo.
 
 :: 3. Launching FastAPI & browser with llama.cpp environment
-echo [3/3] Launching Local API Dashboard...
+echo [3/3] Launching AISecurityAudit HTTPS Dashboard...
 set LLM_BACKEND=llama.cpp
 set EMBEDDING_HOST=http://127.0.0.1:11435
 set OMP_NUM_THREADS=4
 set MKL_NUM_THREADS=4
 set OPENBLAS_NUM_THREADS=4
 
-start http://127.0.0.1:8000/
-python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+start https://aisecurityaudit.local:8000/
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile key.pem --ssl-certfile cert.pem

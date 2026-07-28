@@ -90,12 +90,34 @@ def validate_and_derive_report_payload(findings, session_title="", file_registry
         "scan_date_range": scan_date_range
     }
 
+def severity_sort_key(item):
+    if isinstance(item, dict):
+        sev = str(item.get("severity") or "").upper()
+        cid = str(item.get("control_id") or "").upper()
+    else:
+        sev = str(getattr(item, "severity", "") or "").upper()
+        cid = str(getattr(item, "control_id", "") or "").upper()
+
+    if "CRITICAL" in sev or "P1" in sev or sev.startswith("9.") or sev.startswith("10."):
+        rank = 1
+    elif "HIGH" in sev or "P2" in sev or sev.startswith("7.") or sev.startswith("8."):
+        rank = 2
+    elif "MEDIUM" in sev or "P3" in sev or sev.startswith("4.") or sev.startswith("5.") or sev.startswith("6."):
+        rank = 3
+    elif "LOW" in sev or "P4" in sev or sev.startswith("0.") or sev.startswith("1.") or sev.startswith("2.") or sev.startswith("3."):
+        rank = 4
+    else:
+        rank = 5
+    return (rank, cid)
+
 def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""):
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
     from fpdf.fonts import FontFace
     import io as _io
     import os
+
+    findings = sorted(findings or [], key=severity_sort_key)
     
     def clean_text(val):
         if not val:
@@ -185,8 +207,8 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
                 self.set_font("Helvetica", "", 8.5)
                 self.set_text_color(100, 116, 139)
                 if os.path.exists(logo_path):
-                    self.image(logo_path, x=175, y=6, w=18)
-                    self.cell(155, 5, clean_text(f"{scope_type} Network VAPT Validation Report"), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+                    self.image(logo_path, x=184, y=4, w=10)
+                    self.cell(166, 5, clean_text(f"{scope_type} Network VAPT Validation Report"), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 else:
                     self.cell(0, 5, clean_text(f"{scope_type} Network VAPT Validation Report"), align="R", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
                 self.ln(3)
@@ -2394,6 +2416,8 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
     if is_vapt:
         return _export_vapt_pdf(session_title, findings, resolved_list, status, comments)
     from fpdf.fonts import FontFace
+
+    findings = sorted(findings or [], key=severity_sort_key)
 
 
     def clean_text(val):

@@ -836,6 +836,13 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
     status_curr = str(finding.get("status") or "").strip().upper()
 
     if status_curr == "NON_COMPLIANT" and quote and quote.upper() != "NOT_FOUND":
+        # Check if the quote is actually stating that NO evidence was found or is explaining an absence
+        quote_lower = quote.lower()
+        is_negative_quote = any(neg in quote_lower for neg in [
+            "no evidence", "not found", "no mention", "not documented", "not provided",
+            "no evidence whatsoever", "focuses entirely on", "exclusively details"
+        ])
+
         # Evidence exists in the quote — check if the reasoning acknowledges it was found
         evidence_acknowledged = any(kw in reasoning_lower for kw in [
             "evidence was found", "demonstrating", "mfa", "pam", "multi-factor",
@@ -845,7 +852,7 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
             "access control", "authentication", "isms", "records", "retention"
         ])
 
-        if evidence_acknowledged or len(quote) >= 15:
+        if not is_negative_quote and (evidence_acknowledged or len(quote) >= 15):
             cid = finding.get("control_id") or ""
             print(f"[RULE 8 GUARDRAIL] Control {cid}: Evidence present in any form (quote: '{quote[:40]}...'). Upgrading from NON_COMPLIANT to COMPLIANT under Workspace Audit Rule 8.", flush=True)
             finding["status"] = "COMPLIANT"
@@ -878,8 +885,19 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                 finding["description"] = finding["reasoning"]
         else:
             cid = finding.get("control_id") or ""
+            cname = finding.get("control_name") or "Control"
             print(f"[POLICY-EVIDENCE MATRIX] Control {cid}: Policy={pol_pres}, Evidence={ev_pres}. Both must be COMPLIANT for overall COMPLIANT. Final Verdict: NON_COMPLIANT", flush=True)
             finding["status"] = "NON_COMPLIANT"
+
+            # Clear evidence snippet ONLY if evidence is NOT FOUND / NO or if snippet is an explanation of absence
+            snip_lower = str(finding.get("evidence_snippet") or "").lower()
+            if ev_pres in ("NO", "NOT FOUND", "FALSE", "") or any(neg in snip_lower for neg in ["no evidence", "not found", "focuses entirely on", "exclusively details"]):
+                finding["evidence_snippet"] = ""
+
+            # Ensure recommendation is actionable and NOT "No action required" for Non-Compliant findings
+            rec_str = str(finding.get("recommendation") or "").lower()
+            if not rec_str or "no action required" in rec_str or "evidence satisfies" in rec_str:
+                finding["recommendation"] = f"Formulate and document formally approved policy and procedures for {cname} (ISO 27001 Control {cid}). Establish periodic evidence logging and technical controls to demonstrate compliance."
     # ─────────────────────────────────────────────────────────────────────
             
     return finding

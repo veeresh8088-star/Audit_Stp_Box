@@ -1,7 +1,26 @@
+import sys
+import asyncio
+import os
+
+if sys.platform == "win32":
+    # Silence harmless Windows Proactor connection lost exception noise on socket reset
+    try:
+        from asyncio.proactor_events import _ProactorBasePipeTransport
+        _old_call_connection_lost = _ProactorBasePipeTransport._call_connection_lost
+
+        def _silent_call_connection_lost(self, exc=None):
+            try:
+                _old_call_connection_lost(self, exc)
+            except (ConnectionResetError, OSError):
+                pass
+
+        _ProactorBasePipeTransport._call_connection_lost = _silent_call_connection_lost
+    except Exception:
+        pass
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
-import os
 
 from src.api.endpoints.auth import router as auth_router
 from src.api.endpoints.controls import router as controls_router

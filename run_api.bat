@@ -1,7 +1,7 @@
 @echo off
-title AICyberAuditBox Local API Launcher
+title AISecurityAudit Local API Launcher
 echo ==========================================
-echo    AICyberAuditBox - Local Web Dashboard
+echo    AISecurityAudit - Local Web Dashboard
 echo ==========================================
 
 :: 0. Kill any process already using port 8000 to avoid WinError 10048
@@ -53,6 +53,13 @@ goto :docker_done
 echo.
 
 :: 3. Launching FastAPI & browser
-echo [3/3] Launching Local API Dashboard...
-start http://127.0.0.1:8000/
-python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+echo [3/3] Launching AISecurityAudit Dashboard...
+if exist cert.pem if exist key.pem (
+    echo [🔒 SSL] Self-Signed Certificate detected! Starting HTTPS server...
+    start https://127.0.0.1:8000/
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile key.pem --ssl-certfile cert.pem
+) else (
+    echo [HTTP] Starting standard HTTP server...
+    start http://127.0.0.1:8000/
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+)

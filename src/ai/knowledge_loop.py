@@ -101,21 +101,22 @@ def get_auditor_feedback_few_shot(control_ids):
     if not control_ids:
         return ""
     
-    from src.db.database import SessionLocal, AuditorFeedback
-    session = SessionLocal()
-    try:
-        feedbacks = (
-            session.query(AuditorFeedback)
-            .filter(AuditorFeedback.control_id.in_(control_ids))
-            .order_by(AuditorFeedback.created_at.desc())
-            .limit(15)
-            .all()
-        )
-        if not feedbacks:
+    from src.db.database import SessionLocal, AuditorFeedback, force_master
+    with force_master():
+        session = SessionLocal()
+        try:
+            feedbacks = (
+                session.query(AuditorFeedback)
+                .filter(AuditorFeedback.control_id.in_(control_ids))
+                .order_by(AuditorFeedback.created_at.desc())
+                .limit(15)
+                .all()
+            )
+            if not feedbacks:
+                return ""
+            return format_loop_hints(feedbacks)
+        except Exception as e:
+            print(f"[FEEDBACK] Error retrieving auditor feedback: {e}")
             return ""
-        return format_loop_hints(feedbacks)
-    except Exception as e:
-        print(f"[FEEDBACK] Error retrieving auditor feedback: {e}")
-        return ""
-    finally:
-        session.close()
+        finally:
+            session.close()

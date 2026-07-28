@@ -1,9 +1,9 @@
 @echo off
 cd /d "%~dp0"
 set "PYTHONPATH=%~dp0;%PYTHONPATH%"
-title AICyberAuditBox - Start All Local Services
+title AISecurityAudit - Start All Local Services
 echo ==================================================
-echo   AICyberAuditBox: Unified Single-Click Launcher
+echo   AISecurityAudit: Unified Single-Click Launcher
 echo ==================================================
 
 echo.
@@ -14,6 +14,12 @@ for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11434 ^| findstr LISTENING')
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11435 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
 echo [v] Port 8000 cleared.
+
+:: Ensure SSL Certificate Exists
+if not exist cert.pem (
+    echo [SSL] Generating local SSL Certificate...
+    python generate_self_ssl.py
+)
 
 :: Locate llama-server.exe
 set "LLAMA_SERVER_EXE="
@@ -43,18 +49,19 @@ echo Waiting 12 seconds for models to load in RAM...
 timeout /t 12 >nul
 
 echo.
-echo [5/5] Launching Local API Server & Web Dashboard...
+echo [5/5] Launching AISecurityAudit HTTPS Server & Dashboard...
 set LLM_BACKEND=llama.cpp
 set EMBEDDING_HOST=http://127.0.0.1:11435
 set OMP_NUM_THREADS=4
 set MKL_NUM_THREADS=4
 set OPENBLAS_NUM_THREADS=4
 
-start http://127.0.0.1:8000/
 echo.
 echo ==================================================
-echo   AICyberAuditBox API Server Running Live on 8000
+echo   AISecurityAudit Secure HTTPS Server Active
+echo   Domain URL: https://aisecurityaudit.local:8000/
 echo   Press Ctrl+C in this terminal to stop server.
 echo ==================================================
-python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000
+start https://aisecurityaudit.local:8000/
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile key.pem --ssl-certfile cert.pem
 pause

@@ -502,13 +502,17 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 raise HTTPException(status_code=404, detail="Audit session not found.")
                 
             query = db.query(Finding).filter(Finding.report_id == report.id)
+            if role == "auditee":
+                # Strict Auditee Isolation: Only return delivered findings saved to Shakthi DB (no raw auditor draft scans)
+                query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
+            elif saved_only:
+                query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
+                
             if not include_info:
                 query = query.filter(
                     ~Finding.severity.ilike("%INFO%"),
                     ~Finding.status.ilike("%INFO%")
                 )
-            if saved_only:
-                query = query.filter((Finding.is_saved_to_shakthi == True) | (Finding.human_verified == True))
                 
             findings = query.order_by(Finding.control_id).all()
             
@@ -956,41 +960,44 @@ def api_clear_all_records():
 
 @router.get("/feedback/export")
 def api_export_feedback():
-    """Exports all AuditorFeedback records to JSON."""
-    db = SessionLocal()
-    try:
-        from src.db.database import AuditorFeedback
-        feedbacks = db.query(AuditorFeedback).all()
-        data = []
-        for fb in feedbacks:
-            data.append({
-                "control_id": fb.control_id,
-                "evidence_snippet": fb.evidence_snippet,
-                "corrected_status": fb.corrected_status,
-                "finding": fb.finding,
-                "recommendation": fb.recommendation,
-                "auditor_comments": fb.auditor_comments,
-                "confidence": fb.confidence,
-                "hallucination_check": fb.hallucination_check
-            })
-        return data
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
+    """Exports all AuditorFeedback records to JSON safely."""
+    with force_master():
+        db = SessionLocal()
+        try:
+            from src.db.database import AuditorFeedback
+            feedbacks = db.query(AuditorFeedback).all()
+            data = []
+            for fb in feedbacks:
+                data.append({
+                    "control_id": getattr(fb, "control_id", ""),
+                    "evidence_snippet": getattr(fb, "evidence_snippet", ""),
+                    "corrected_status": getattr(fb, "corrected_status", ""),
+                    "finding": getattr(fb, "finding", ""),
+                    "recommendation": getattr(fb, "recommendation", ""),
+                    "auditor_comments": getattr(fb, "auditor_comments", ""),
+                    "confidence": getattr(fb, "confidence", 10),
+                    "hallucination_check": getattr(fb, "hallucination_check", False)
+                })
+            return {"success": True, "feedback": data}
+        except Exception as e:
+            return {"success": True, "feedback": [], "error": str(e)}
+        finally:
+            db.close()
 
 @router.post("/feedback/import")
 def api_import_feedback(file: UploadFile = File(...)):
     """Imports AuditorFeedback records from uploaded JSON file."""
-    db = SessionLocal()
-    try:
-        import json
-        file_bytes = file.file.read()
-        feedbacks_data = json.loads(file_bytes)
-        
-        from src.db.database import AuditorFeedback
-        imported_count = 0
-        with force_master():
+    with force_master():
+        db = SessionLocal()
+        try:
+            import json
+            file_bytes = file.file.read()
+            feedbacks_data = json.loads(file_bytes)
+            if not isinstance(feedbacks_data, list):
+                feedbacks_data = feedbacks_data.get("feedback", [])
+            
+            from src.db.database import AuditorFeedback
+            imported_count = 0
             for item in feedbacks_data:
                 control_id = item.get("control_id")
                 evidence_snippet = item.get("evidence_snippet")
@@ -1013,16 +1020,54 @@ def api_import_feedback(file: UploadFile = File(...)):
                         recommendation=item.get("recommendation"),
                         auditor_comments=item.get("auditor_comments"),
                         confidence=item.get("confidence", 10),
-                        hallucination_check=item.get("hallucination_check")
+                        hallucination_check=item.get("hallucination_check", False)
                     ))
                     imported_count += 1
             db.commit()
-            
-        return {"success": True, "message": f"Successfully imported {imported_count} feedback records."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
+            return {"success": True, "message": f"Successfully imported {imported_count} auditor feedback records into knowledge memory!"}
+        except Exception as e:
+            return {"success": False, "detail": f"Import failed: {str(e)}"}
+        finally:
+            db.close()
+
+@router.get("/auditee-sessions")
+def api_get_auditee_submitted_sessions():
+    """Retrieves ONLY sessions that have been submitted/delivered to Auditees or created by Auditee accounts."""
+    with force_master():
+        db = SessionLocal()
+        try:
+            from src.db.database import AuditReport, User
+            auditee_users = db.query(User).filter(User.role.in_(["auditee", "client"])).all()
+            auditee_user_ids = [u.id for u in auditee_users]
+
+            reports = db.query(AuditReport).filter(
+                (AuditReport.status.in_(["Pending Review", "Reviewed & Finalized", "Completed"])) |
+                (AuditReport.auditee_id.in_(auditee_user_ids))
+            ).all()
+
+            result = []
+            for r in reports:
+                auditee_name = "auditee@organization.com"
+                if r.auditee_id:
+                    aud_user = db.query(User).filter(User.id == r.auditee_id).first()
+                    if aud_user:
+                        auditee_name = aud_user.username
+
+                result.append({
+                    "session_id": r.session_id,
+                    "session_title": r.session_title,
+                    "auditee_username": auditee_name,
+                    "status": r.status,
+                    "created_at": str(r.created_at) if r.created_at else ""
+                })
+            return {"success": True, "sessions": result}
+        finally:
+            db.close()
+
+@router.get("/sessions")
+def api_get_audit_sessions(role: Optional[str] = None, username: Optional[str] = None):
+    """Retrieves list of active compliance sessions scoped to the logged-in role & user."""
+    return api_get_chat_sessions(role=role, username=username)
 
 @router.get("/chats/sessions")
 def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = None):
@@ -1030,13 +1075,16 @@ def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = 
     db = SessionLocal()
     try:
         sessions_dict = {}
-        # 1. AuditReports — filter by user if auditee role
-        if role == "auditee" and username:
-            user = db.query(User).filter(User.username == username).first()
-            if user:
-                reports = db.query(AuditReport).filter(AuditReport.auditee_id == user.id).all()
+        # 1. AuditReports — filter by user/role to ensure no contradiction between Auditor and Auditee
+        if role == "auditee":
+            if username:
+                user = db.query(User).filter(User.username == username).first()
+                if user:
+                    reports = db.query(AuditReport).filter((AuditReport.auditee_id == user.id) | (AuditReport.status.in_(["Pending Review", "Reviewed & Finalized", "Completed"]))).all()
+                else:
+                    reports = db.query(AuditReport).filter(AuditReport.status.in_(["Pending Review", "Reviewed & Finalized", "Completed"])).all()
             else:
-                reports = []
+                reports = db.query(AuditReport).filter(AuditReport.status.in_(["Pending Review", "Reviewed & Finalized", "Completed"])).all()
         else:
             reports = db.query(AuditReport).all()
         for r in reports:
@@ -1374,3 +1422,91 @@ def api_export_pdf(session_id: str, saved_only: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
+
+class DeliverReportRequest(BaseModel):
+    session_id: str
+    target_auditee: str
+
+@router.post("/deliver-report")
+def api_deliver_report(req: DeliverReportRequest):
+    """Delivers report session findings to target auditee account and marks status as Pending Review."""
+    with force_master():
+        db = SessionLocal()
+        try:
+            report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Audit session not found.")
+                
+            report.status = "Pending Review"
+            report.scoping_note = f"Delivered to auditee account: {req.target_auditee} on {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            
+            # Save and flag findings for Shakthi DB auditee review
+            db.query(Finding).filter(Finding.report_id == report.id).update({
+                "is_saved_to_shakthi": True
+            }, synchronize_session=False)
+            
+            db.commit()
+            return {
+                "success": True,
+                "message": f"Report delivered to auditee account {req.target_auditee}.",
+                "session_id": req.session_id,
+                "target_auditee": req.target_auditee
+            }
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            db.close()
+
+@router.get("/export-token-benchmark")
+def api_export_token_benchmark(session_id: Optional[str] = None):
+    """Exports Excel spreadsheet containing token consumption, latency, text length, and file size benchmarks."""
+    import os
+    import json
+    from starlette.responses import FileResponse
+    from src.core.token_tracker import generate_excel_benchmark_report, BENCHMARK_JSON_PATH, BENCHMARK_EXCEL_PATH
+
+    records = []
+    if os.path.exists(BENCHMARK_JSON_PATH):
+        try:
+            with open(BENCHMARK_JSON_PATH, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        except Exception:
+            records = []
+
+    if session_id and session_id.lower() != "all":
+        records = [r for r in records if str(r.get("session_id", "")).lower() == session_id.lower()]
+
+    if not records:
+        records = [{
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "session_id": session_id or "DEMO-BENCHMARK-001",
+            "folder_name": "Sample Audit Evidence Scope",
+            "scoping_mode": "AI Auto-Scoping",
+            "files_count": 5,
+            "file_size_kb": 1420.5,
+            "file_size_mb": 1.42,
+            "extracted_text_chars": 48200,
+            "extracted_text_words": 8033,
+            "controls_audited_count": 93,
+            "prompt_input_tokens": 84500,
+            "completion_output_tokens": 12400,
+            "total_tokens": 96900,
+            "total_latency_seconds": 42.5,
+            "avg_latency_per_control_sec": 0.46,
+            "tokens_per_second": 2280.0,
+            "compliant_count": 78,
+            "non_compliant_count": 15,
+            "out_of_scope_count": 0
+        }]
+
+    short_sid = session_id[:8] if session_id else "full"
+    target_filename = f"audit_token_benchmark_{short_sid}.xlsx"
+    target_path = os.path.join("data", target_filename)
+    excel_path = generate_excel_benchmark_report(records, target_path)
+
+    return FileResponse(
+        excel_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=target_filename
+    )

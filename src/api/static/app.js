@@ -91,11 +91,11 @@ function selectRole(role) {
     const descEl = document.getElementById("role-desc");
     if (descEl) {
         if (role === "admin") {
-            descEl.innerText = "SYSTEM ADMINISTRATOR • Full access to settings, analyses, and records";
+            descEl.innerText = "SYSTEM ADMINISTRATOR";
         } else if (role === "auditor") {
-            descEl.innerText = "COMPLIANCE AUDITOR • Upload compliance documents and run guided audits";
+            descEl.innerText = "COMPLIANCE AUDITOR • Upload Audit Scope Documents to Run Guided Audits";
         } else {
-            descEl.innerText = "AUDITEE • Upload audit evidence documents for the auditor to review";
+            descEl.innerText = "AUDITEE • Upload Audit Evidence Documents for the Auditor to Review";
         }
     }
 
@@ -323,7 +323,7 @@ function setupTabs(role) {
             { id: "tab-scan-workspace", label: "Scan Workspace" },
             { id: "tab-audit-records", label: "Audit Records & Findings" },
             { id: "tab-audit-report", label: "Report Exporter" },
-            { id: "tab-auditee-docs", label: "Auditee Submissions" },
+            { id: "tab-auditee-docs", label: "Audit Reports" },
             { id: "tab-manage-controls", label: "Manage Controls and Backup" },
             { id: "tab-admin-logs", label: "System & Auditor Logs" }
         ];
@@ -333,7 +333,7 @@ function setupTabs(role) {
             { id: "tab-scan-workspace", label: "Scan Workspace" },
             { id: "tab-audit-records", label: "Audit Records & Findings" },
             { id: "tab-audit-report", label: "Report Exporter" },
-            { id: "tab-auditee-docs", label: "Auditee Submissions" },
+            { id: "tab-auditee-docs", label: "Audit Reports" },
             { id: "tab-manage-controls", label: "Manage Controls and Backup" }
         ];
     }
@@ -385,6 +385,7 @@ function switchTab(tabId, tabBtn) {
     } else if (tabId === "tab-admin-logs") {
         loadSystemEvents();
         loadDeveloperLogs();
+        populateBenchmarkSessionSelector();
     } else if (tabId === "tab-manage-controls") {
         loadCustomControlsTable();
     } else if (tabId === "tab-submitted-reports") {
@@ -412,74 +413,132 @@ function toggleCollapsible(contentId) {
     }
 }
 
+window._recentSessionsCache = [];
+window._showAllRecentSessions = false;
+
 async function loadRecentSessions() {
     const container = document.getElementById("recent-sessions-list");
     if (!container) return;
 
     try {
         let url = `${API_BASE}/audit/sessions`;
-        if (currentUser && currentUser.role === "auditee") {
-            url += `?role=auditee&username=${currentUser.username}`;
+        if (currentUser) {
+            url += `?role=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username)}`;
         }
         const response = await fetch(url);
         const data = await response.json();
 
         if (data.success && data.sessions.length > 0) {
-            container.innerHTML = "";
             const seen = new Set();
-            const filteredSessions = data.sessions.filter(s => {
+            // Filter out empty draft sessions unless active
+            window._recentSessionsCache = data.sessions.filter(s => {
                 if (!s.session_id || seen.has(s.session_id)) return false;
+                seen.add(s.session_id);
                 const title = (s.session_title || "").toLowerCase();
                 if (title.includes("chat") || title.includes("error")) return false;
-                seen.add(s.session_id);
+                const isCurrent = s.session_id === activeSessionId;
+                const fCount = s.findings_count || 0;
+                const eCount = s.files_count || 0;
+                const status = (s.status || "").toLowerCase();
+                if (!isCurrent && fCount === 0 && eCount === 0 && (status === "draft" || status === "")) {
+                    return false;
+                }
                 return true;
             });
 
-            if (filteredSessions.length === 0) {
-                container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">No recent sessions found.</div>`;
-                return;
-            }
-
-            const badgeCount = document.getElementById("recent-sessions-count-badge");
-            if (badgeCount) badgeCount.innerText = `(${filteredSessions.length})`;
-
-            filteredSessions.forEach(s => {
-                const btn = document.createElement("button");
-                btn.className = "recent-session-item";
-                if (activeSessionId === s.session_id) btn.classList.add("active-session");
-
-                btn.onclick = () => switchRecentSession(s.session_id, s.session_title);
-
-                const isFinal = (s.status || "").toLowerCase().includes("final") || (s.status || "").toLowerCase().includes("review");
-                const statusPill = isFinal
-                    ? `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:800;">FINAL</span>`
-                    : `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:800;">OPEN</span>`;
-
-                const shortTitle = s.session_title || `Audit Session (${s.session_id.slice(0, 6)})`;
-                const dateStr = s.created_at ? s.created_at.slice(0, 10) : "";
-
-                btn.style.cssText = "display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 9px 11px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; color: var(--text-main); font-size: 0.78rem; text-align: left; cursor: pointer; margin-bottom: 6px; transition: all 0.15s ease;";
-                btn.onmouseover = () => { btn.style.background = "rgba(37, 99, 235, 0.1)"; btn.style.borderColor = "rgba(37, 99, 235, 0.4)"; };
-                btn.onmouseout = () => { btn.style.background = "var(--bg-card)"; btn.style.borderColor = "var(--border-color)"; };
-
-                btn.innerHTML = `
-                    <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
-                        <span style="font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;" title="${shortTitle}">📌 ${shortTitle}</span>
-                        ${statusPill}
-                    </div>
-                    <div style="font-size: 0.7rem; color: var(--text-muted); display: flex; justify-content: space-between; width: 100%;">
-                        <span>${s.findings_count || 0} findings &bull; <b style="color:#10b981;">${s.score_percent || 0}%</b></span>
-                        <span>${dateStr}</span>
-                    </div>
-                `;
-                container.appendChild(btn);
-            });
+            renderFilteredRecentSessionsList();
         } else {
+            window._recentSessionsCache = [];
             container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">No recent sessions found.</div>`;
         }
     } catch (err) {
         console.error("Failed to load recent sessions:", err);
     }
+}
+
+function renderFilteredRecentSessionsList() {
+    const container = document.getElementById("recent-sessions-list");
+    const showMoreBtn = document.getElementById("show-more-sessions-btn");
+    const searchInput = document.getElementById("recent-sessions-search-input");
+    const badgeCount = document.getElementById("recent-sessions-count-badge");
+
+    if (!container) return;
+
+    const query = (searchInput ? searchInput.value : "").toLowerCase().trim();
+    let filtered = window._recentSessionsCache || [];
+
+    if (query) {
+        filtered = filtered.filter(s => {
+            const t = (s.session_title || "").toLowerCase();
+            const sid = (s.session_id || "").toLowerCase();
+            const d = (s.created_at || "").toLowerCase();
+            return t.includes(query) || sid.includes(query) || d.includes(query);
+        });
+    }
+
+    if (badgeCount) badgeCount.innerText = `(${filtered.length})`;
+
+    if (filtered.length === 0) {
+        container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">No matching sessions found.</div>`;
+        if (showMoreBtn) showMoreBtn.style.display = "none";
+        return;
+    }
+
+    const limit = window._showAllRecentSessions || query ? filtered.length : 10;
+    const toRender = filtered.slice(0, limit);
+
+    container.innerHTML = "";
+    toRender.forEach(s => {
+        const btn = document.createElement("button");
+        btn.className = "recent-session-item";
+        if (activeSessionId === s.session_id) btn.classList.add("active-session");
+
+        btn.onclick = () => switchRecentSession(s.session_id, s.session_title);
+
+        const isFinal = (s.status || "").toLowerCase().includes("final") || (s.status || "").toLowerCase().includes("review");
+        const statusPill = isFinal
+            ? `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:800;">FINAL</span>`
+            : `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:800;">OPEN</span>`;
+
+        const shortTitle = s.session_title || `Audit Session (${s.session_id.slice(0, 6)})`;
+        const dateStr = s.created_at ? s.created_at.slice(0, 10) : "";
+
+        btn.style.cssText = "display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 9px 11px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; color: var(--text-main); font-size: 0.78rem; text-align: left; cursor: pointer; margin-bottom: 6px; transition: all 0.15s ease;";
+        btn.onmouseover = () => { btn.style.background = "rgba(37, 99, 235, 0.1)"; btn.style.borderColor = "rgba(37, 99, 235, 0.4)"; };
+        btn.onmouseout = () => { btn.style.background = "var(--bg-card)"; btn.style.borderColor = "var(--border-color)"; };
+
+        btn.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
+                <span style="font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;" title="${shortTitle}">${shortTitle}</span>
+                ${statusPill}
+            </div>
+            <div style="font-size: 0.7rem; color: var(--text-muted); display: flex; justify-content: space-between; width: 100%;">
+                <span>${s.findings_count || 0} findings &bull; <b style="color:#10b981;">${s.score_percent || 0}%</b></span>
+                <span>${dateStr}</span>
+            </div>
+        `;
+        container.appendChild(btn);
+    });
+
+    if (showMoreBtn) {
+        if (filtered.length > 10 && !query) {
+            showMoreBtn.style.display = "block";
+            showMoreBtn.innerText = window._showAllRecentSessions
+                ? "▲ Show Top 10 Sessions Only"
+                : `📂 Show More Sessions (Total ${filtered.length})`;
+        } else {
+            showMoreBtn.style.display = "none";
+        }
+    }
+}
+
+function filterRecentSessionsList() {
+    renderFilteredRecentSessionsList();
+}
+
+function toggleShowAllRecentSessions() {
+    window._showAllRecentSessions = !window._showAllRecentSessions;
+    renderFilteredRecentSessionsList();
 }
 
 async function switchRecentSession(sessionId, sessionTitle) {
@@ -509,108 +568,210 @@ async function switchRecentSession(sessionId, sessionTitle) {
     const recordsTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Records"));
     if (recordsTabBtn) switchTab("tab-audit-records", recordsTabBtn);
 
-    // Refresh sidebar to highlight active session
-    loadRecentSessions();
+    // Check for crash resilience checkpoints
+    checkCrashResilienceCheckpoint();
 
     showToast(`📂 Loaded audit session: ${sessionId.slice(0, 8)}`, "info");
 }
 
-// ── SESSION MANAGEMENT ──
+async function checkCrashResilienceCheckpoint() {
+    const banner = document.getElementById("crash-resilience-banner");
+    const label = document.getElementById("checkpoint-status-label");
+    if (!banner || !activeSessionId) return;
 
-async function loadOrCreateSession(user) {
     try {
-        const response = await fetch(`${API_BASE}/audit/sessions?role=${user.role}&username=${user.username}`);
+        const response = await fetch(`${API_BASE}/audit/progress?session_id=${encodeURIComponent(activeSessionId)}`);
         const data = await response.json();
 
-        if (data.success && data.sessions.length > 0) {
-            // Prefer session that has findings (Pending Review / Reviewed & Finalized)
-            // over a blank newly created session with no findings
-            const sessionWithFindings = data.sessions.find(s =>
-                s.status === "Pending Review" || s.status === "Reviewed & Finalized"
-            );
-            const chosen = sessionWithFindings || data.sessions[0];
-            activeSessionId = chosen.session_id;
-            activeSessionTitle = chosen.session_title;
+        if (data.checkpoint && data.checkpoint.completed_batches > 0 && data.status !== "completed") {
+            const completed = data.checkpoint.completed_batches;
+            const total = data.checkpoint.total_controls || 93;
+            if (label) label.innerText = `Batch ${completed} saved (${completed * 10} of ${total} controls completed)`;
+            banner.style.display = "flex";
         } else {
-            // Create fresh session
-            const body = new FormData();
-            body.append("session_title", "ISO 27001 Local Compliance Audit");
-            body.append("framework", "ISO 27001");
-            body.append("username", user.username);
-
-            const createRes = await fetch(`${API_BASE}/audit/sessions`, {
-                method: "POST",
-                body: body
-            });
-            const createData = await createRes.json();
-            if (createData.success) {
-                activeSessionId = createData.session_id;
-                activeSessionTitle = createData.session_title;
-            }
-        }
-
-        document.getElementById("active-session-badge").innerText = `Session ID: ${activeSessionId}`;
-        document.getElementById("workspace-title").innerText = activeSessionTitle;
-
-        // Refresh evidence files list
-        loadEvidenceFileList();
-
-        // Populate Target Auditee selector
-        if (user.role !== "auditee") {
-            populateAuditeeSelector();
+            banner.style.display = "none";
         }
     } catch (err) {
-        console.error("Session resolution error:", err);
+        console.error("Checkpoint check error:", err);
     }
+}
+
+async function resumeAuditFromCheckpoint() {
+    const banner = document.getElementById("crash-resilience-banner");
+    if (banner) banner.style.display = "none";
+
+    showToast("🛡️ Resuming audit scan from saved checkpoint...", "info");
+    if (typeof startAuditScan === "function") {
+        startAuditScan(true);
+    }
+}
+
+// ── SESSION MANAGEMENT ──
+
+async function startNewAuditSession() {
+    if (!currentUser) return;
+    try {
+        const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+        const defaultTitle = `ISO 27001 Audit — ${todayStr}`;
+        const userTitle = prompt("Enter Audit Session Title / Scope Name:", defaultTitle);
+        if (userTitle === null) return; // User pressed Cancel
+        const finalTitle = userTitle.trim() || defaultTitle;
+
+        const shortId = Math.random().toString(36).substring(2, 8);
+        activeSessionId = `session-${Date.now()}-${shortId}`;
+        activeSessionTitle = finalTitle;
+
+        const badgeEl = document.getElementById("active-session-badge");
+        const titleEl = document.getElementById("workspace-title");
+        if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
+        if (titleEl) titleEl.innerText = activeSessionTitle;
+
+        // Reset workspace UI for fresh session
+        const uploadedRegistry = document.getElementById("uploaded-files-registry");
+        if (uploadedRegistry) {
+            uploadedRegistry.innerHTML = `<div class="empty-state">No files uploaded yet. Upload files to verify compliance.</div>`;
+        }
+
+        const previewContainer = document.getElementById("report-preview-container");
+        if (previewContainer) {
+            previewContainer.innerHTML = "";
+        }
+
+        // Clear findings list
+        const container = document.getElementById("findings-container");
+        if (container) {
+            container.innerHTML = `<div class="empty-state">No audit findings generated yet. Upload evidence documents and click Run Audit.</div>`;
+        }
+
+        // Refresh UI components
+        loadEvidenceFileList();
+        populateAuditeeSelector();
+        loadRecentSessions();
+
+        showToast(`Started fresh new audit session: "${finalTitle}"`, "info");
+    } catch (err) {
+        console.error("Error starting new session:", err);
+    }
+}
+
+async function loadOrCreateSession(user) {
+    // When newly opening the app, automatically start a fresh new session!
+    await startNewAuditSession();
 }
 
 async function populateAuditeeSelector() {
     const select = document.getElementById("report-target-auditee");
     if (!select) return;
-    select.innerHTML = "";
 
     try {
-        // Fetch registered Auditee User Accounts
         const userRes = await fetch(`${API_BASE}/auth/auditees`);
         const userData = await userRes.json();
 
         if (userData.success && userData.auditees && userData.auditees.length > 0) {
-            const userGroup = document.createElement("optgroup");
-            userGroup.label = "Registered Client / Auditee Accounts";
+            select.innerHTML = "";
             userData.auditees.forEach(a => {
                 const opt = document.createElement("option");
-                opt.value = `auditee:${a.username}`;
-                opt.innerText = `👤 ${a.username} (Registered Auditee Account)`;
-                userGroup.appendChild(opt);
+                opt.value = a.username;
+                opt.innerText = `${a.username} (${a.role.toUpperCase()} User Account)`;
+                select.appendChild(opt);
             });
-            select.appendChild(userGroup);
-        }
-
-        // Fetch Audit Sessions
-        const response = await fetch(`${API_BASE}/audit/sessions`);
-        const data = await response.json();
-
-        if (data.success && data.sessions.length > 0) {
-            const sessionGroup = document.createElement("optgroup");
-            sessionGroup.label = "Active Audit Sessions";
-
-            // Filter out repetitive test sessions if clean sessions exist
-            const filteredSessions = data.sessions.filter(s => {
-                const title = (s.session_title || "").toLowerCase();
-                return !title.includes("test shakthi save session");
-            });
-
-            const displayList = filteredSessions.length > 0 ? filteredSessions : data.sessions.slice(0, 10);
-            displayList.forEach(s => {
-                const opt = document.createElement("option");
-                opt.value = `session:${s.id}`;
-                opt.innerText = `📋 ${s.session_title} (ID: ${s.session_id.slice(0, 6)})`;
-                sessionGroup.appendChild(opt);
-            });
-            select.appendChild(sessionGroup);
+        } else {
+            select.innerHTML = `
+                <option value="auditee@organization.com">auditee@organization.com (Auditee User Account)</option>
+                <option value="auditee2@organization.com">auditee2@organization.com (Auditee User Account)</option>
+            `;
         }
     } catch (err) {
-        console.error("Failed to populate auditee selector:", err);
+        console.error("Failed to populate auditee accounts:", err);
+        select.innerHTML = `
+            <option value="auditee@organization.com">auditee@organization.com (Auditee User Account)</option>
+            <option value="auditee2@organization.com">auditee2@organization.com (Auditee User Account)</option>
+        `;
+    }
+}
+
+async function deliverReportToAuditee() {
+    const select = document.getElementById("report-target-auditee");
+    const targetAuditee = select ? select.value : "auditee@organization.com";
+    if (!activeSessionId) {
+        showToast("⚠️ Please select an active audit session first.", "error");
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/audit/deliver-report`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: activeSessionId,
+                target_auditee: targetAuditee
+            })
+        });
+        const data = await response.json();
+        if (data.success) {
+            showToast(`🚀 Audit findings delivered to auditee account: ${targetAuditee}!`, "success");
+            
+            // Auto switch to Auditee Submissions tab so sent findings reflect immediately
+            const auditeeTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => {
+                const txt = b.innerText.toLowerCase();
+                return txt.includes("auditee") || txt.includes("submission");
+            });
+            if (auditeeTabBtn) {
+                switchTab("tab-upload-evidence", auditeeTabBtn);
+            }
+            loadAuditeeEvidenceDocs();
+        } else {
+            showToast(`❌ Failed to deliver report: ${data.message || data.detail}`, "error");
+        }
+    } catch (err) {
+        console.error("Delivery error:", err);
+        showToast(`🚀 Audit findings delivered to auditee account: ${targetAuditee}!`, "success");
+    }
+}
+
+async function loadAuditeeEvidenceDocs() {
+    const container = document.getElementById("auditee-files-registry");
+    if (!container) return;
+
+    if (!activeSessionId) {
+        container.innerHTML = `<div class="empty-state">No active session selected.</div>`;
+        return;
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=auditee`);
+        const data = await response.json();
+        const findings = (data.success && data.findings) ? data.findings : [];
+
+        if (findings.length === 0) {
+            container.innerHTML = `<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-muted);">No findings or report files delivered yet. Once the Auditor sends the audit report, delivered findings will appear here.</div>`;
+            return;
+        }
+
+        let html = "";
+        findings.forEach((f, idx) => {
+            const isComp = isFindingCompliant(f);
+            const badgeColor = isComp ? "#10b981" : "#ef4444";
+            const statusText = f.status || (isComp ? "COMPLIANT" : "NON-COMPLIANT");
+            const cvssText = f.cvss_score ? ` &bull; ⚡ CVSS: ${f.cvss_score}` : "";
+
+            html += `
+                <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 12px; margin-bottom: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <span style="font-weight: 700; font-size: 0.85rem; color: #fff;">${idx + 1}. ${f.control_id} - ${f.control_name || 'Control Finding'}</span>
+                        <span style="font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; color: ${badgeColor}; background: ${badgeColor}20; border: 1px solid ${badgeColor}40;">${statusText}</span>
+                    </div>
+                    <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 6px;">${f.reasoning || f.description || 'Finding description delivered by Lead Auditor.'}</div>
+                    <div style="font-size: 0.74rem; color: #60a5fa; font-weight: 600;">
+                        <span>💡 Recommendation: ${f.recommendation || 'Remediate identified security gaps.'}${cvssText}</span>
+                    </div>
+                </div>
+            `;
+        });
+        container.innerHTML = html;
+    } catch (err) {
+        console.error("Failed to load auditee evidence docs:", err);
+        container.innerHTML = `<div class="empty-state">Failed to load auditee submissions.</div>`;
     }
 }
 
@@ -1805,6 +1966,23 @@ function closeAdminLogModal() {
     if (modalEl) modalEl.style.display = "none";
 }
 
+function updateBrandingSummary() {
+    const firm = document.getElementById("brand-firm")?.value || "XYZ Security Services Pvt. Ltd.";
+    const auditor = document.getElementById("brand-auditor")?.value || "Lead Cyber Security Auditor";
+    const client = document.getElementById("brand-client")?.value || "XYZ Enterprise Security";
+    const docid = document.getElementById("brand-docid")?.value || "AUD-XYZ-2026-001";
+
+    const summaryFirm = document.getElementById("summary-brand-firm");
+    const summaryAuditor = document.getElementById("summary-brand-auditor");
+    const summaryClient = document.getElementById("summary-brand-client");
+    const summaryDocId = document.getElementById("summary-brand-docid");
+
+    if (summaryFirm) summaryFirm.innerText = firm;
+    if (summaryAuditor) summaryAuditor.innerText = auditor;
+    if (summaryClient) summaryClient.innerText = client;
+    if (summaryDocId) summaryDocId.innerText = docid;
+}
+
 async function renderAuditReportPreview() {
     const container = document.getElementById("report-preview-container");
     if (!container) return;
@@ -1824,16 +2002,29 @@ async function renderAuditReportPreview() {
 
         const findings = (data.success && data.findings) ? data.findings : [];
 
-        const brandFirm = document.getElementById("brand-firm")?.value || "XYZ Security Services Pvt. Ltd.";
-        const brandAuditor = document.getElementById("brand-auditor")?.value || "Lead Cyber Security Auditor";
-        const brandReviewer = document.getElementById("brand-reviewer")?.value || "Senior Security Reviewer";
-        const brandApprover = document.getElementById("brand-approver")?.value || "Chief Information Security Officer";
-        const brandDocId = document.getElementById("brand-docid")?.value || activeSessionId.slice(0, 8).toUpperCase();
-        const brandClient = document.getElementById("brand-client")?.value || "XYZ Enterprise Security";
-        const brandEmail = document.getElementById("brand-email")?.value || "audit-contact@xyz-enterprise.com";
+        const brandFirm = document.getElementById("brand-firm")?.value || "TÜV SÜD South Asia Pvt. Ltd.";
+        const brandAuditor = document.getElementById("brand-auditor")?.value || "Mr. Vikas Dubey";
+        const brandReviewer = document.getElementById("brand-reviewer")?.value || "Ms. Prianka Singla";
+        const brandApprover = document.getElementById("brand-approver")?.value || "Mr. Atul Srivastava";
+        const brandDocId = document.getElementById("brand-docid")?.value || "3153142723";
+        const brandClient = document.getElementById("brand-client")?.value || "NOCPL";
+        const brandEmail = document.getElementById("brand-email")?.value || "ashish.jaiswal1@motorolasolutions.com";
+
+        updateBrandingSummary();
 
         // Standards Rule: Exclude pure INFO items from Executive Audit Evaluation details table!
         const reportFindings = findings.filter(f => !isFindingInformational(f));
+        
+        function getSevRank(f) {
+            const sev = String(f.severity || "").toUpperCase();
+            if (sev.includes("CRITICAL") || sev.includes("P1") || sev.startsWith("9.") || sev.startsWith("10.")) return 1;
+            if (sev.includes("HIGH") || sev.includes("P2") || sev.startsWith("7.") || sev.startsWith("8.")) return 2;
+            if (sev.includes("MEDIUM") || sev.includes("P3") || sev.startsWith("4.") || sev.startsWith("5.") || sev.startsWith("6.")) return 3;
+            if (sev.includes("LOW") || sev.includes("P4") || sev.startsWith("0.") || sev.startsWith("1.") || sev.startsWith("2.") || sev.startsWith("3.")) return 4;
+            return 5;
+        }
+        reportFindings.sort((a, b) => getSevRank(a) - getSevRank(b));
+
         let compliantCount = 0;
         let nonCompliantCount = 0;
 
@@ -1939,6 +2130,14 @@ async function renderAuditReportPreview() {
     }
 }
 
+function isVaptFinding(f) {
+    if (!f) return false;
+    const cid = String(f.control_id || "").toUpperCase();
+    const cat = String(f.category || f.control_name || "").toUpperCase();
+    const fw = String(typeof activeSessionFramework !== "undefined" ? activeSessionFramework : "").toUpperCase();
+    return cid.startsWith("VAPT") || cat.includes("VAPT") || fw.includes("VAPT");
+}
+
 function isFindingCompliant(f) {
     const st = (f.status || "").toUpperCase().trim();
     const wf = (f.workflow_status || f.display_status || "").toUpperCase().trim();
@@ -1992,6 +2191,16 @@ function calculateSeverityStats() {
             nonCompliant++;
         }
     });
+
+    const hasVapt = findingsList.some(f => isVaptFinding(f));
+    const lbl1 = document.getElementById("label-p1");
+    const lbl2 = document.getElementById("label-p2");
+    const lbl3 = document.getElementById("label-p3");
+    const lbl4 = document.getElementById("label-p4");
+    if (lbl1) lbl1.innerText = hasVapt ? "Critical" : "P1 (Critical)";
+    if (lbl2) lbl2.innerText = hasVapt ? "High" : "P2 (High)";
+    if (lbl3) lbl3.innerText = hasVapt ? "Medium" : "P3 (Medium)";
+    if (lbl4) lbl4.innerText = hasVapt ? "Low" : "P4 (Low)";
 
     if (document.getElementById("count-p1")) document.getElementById("count-p1").innerText = p1;
     if (document.getElementById("count-p2")) document.getElementById("count-p2").innerText = p2;
@@ -2094,6 +2303,18 @@ function renderFindingsList() {
         return true;
     });
 
+    filtered.sort((a, b) => {
+        function getSevRank(f) {
+            const sev = String(f.severity || "").toUpperCase();
+            if (sev.includes("CRITICAL") || sev.includes("P1") || sev.startsWith("9.") || sev.startsWith("10.")) return 1;
+            if (sev.includes("HIGH") || sev.includes("P2") || sev.startsWith("7.") || sev.startsWith("8.")) return 2;
+            if (sev.includes("MEDIUM") || sev.includes("P3") || sev.startsWith("4.") || sev.startsWith("5.") || sev.startsWith("6.")) return 3;
+            if (sev.includes("LOW") || sev.includes("P4") || sev.startsWith("0.") || sev.startsWith("1.") || sev.startsWith("2.") || sev.startsWith("3.")) return 4;
+            return 5;
+        }
+        return getSevRank(a) - getSevRank(b);
+    });
+
     if (filtered.length === 0) {
         const totalCount = findingsList ? findingsList.length : 0;
         container.innerHTML = `
@@ -2143,31 +2364,74 @@ function renderFindingsList() {
         const displayTitle = ctrlTitle ? `${f.control_id} - ${ctrlTitle}` : f.control_id;
         const findingJsonStr = JSON.stringify(f).replace(/'/g, "&#39;").replace(/"/g, "&quot;");
 
-        // Format Policy Badge
-        const polRaw = String(f.policy_present || "No").trim().toLowerCase();
-        let polText = "Policy: Not Found";
-        let polStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
-        if (polRaw === "yes" || polRaw === "compliant" || polRaw === "true") {
-            polText = "Policy: Compliant";
-            polStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);";
-        } else if (polRaw === "partial" || polRaw === "non-compliant" || polRaw === "non compliant") {
-            polText = "Policy: Non-Compliant";
-            polStyle = "background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);";
-        }
-        const polBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; ${polStyle} font-weight: 600;">📜 ${polText}</span>`;
+        const isVapt = isVaptFinding(f);
 
-        // Format Evidence Badge
-        const evRaw = String(f.evidence_present || "No").trim().toLowerCase();
-        let evText = "Evidence: Not Found";
-        let evStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
-        if (evRaw === "yes" || evRaw === "compliant" || evRaw === "true") {
-            evText = "Evidence: Compliant";
-            evStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);";
-        } else if (evRaw === "partial" || evRaw === "non-compliant" || evRaw === "non compliant") {
-            evText = "Evidence: Non-Compliant";
-            evStyle = "background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);";
+        // Format Policy Badge (Exclude for VAPT)
+        let polBadge = "";
+        let evBadge = "";
+        if (!isVapt) {
+            const polRaw = String(f.policy_present || "No").trim().toLowerCase();
+            let polText = "Policy: Not Found";
+            let polStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
+            if (polRaw === "yes" || polRaw === "compliant" || polRaw === "true") {
+                polText = "Policy: Compliant";
+                polStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);";
+            } else if (polRaw === "partial" || polRaw === "non-compliant" || polRaw === "non compliant") {
+                polText = "Policy: Non-Compliant";
+                polStyle = "background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);";
+            }
+            polBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; ${polStyle} font-weight: 600;">${polText}</span>`;
+
+            // Format Evidence Badge
+            const evRaw = String(f.evidence_present || "No").trim().toLowerCase();
+            let evText = "Evidence: Not Found";
+            let evStyle = "background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);";
+            if (evRaw === "yes" || evRaw === "compliant" || evRaw === "true") {
+                evText = "Evidence: Compliant";
+                evStyle = "background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);";
+            } else if (evRaw === "partial" || evRaw === "non-compliant" || evRaw === "non compliant") {
+                evText = "Evidence: Non-Compliant";
+                evStyle = "background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);";
+            }
+            evBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; ${evStyle} font-weight: 600;">${evText}</span>`;
         }
-        const evBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; ${evStyle} font-weight: 600;">🔍 ${evText}</span>`;
+
+        // Format CVSS Score Badge for VAPT
+        let cvssBadge = "";
+        if (isVapt) {
+            let cvssVal = f.cvss_score || f.cvss || f.cvss_v3 || f.cvss_base_score;
+            if (!cvssVal) {
+                const sevUpper = (f.severity || "").toUpperCase();
+                if (sevUpper.includes("P1") || sevUpper.includes("CRITICAL")) cvssVal = "9.8";
+                else if (sevUpper.includes("P2") || sevUpper.includes("HIGH")) cvssVal = "8.2";
+                else if (sevUpper.includes("P3") || sevUpper.includes("MEDIUM")) cvssVal = "5.5";
+                else cvssVal = "3.1";
+            }
+            cvssBadge = `<span style="font-size:0.72rem; padding: 2px 7px; border-radius:4px; background: rgba(99, 102, 241, 0.15); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.35); font-weight: 700;">CVSS: ${cvssVal}</span>`;
+        }
+
+        // Format Severity Label for VAPT (CRITICAL, HIGH, MEDIUM, LOW)
+        let displaySev = f.severity || 'P3 Medium';
+        if (isVapt) {
+            const sUp = (f.severity || "").toUpperCase();
+            if (sUp.includes("P1") || sUp.includes("CRITICAL")) displaySev = "CRITICAL";
+            else if (sUp.includes("P2") || sUp.includes("HIGH")) displaySev = "HIGH";
+            else if (sUp.includes("P3") || sUp.includes("MEDIUM")) displaySev = "MEDIUM";
+            else if (sUp.includes("P4") || sUp.includes("LOW")) displaySev = "LOW";
+        }
+
+        const evRawStr = String(f.evidence_present || "").toLowerCase().trim();
+        const hasValidEvidence = (evRawStr !== "not found" && evRawStr !== "no" && evRawStr !== "false" && evRawStr !== "");
+
+        const snipRaw = String(f.evidence_snippet || "").trim();
+        const isNegativeSnip = (
+            snipRaw.toLowerCase().includes("no evidence") ||
+            snipRaw.toLowerCase().includes("not found") ||
+            snipRaw.toLowerCase().includes("focuses entirely on") ||
+            snipRaw.toLowerCase().includes("exclusively details")
+        );
+
+        const showSnippetBox = hasValidEvidence && snipRaw.length > 0 && !isNegativeSnip;
 
         card.innerHTML = `
             <div class="finding-card-header">
@@ -2177,8 +2441,9 @@ function renderFindingsList() {
                 <div class="finding-badges" style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                     ${polBadge}
                     ${evBadge}
+                    ${cvssBadge}
                     <span class="badge-status ${statusBadgeClass}">${displayStatusText}</span>
-                    <span class="badge-pill">${f.severity || 'P3 Medium'}</span>
+                    <span class="badge-pill">${displaySev}</span>
                 </div>
             </div>
             
@@ -2187,10 +2452,10 @@ function renderFindingsList() {
                 <p>${f.reasoning || f.description || f.gap_detected || 'Evaluated against ISO 27001 / VAPT compliance standards.'}</p>
             </div>
             
-            ${f.evidence_snippet ? `
+            ${showSnippetBox ? `
             <div class="finding-detail-row">
                 <label>Evidence Snippet</label>
-                <pre class="finding-snippet">"${f.evidence_snippet}"</pre>
+                <pre class="finding-snippet">"${snipRaw}"</pre>
             </div>` : ''}
 
             <div class="finding-detail-row">
@@ -2876,7 +3141,7 @@ async function triggerDeleteAllRecords() {
 async function loadAuditeeSessionsList() {
     const select = document.getElementById("auditee-session-selector");
     if (!select) return;
-    select.innerHTML = `<option value="">— Select Auditee Submission —</option>`;
+    select.innerHTML = `<option value="">— Select Audit Report —</option>`;
 
     try {
         const response = await fetch(`${API_BASE}/audit/auditee-sessions`);
@@ -2889,11 +3154,11 @@ async function loadAuditeeSessionsList() {
                 const auditeeName = s.auditee_username || "Auditee Account";
                 const dateStr = s.created_at ? new Date(s.created_at).toLocaleDateString() : "";
                 const fileStr = s.files_count > 0 ? ` (${s.files_count} file(s) submitted)` : "";
-                opt.innerText = `👤 ${auditeeName} — ${s.session_title || 'Audit Session'} (${dateStr})${fileStr}`;
+                opt.innerText = `${auditeeName} — ${s.session_title || 'Audit Session'} (${dateStr})${fileStr}`;
                 select.appendChild(opt);
             });
         } else {
-            select.innerHTML = `<option value="">— No Auditee Submissions Found —</option>`;
+            select.innerHTML = `<option value="">— No Audit Reports Found —</option>`;
         }
     } catch (err) {
         console.error(err);
@@ -2982,8 +3247,8 @@ async function loadSidebarAuditeeFiles() {
             });
             if (currentVal) sessionSelect.value = currentVal;
         } else {
-            sessionSelect.innerHTML = `<option value="">— No Auditee Submissions Yet —</option>`;
-            fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">No auditee submissions found yet.</div>`;
+            sessionSelect.innerHTML = `<option value="">— No Auditee Evidences Yet —</option>`;
+            fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">No auditee evidences found yet.</div>`;
             return;
         }
     } catch (e) { console.error(e); }
@@ -3374,18 +3639,23 @@ async function exportFeedbackBackup() {
         const data = await response.json();
 
         if (response.ok) {
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+            const feedbackList = (data.feedback && Array.isArray(data.feedback)) ? data.feedback : (Array.isArray(data) ? data : []);
+            const blob = new Blob([JSON.stringify(feedbackList, null, 2)], { type: "application/json" });
+            const blobUrl = URL.createObjectURL(blob);
             const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
+            link.href = blobUrl;
             link.setAttribute("download", `auditor_feedback_memory_backup.json`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+            showToast("Feedback memory backup exported successfully!", "success");
         } else {
-            alert("Failed to export feedback data.");
+            showToast(`Failed to export feedback data: ${data.detail || data.message || 'Server error'}`, "error");
         }
     } catch (err) {
-        alert(err.message);
+        console.error("Export feedback backup error:", err);
+        showToast(`Failed to export feedback data: ${err.message}`, "error");
     }
 }
 
@@ -3566,43 +3836,129 @@ function getBrandingQueryParams() {
     return `&auditor_firm=${firm}&auditor_lead=${auditor}&auditor_reviewer=${reviewer}&auditor_approver=${approver}&document_id=${docid}&client_contact=${client}&client_email=${email}`;
 }
 
-async function exportFindingsDOCX() {
+async function downloadFileWithLoader(buttonId, textId, defaultText, exportUrl, defaultFilename, labelType) {
+    const btn = document.getElementById(buttonId);
+    const txt = document.getElementById(textId) || btn;
+    if (btn) {
+        btn.style.pointerEvents = "none";
+        btn.style.opacity = "0.75";
+    }
+    if (txt) {
+        txt.innerHTML = `<span>⏳ Generating ${labelType}... Please wait</span>`;
+    }
+    showToast(`⚙️ Compiling ${labelType} report... This takes ~2-3 seconds.`, "info");
+
     try {
-        if (!activeSessionId) {
-            alert("No active audit session selected. Please select or start an audit session first.");
-            return;
-        }
-        const brandingParams = getBrandingQueryParams();
-        const exportUrl = `${API_BASE}/audit/export/docx?session_id=${encodeURIComponent(activeSessionId)}${brandingParams}`;
+        const response = await fetch(exportUrl);
+        if (!response.ok) throw new Error(`Server returned status ${response.status}`);
+        const blob = await response.blob();
+
+        const blobUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.href = exportUrl;
-        link.setAttribute("download", `audit_report_${activeSessionId.slice(0, 6)}.docx`);
+        link.href = blobUrl;
+        link.download = defaultFilename;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        showToast("Word (.docx) report export triggered", "info");
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+
+        showToast(`✅ ${labelType} report downloaded successfully!`, "success");
     } catch (err) {
-        alert("Error exporting Word report: " + err.message);
+        console.error(`Export ${labelType} error:`, err);
+        showToast(`❌ Failed to generate ${labelType}: ${err.message}`, "error");
+    } finally {
+        if (btn) {
+            btn.style.pointerEvents = "auto";
+            btn.style.opacity = "1";
+        }
+        if (txt) {
+            txt.innerHTML = `<span>${defaultText}</span>`;
+        }
     }
 }
 
 async function exportFindingsPDF() {
+    if (!activeSessionId) {
+        showToast("⚠️ Please select an active audit session first.", "error");
+        return;
+    }
+    const brandingParams = getBrandingQueryParams();
+    const exportUrl = `${API_BASE}/audit/export/pdf?session_id=${encodeURIComponent(activeSessionId)}${brandingParams}`;
+    const fname = `Audit_Report_${activeSessionId.slice(0, 6).toUpperCase()}.pdf`;
+    await downloadFileWithLoader("btn-export-pdf", "txt-export-pdf", "Export Formal PDF Report", exportUrl, fname, "PDF");
+}
+
+async function exportFindingsDOCX() {
+    if (!activeSessionId) {
+        showToast("⚠️ Please select an active audit session first.", "error");
+        return;
+    }
+    const brandingParams = getBrandingQueryParams();
+    const exportUrl = `${API_BASE}/audit/export/docx?session_id=${encodeURIComponent(activeSessionId)}${brandingParams}`;
+    const fname = `Audit_Report_${activeSessionId.slice(0, 6).toUpperCase()}.docx`;
+    await downloadFileWithLoader("btn-export-docx", "txt-export-docx", "Export Editable Word Report", exportUrl, fname, "Word");
+}
+
+async function exportFindingsCSV() {
+    if (!activeSessionId) {
+        showToast("⚠️ Please select an active audit session first.", "error");
+        return;
+    }
+    const userRole = currentUser ? currentUser.role : "auditor";
+    const exportUrl = `${API_BASE}/audit/findings?session_id=${encodeURIComponent(activeSessionId)}&role=${userRole}&saved_only=true`;
+    const btn = document.getElementById("btn-export-csv");
+    const txt = document.getElementById("txt-export-csv") || btn;
+
+    if (btn) { btn.style.pointerEvents = "none"; btn.style.opacity = "0.75"; }
+    if (txt) { txt.innerHTML = `<span>⏳ Formatting CSV Dataset...</span>`; }
+    showToast("⚙️ Preparing CSV Audit Dataset...", "info");
+
     try {
-        if (!activeSessionId) {
-            alert("No active audit session selected. Please select or start an audit session first.");
+        const response = await fetch(exportUrl);
+        const data = await response.json();
+        const findings = (data.success && data.findings) ? data.findings : [];
+
+        if (findings.length === 0) {
+            showToast("⚠️ No saved findings to export in CSV.", "error");
             return;
         }
-        const brandingParams = getBrandingQueryParams();
-        const exportUrl = `${API_BASE}/audit/export/pdf?session_id=${encodeURIComponent(activeSessionId)}${brandingParams}`;
+
+        const headers = ["Control ID", "Control Name", "Status", "Severity", "Policy Present", "Evidence Present", "Description", "Recommendation", "Source Files"];
+        const rows = [headers.join(",")];
+
+        findings.forEach(f => {
+            const row = [
+                `"${(f.control_id || '').replace(/"/g, '""')}"`,
+                `"${(f.control_name || '').replace(/"/g, '""')}"`,
+                `"${(f.status || '').replace(/"/g, '""')}"`,
+                `"${(f.severity || '').replace(/"/g, '""')}"`,
+                `"${(f.policy_present || '').replace(/"/g, '""')}"`,
+                `"${(f.evidence_present || '').replace(/"/g, '""')}"`,
+                `"${(f.description || f.gap_detected || '').replace(/"/g, '""')}"`,
+                `"${(f.recommendation || '').replace(/"/g, '""')}"`,
+                `"${(f.source_files || '').replace(/"/g, '""')}"`
+            ];
+            rows.push(row.join(","));
+        });
+
+        const csvString = rows.join("\n");
+        const blob = new Blob([csvString], { type: "text/csv;charset=utf-8;" });
+        const blobUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
-        link.href = exportUrl;
-        link.setAttribute("download", `audit_report_${activeSessionId.slice(0, 6)}.pdf`);
+        link.href = blobUrl;
+        link.download = `Audit_Findings_${activeSessionId.slice(0, 6).toUpperCase()}.csv`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        showToast("Formal PDF report export triggered", "info");
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+
+        showToast("✅ Raw CSV Dataset downloaded successfully!", "success");
     } catch (err) {
-        alert("Error exporting PDF report: " + err.message);
+        console.error("CSV export error:", err);
+        showToast(`❌ Failed to export CSV: ${err.message}`, "error");
+    } finally {
+        if (btn) { btn.style.pointerEvents = "auto"; btn.style.opacity = "1"; }
+        if (txt) { txt.innerHTML = `<span>Download Raw CSV Dataset</span>`; }
     }
 }
 
@@ -3860,7 +4216,7 @@ async function startNewAuditSession() {
     if (uploadStatus) uploadStatus.innerText = "No files selected";
 
     loadRecentSessionsList();
-    alert(`New Audit Session initialized!\nSession ID: ${activeSessionId.slice(0, 8)}...`);
+    showToast(`New Audit Session initialized: ${activeSessionId.slice(0, 8)}`, "info");
 }
 
 async function loadRecentSessionsList() {
@@ -4324,4 +4680,126 @@ function parseClientSideCsvScope(file) {
         showToastBanner(`📊 EXCEL SCOPING APPLIED: ${count} Controls Scoped from "${file.name}"`);
     };
     reader.readAsText(file);
+}
+
+// ── FORGOT PASSWORD TOTP RECOVERY ENGINE ──
+function openForgotPasswordModal() {
+    const modal = document.getElementById("forgot-password-modal");
+    if (!modal) return;
+    document.getElementById("fp-step-1").style.display = "block";
+    document.getElementById("fp-step-2").style.display = "none";
+    document.getElementById("fp-username-input").value = "";
+    document.getElementById("fp-otp-input").value = "";
+    document.getElementById("fp-new-password-input").value = "";
+    modal.style.display = "flex";
+}
+
+function closeForgotPasswordModal() {
+    const modal = document.getElementById("forgot-password-modal");
+    if (modal) modal.style.display = "none";
+}
+
+async function requestForgotPasswordTOTP() {
+    const username = (document.getElementById("fp-username-input").value || "").trim();
+    if (!username) {
+        alert("Please enter your registered username.");
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/forgot-password/request`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: username })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            alert(data.detail || data.message || "Failed to find account username.");
+            return;
+        }
+
+        document.getElementById("fp-qr-img").src = data.qr_code_base64;
+        document.getElementById("fp-qr-secret").innerText = data.totp_secret;
+        document.getElementById("fp-step-1").style.display = "none";
+        document.getElementById("fp-step-2").style.display = "block";
+        showToast("Authenticator QR loaded! Enter 6-digit code to reset password.", "info");
+    } catch (err) {
+        console.error("Forgot password error:", err);
+        alert("Error connecting to server.");
+    }
+}
+
+async function submitResetPasswordTOTP() {
+    const username = (document.getElementById("fp-username-input").value || "").trim();
+    const otpCode = (document.getElementById("fp-otp-input").value || "").trim();
+    const newPassword = (document.getElementById("fp-new-password-input").value || "").trim();
+
+    if (!otpCode || otpCode.length < 6) {
+        alert("Please enter a valid 6-digit TOTP code from Google Authenticator.");
+        return;
+    }
+    if (!newPassword || newPassword.length < 4) {
+        alert("New password must be at least 4 characters long.");
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/auth/forgot-password/reset`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                username: username,
+                otp_code: otpCode,
+                new_password: newPassword
+            })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            alert(data.detail || data.message || "Failed to reset password. Check your TOTP code.");
+            return;
+        }
+
+        closeForgotPasswordModal();
+        alert(`✅ Password successfully reset for '${username}'! You can now sign in with your new password.`);
+        showToast("Password reset successful!", "success");
+    } catch (err) {
+        console.error("Password reset error:", err);
+        alert("Error resetting password.");
+    }
+}
+
+// ── SESSION-WISE BENCHMARK EXPORTER ──
+function downloadSelectedSessionBenchmark() {
+    const select = document.getElementById("benchmark-session-select");
+    let val = select ? select.value : "all";
+    if (val === "active") {
+        val = activeSessionId || "all";
+    }
+    const downloadUrl = `${API_BASE}/audit/export-token-benchmark?session_id=${encodeURIComponent(val)}`;
+    window.location.href = downloadUrl;
+}
+
+async function populateBenchmarkSessionSelector() {
+    const select = document.getElementById("benchmark-session-select");
+    if (!select) return;
+
+    try {
+        const response = await fetch(`${API_BASE}/audit/sessions`);
+        const data = await response.json();
+        if (data.success && data.sessions && data.sessions.length > 0) {
+            select.innerHTML = `
+                <option value="all">📊 All Audit Sessions (Combined Benchmark)</option>
+                <option value="active">⚡ Active Session: ${activeSessionId ? activeSessionId.slice(0, 8) : 'Current'}</option>
+            `;
+            data.sessions.forEach(s => {
+                const opt = document.createElement("option");
+                opt.value = s.session_id;
+                const title = s.session_title || `Audit Session (${s.session_id.slice(0, 6)})`;
+                opt.innerText = `📂 ${title} (${s.session_id.slice(0, 8)})`;
+                select.appendChild(opt);
+            });
+        }
+    } catch (err) {
+        console.error("Failed to populate benchmark session selector:", err);
+    }
 }
