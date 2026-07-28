@@ -59,16 +59,17 @@
             <!-- Main Credentials Form -->
             <form id="login-form">
                 <div class="form-group">
-                    <label>Username</label>
+                    <label id="username-label">Username (Gmail Only)</label>
                     <div class="input-wrapper">
-                        <input type="text" id="username-input" placeholder="Enter your username" required>
+                        <input type="text" id="username-input" placeholder="e.g. auditor@gmail.com or admin" required>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label>Password</label>
+                    <label id="password-label">Password (ISO 27001 Policy)</label>
                     <div class="input-wrapper">
-                        <input type="password" id="password-input" placeholder="Enter your password" required>
+                        <input type="password" id="password-input" placeholder="Min 8 chars: A-Z, a-z, 0-9, special char (e.g. @Pass123!)" required>
                     </div>
+                    <div id="pw-hint" style="font-size: 0.68rem; color: #94a3b8; margin-top: 4px; display: none;">🔒 ISO 27001 Policy: 8+ chars, Uppercase, Lowercase, Number & Special Char</div>
                 </div>
 
                 <div id="auth-actions" style="display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 18px; width: 100%;">

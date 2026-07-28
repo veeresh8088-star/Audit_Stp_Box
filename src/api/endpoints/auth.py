@@ -181,9 +181,11 @@ def api_forgot_password_request(req: ForgotPasswordRequest):
 
 @router.post("/forgot-password/reset")
 def api_forgot_password_reset(req: ResetPasswordTOTPRequest):
-    """Verifies 6-digit TOTP code from Google Authenticator and resets user password."""
-    if len(req.new_password) < 4:
-        raise HTTPException(status_code=400, detail="New password must be at least 4 characters long.")
+    """Verifies 6-digit TOTP code from Google Authenticator and resets user password with ISO 27001 policy."""
+    from src.core.auth import validate_iso_password
+    p_ok, p_msg = validate_iso_password(req.new_password)
+    if not p_ok:
+        raise HTTPException(status_code=400, detail=p_msg)
 
     with force_master():
         db = SessionLocal()

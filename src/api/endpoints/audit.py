@@ -143,11 +143,14 @@ def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None)
     db = SessionLocal()
     try:
         query = db.query(AuditReport)
-        if role == "auditee" and username:
+        # Enforce session isolation: non-admin users only see their own sessions!
+        if role and role.lower() != "admin" and username:
             user = db.query(User).filter(User.username == username).first()
             if user:
                 query = query.filter(AuditReport.auditee_id == user.id)
-        
+            else:
+                return {"success": True, "sessions": []}
+
         reports = query.order_by(AuditReport.created_at.desc()).all()
         result = []
         for r in reports:
