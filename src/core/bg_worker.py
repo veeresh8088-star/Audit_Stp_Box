@@ -284,114 +284,247 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     controls = _build_controls_for_audit(selected_sls, custom_evidence)
     scanned_files_str = ", ".join(file_names_list) if file_names_list else "None"
 
-    # ── AI AUTO-SCOPING PRE-FILTER ─────────────────────────────────────
-    # Pre-screen document text using vector embeddings to drop irrelevant controls BEFORE looping
+    # ── CHECK IF AUTO-SCOPING MODE IS ACTIVE ─────────────────────────────
+    # Auto-scoping ONLY runs for AI Auto-Scoping mode or full pool scans (>=30 controls with no manual selection).
+    # Manual Control Selection and Excel Upload Scope will BYPASS auto-scoping and audit 100% of selected controls!
     is_auto_scoping = (
-        "quick" in str(audit_mode).lower() or 
         "auto" in str(audit_mode).lower() or 
         "scope" in str(audit_mode).lower() or 
-        len(controls) >= 30 or 
-        not custom_docs
+        (selected_sls is None and custom_evidence is None and len(controls) >= 30)
     )
-    if is_auto_scoping:
-        import re
-        import math
 
-        # ── STEP 1: KEYWORD PRE-SCORE ────────────────────────────────────
+    filtered_controls = []
+    out_of_scope_results = []
+
+    if is_auto_scoping:
+        # ── TOPIC → ISO CONTROL MAP ──────────────────────────────────────────
+        TOPIC_CONTROL_MAP = {
+        # Authentication & Identity
+        "multi-factor authentication": ["8.5", "5.17", "5.16"],
+        "mfa": ["8.5", "5.17"], "otp": ["8.5", "5.17"], "2fa": ["8.5", "5.17"],
+        "two-factor": ["8.5", "5.17"], "password": ["8.5", "5.17"],
+        "authentication": ["8.5", "5.17", "5.15"], "authentication process": ["8.5", "5.17"],
+        "authentication information": ["5.17"], "identity management": ["5.16", "5.15"],
+        "iam": ["5.16", "5.15", "8.2", "5.18"], "idam": ["5.16", "5.15", "8.2", "5.18"],
+        "single sign-on": ["8.5", "5.16"], "sso": ["8.5", "5.16"],
+        # Privileged Access / PAM
+        "privileged access": ["8.2", "5.15", "5.18"], "pam": ["8.2", "5.15", "5.18"],
+        "pim": ["8.2", "5.15"], "admin access": ["8.2", "5.18"],
+        "root access": ["8.2", "5.18"], "role based access": ["5.15", "5.18", "8.2"],
+        "rbac": ["5.15", "5.18"], "access rights": ["5.18", "5.15"],
+        "access control": ["5.15", "5.18", "8.3"], "access management": ["5.15", "5.18"],
+        # Monitoring & Logging
+        "monitoring": ["8.16", "7.4", "5.22"], "cloudwatch": ["8.16", "7.4"],
+        "aws cloudwatch": ["8.16", "7.4", "5.23"], "cloud monitoring": ["8.16", "5.23", "5.22", "7.4"],
+        "siem": ["8.16", "8.15"], "alerting": ["8.16", "5.25"],
+        "logging": ["8.15", "8.16", "5.28"], "log management": ["8.15", "5.28"],
+        "log archival": ["8.15", "5.28"], "log archive": ["8.15", "5.28"],
+        "archived log": ["8.15", "5.28"], "audit log": ["8.15", "5.28"],
+        "prod log": ["8.15", "5.28"], "syslog": ["8.15"], "event logs": ["8.15"],
+        "collection of evidence": ["5.28"], "evidence collection": ["5.28"],
+        # NTP / Clock
+        "ntp": ["8.17"], "ntp server": ["8.17"], "clock synchronization": ["8.17"],
+        "clock sync": ["8.17"], "ntp clock sync": ["8.17"],
+        "time sync": ["8.17"], "time server": ["8.17"], "timestamp": ["8.17"],
+        # Cloud Services
+        "cloud": ["5.23", "8.16"], "aws": ["5.23", "8.16"], "azure": ["5.23"], "gcp": ["5.23"],
+        "cloud services": ["5.23"], "cloud security": ["5.23"],
+        # Network Security
+        "network security": ["8.20", "8.21", "8.22"], "firewall": ["8.20", "VAPT-13"],
+        "network segmentation": ["8.22", "VAPT-13"], "vpn": ["6.7", "8.20"],
+        "remote working": ["6.7"], "remote access": ["6.7", "8.20"],
+        # Vulnerability & Patch
+        "vulnerability": ["8.8", "VAPT-11"], "patch": ["VAPT-12", "8.8"],
+        "patch management": ["VAPT-12", "8.8"], "vulnerability scan": ["8.8", "VAPT-3"],
+        "penetration test": ["VAPT-5", "VAPT-6", "8.29"],
+        "pentest": ["VAPT-5", "VAPT-6"], "vapt": ["VAPT-5", "VAPT-6", "8.29"],
+        # API & Application Security
+        "api": ["8.26", "VAPT-10"], "api security": ["8.26", "VAPT-10"],
+        "api authentication": ["8.5", "8.26"], "api auth": ["8.5", "8.26"],
+        "api policy": ["5.37", "8.26"], "web application": ["VAPT-4", "8.26"],
+        "fraud analytics": ["5.37", "8.26"], "fraud detection": ["5.37", "8.26"],
+        "application security": ["8.26", "8.25", "8.28"],
+        # Policy & Procedures
+        "policy": ["5.1", "5.37"], "operating procedures": ["5.37"],
+        "security policy": ["5.1", "5.37"], "compliance": ["5.36", "5.31"],
+        # Backup & Continuity
+        "backup": ["8.13", "8.15"], "database backup": ["8.13", "8.15"],
+        "recovery": ["8.13", "5.30"], "business continuity": ["5.29", "5.30"],
+        # Cryptography
+        "encryption": ["8.24"], "cryptography": ["8.24"],
+        "certificate": ["8.24"], "tls": ["8.24"], "ssl": ["8.24"],
+        # Physical Security
+        "physical security": ["7.1", "7.2", "7.4"], "cctv": ["7.4"],
+        "badge": ["7.2"], "server room": ["7.1", "7.3"],
+        # Capacity & Malware
+        "capacity": ["8.6"], "malware": ["8.7"], "antivirus": ["8.7"],
+        "endpoint": ["8.1", "8.7"], "edr": ["8.7", "8.1"],
+        # Data Protection
+        "data masking": ["8.11"], "dlp": ["8.12"], "pii": ["5.34"],
+        "gdpr": ["5.34", "5.31"], "personally identifiable": ["5.34"],
+    }
+
+    # ── STEP 1: LLM TOPIC EXTRACTION ─────────────────────────────────────
+    import re
+    from src.core.llm_client import query_llm
+
+    def _extract_topics_llm(file_names_list, context_text):
+        """Extract security topics from evidence using LLM (file names + per-file snippets)."""
+        file_summaries = []
+        # Split context back into per-file chunks using double newline
+        chunks = context_text.split("\n\n") if context_text else []
+        fnames = file_names_list or []
+        for i, fname in enumerate(fnames):
+            snippet = (chunks[i][:300] if i < len(chunks) else "").replace("\n", " ").strip()
+            file_summaries.append(f"FILE: {fname}\nCONTENT: {snippet}")
+        files_block = "\n\n".join(file_summaries) if file_summaries else context_text[:2000]
+
+        prompt = f"""You are a security auditor assistant. Below are evidence files for an ISO 27001 audit.
+Extract the specific security topics these files cover.
+Rules:
+- Return ONLY a JSON array of short topic strings (1-4 words each)
+- Cover ALL files listed
+- Focus on: authentication, access control, logging, NTP/clock, cloud, backup, encryption, fraud, monitoring
+- Maximum 20 topics, no duplicates
+- No explanation, just the JSON array
+
+Evidence Files:
+{files_block}
+
+Return format: ["topic1", "topic2", ...]"""
+
+        try:
+            response = query_llm(
+                prompt, model=ollama_model, num_ctx=4096, temperature=0.0, timeout=120,
+                stop=["<end_of_turn>", "<eos>", "<|im_end|>", "</s>"]
+            )
+            if not response:
+                return []
+            # Parse JSON array from response
+            match = re.search(r'\[.*?\]', response, re.DOTALL)
+            if match:
+                topics = __import__("json").loads(match.group())
+                return [t.lower().strip() for t in topics if isinstance(t, str)]
+            # Fallback: parse line-by-line
+            lines = [l.strip().strip('"\'').strip('-').strip() for l in response.splitlines() if l.strip()]
+            return [l.lower() for l in lines if 2 < len(l) < 60 and not l.startswith('{')]
+        except Exception as e:
+            print(f"[AI AUTO-SCOPE] LLM topic extraction failed: {e}", flush=True)
+            return []
+
+    def _ctrl_prefix(ctrl_str):
+        """Extract numeric prefix from control string e.g. '5.15 Access Control' → '5.15'"""
+        parts = ctrl_str.strip().split()
+        return parts[0] if parts else ctrl_str
+
+    print(f"[AI AUTO-SCOPE] Starting Evidence-First scoping for {len(controls)} controls...", flush=True)
+    topics = _extract_topics_llm(file_names_list, context or "")
+
+    if topics:
+        print(f"[AI AUTO-SCOPE] LLM extracted topics: {topics}", flush=True)
+        # ── STEP 2: MAP TOPICS → CONTROL IDs ─────────────────────────────
+        matched_ids = set()
+        for topic in topics:
+            for key, ctrl_ids in TOPIC_CONTROL_MAP.items():
+                if key in topic or topic in key:
+                    matched_ids.update(ctrl_ids)
+
+        # ── STEP 3: FILTER CONTROLS ────────────────────────────────────────
+        for c in controls:
+            prefix = _ctrl_prefix(c["control"])
+            if prefix in matched_ids:
+                filtered_controls.append(c)
+            else:
+                out_of_scope_results.append({
+                    "control_id": c["control"], "control": c["label"],
+                    "relevance_score": 0, "evidence_found": "Not Relevant",
+                    "evidence_snippet": "", "status": "Out of Scope", "severity": "N/A",
+                    "finding": "Control does not apply to this document scope",
+                    "recommendation": "",
+                    "reasoning": f"AI Evidence-First Scoping: topics {topics} did not match this control.",
+                    "source_files": scanned_files_str,
+                })
+        print(f"[AI AUTO-SCOPE] Evidence-First filtered {len(controls)} → {len(filtered_controls)} controls.", flush=True)
+
+        # ── SAFETY NET: LLM found topics but 0 controls matched map ────────
+        # This happens when doc covers a domain not yet in TOPIC_CONTROL_MAP
+        if not filtered_controls and topics:
+            print(f"[AI AUTO-SCOPE] WARNING: Topics extracted but 0 controls matched map. Running keyword fallback as safety net.", flush=True)
+            stopwords = {"whether","is","are","the","and","for","with","available","enabled","done","used","audit","evidence","check","system","information","security","management","policies","policy","shall","should","must","will","has","have","been","that","this","also","from","into","their","which","data","user","users","access","control","controls","process","processes","document","documents","record","records","activity","activities","include","including","ensure","required","requirement","requirements","related","relevant","review","reviews","update","updates","implement","implementation","define","defined","maintain","maintained","establish","established","appropriate","effective","internal","external","based","provide","provided","all","each","other","any","not","only","such","may","its","use","organization","asset","assets","risk","risks","measure","measures","protect","protection"}
+            full_text = (str(context or "") + " " + " ".join(file_names_list or [])).lower()
+            out_of_scope_results = []  # reset
+            for c in controls:
+                combined = (c.get("label","") + " " + c.get("expected","") + " " + c.get("prompt_hint","")).lower()
+                phrases = re.findall(r'\b[a-z]{5,}(?:\s+[a-z]{4,}){1,3}\b', combined)
+                phrases = [p for p in phrases if not any(w in stopwords for w in p.split())]
+                single_kw = [w for w in set(re.findall(r'\b[a-z]{7,}\b', combined)) if w not in stopwords]
+                score = sum(3 for p in phrases if p in full_text) + sum(1 for w in single_kw if w in full_text)
+                if score >= 3:  # Lower threshold for safety net
+                    filtered_controls.append(c)
+                else:
+                    out_of_scope_results.append({
+                        "control_id": c["control"], "control": c["label"],
+                        "relevance_score": score, "evidence_found": "Not Relevant",
+                        "evidence_snippet": "", "status": "Out of Scope", "severity": "N/A",
+                        "finding": "Control does not apply to this document scope",
+                        "recommendation": "",
+                        "reasoning": f"Safety net keyword fallback: score {score} < 3.",
+                        "source_files": scanned_files_str,
+                    })
+            print(f"[AI AUTO-SCOPE] Safety net keyword: {len(filtered_controls)} controls matched.", flush=True)
+    else:
+        # ── FALLBACK: KEYWORD SCORING ─────────────────────────────────────
+        print(f"[AI AUTO-SCOPE] LLM unavailable — using keyword fallback.", flush=True)
         stopwords = {
-            "whether", "is", "are", "the", "and", "for", "with", "available", "enabled",
-            "done", "used", "audit", "evidence", "check", "system", "information", "security",
-            "management", "policies", "policy", "shall", "should", "must", "will", "has",
-            "have", "been", "that", "this", "also", "from", "into", "their", "which",
-            "data", "user", "users", "access", "control", "controls", "process", "processes",
-            "document", "documents", "record", "records", "activity", "activities", "include",
-            "including", "ensure", "required", "requirement", "requirements", "related", "relevant",
-            "review", "reviews", "update", "updates", "implement", "implementation", "define",
-            "defined", "maintain", "maintained", "establish", "established", "appropriate",
-            "effective", "internal", "external", "based", "provide", "provided", "all",
-            "each", "other", "any", "not", "only", "such", "may", "its", "use", "organization",
-            "asset", "assets", "risk", "risks", "measure", "measures", "protect", "protection"
+            "whether","is","are","the","and","for","with","available","enabled","done","used",
+            "audit","evidence","check","system","information","security","management","policies",
+            "policy","shall","should","must","will","has","have","been","that","this","also",
+            "from","into","their","which","data","user","users","access","control","controls",
+            "process","processes","document","documents","record","records","activity","activities",
+            "include","including","ensure","required","requirement","requirements","related","relevant",
+            "review","reviews","update","updates","implement","implementation","define","defined",
+            "maintain","maintained","establish","established","appropriate","effective","internal",
+            "external","based","provide","provided","all","each","other","any","not","only","such",
+            "may","its","use","organization","asset","assets","risk","risks","measure","measures",
+            "protect","protection"
         }
         full_text = (str(context or "") + " " + " ".join(file_names_list or [])).lower()
-        filtered_controls = []
-        out_of_scope_results = []
-
-        def _kw_score(c):
+        for c in controls:
             combined = (c.get("label","") + " " + c.get("expected","") + " " + c.get("prompt_hint","")).lower()
             phrases = re.findall(r'\b[a-z]{5,}(?:\s+[a-z]{4,}){1,3}\b', combined)
             phrases = [p for p in phrases if not any(w in stopwords for w in p.split())]
             single_kw = [w for w in set(re.findall(r'\b[a-z]{7,}\b', combined)) if w not in stopwords]
-            return sum(3 for p in phrases if p in full_text) + sum(1 for w in single_kw if w in full_text)
-
-        kw_scores = {c["control"]: _kw_score(c) for c in controls}
-
-        # ── STEP 2: EMBEDDING SIMILARITY (batch, 2 calls total) ──────────
-        # Get one representative embedding for the whole evidence package
-        from src.core.llm_client import get_embedding
-        evidence_summary = (context or "")[:4000]  # First 4000 chars as evidence representative
-        emb_evidence = None
-        try:
-            emb_evidence = get_embedding(evidence_summary)
-        except Exception as _emb_err:
-            print(f"[AI AUTO-SCOPE] Embedding call failed, using keyword-only: {_emb_err}", flush=True)
-
-        def _cosine(v1, v2):
-            if not v1 or not v2:
-                return 0.0
-            dot = sum(a * b for a, b in zip(v1, v2))
-            n1 = math.sqrt(sum(a * a for a in v1))
-            n2 = math.sqrt(sum(b * b for b in v2))
-            return dot / (n1 * n2) if n1 and n2 else 0.0
-
-        # Embed all control labels+expected evidence in ONE call each (using file name hinting)
-        control_sims = {}
-        if emb_evidence:
-            for c in controls:
-                ctrl_text = f"{c['label']}. {c.get('expected','')}"[:500]
-                try:
-                    emb_ctrl = get_embedding(ctrl_text)
-                    control_sims[c["control"]] = _cosine(emb_evidence, emb_ctrl)
-                except Exception:
-                    control_sims[c["control"]] = 0.0
-        else:
-            control_sims = {c["control"]: 0.0 for c in controls}
-
-        print(f"[AI AUTO-SCOPE] Hybrid scoring: keyword + embedding for {len(controls)} controls", flush=True)
-
-        # ── STEP 3: HYBRID SCORE & THRESHOLD ─────────────────────────────
-        # keyword_score (0-∞) + embedding_similarity (0.0-1.0, scaled to 0-10)
-        # Accept if hybrid_score >= 5 OR cosine_similarity >= 0.35 (strong semantic match)
-        for c in controls:
-            ks = kw_scores.get(c["control"], 0)
-            cos = control_sims.get(c["control"], 0.0)
-            hybrid = ks + (cos * 10)  # Scale cosine 0-1 → 0-10
-
-            if hybrid >= 5 or cos >= 0.35:
+            score = sum(3 for p in phrases if p in full_text) + sum(1 for w in single_kw if w in full_text)
+            if score >= 5:
                 filtered_controls.append(c)
-                print(f"[SCOPE MATCH] {c['control']}: {c['label']} | kw={ks} emb={cos:.3f} hybrid={hybrid:.2f}", flush=True)
             else:
                 out_of_scope_results.append({
-                    "control_id": c["control"],
-                    "control": c["label"],
-                    "relevance_score": round(hybrid, 2),
-                    "evidence_found": "Not Relevant",
-                    "evidence_snippet": "",
-                    "status": "Out of Scope",
-                    "severity": "N/A",
+                    "control_id": c["control"], "control": c["label"],
+                    "relevance_score": score, "evidence_found": "Not Relevant",
+                    "evidence_snippet": "", "status": "Out of Scope", "severity": "N/A",
                     "finding": "Control does not apply to this document scope",
                     "recommendation": "",
-                    "reasoning": f"AI Hybrid Auto-Scoping: keyword={ks}, embedding_sim={cos:.3f}, hybrid={hybrid:.2f} (below threshold). Control is out of scope.",
+                    "reasoning": f"Keyword fallback: score {score} below threshold 5.",
                     "source_files": scanned_files_str,
                 })
 
+    # Apply filtered results to controls list if in auto-scoping mode
+    if is_auto_scoping:
         if filtered_controls:
-            print(f"[AI AUTO-SCOPING PRE-FILTER] Filtered controls from {len(controls)} down to {len(filtered_controls)} matched controls.", flush=True)
+            print(f"[AI AUTO-SCOPE] Final: {len(filtered_controls)} controls will be audited by LLM.", flush=True)
             controls = filtered_controls
             all_results = out_of_scope_results
         else:
+            # ── ULTIMATE SAFETY NET: If ALL filters returned 0, audit ALL controls ──
+            print(f"[AI AUTO-SCOPE] ULTIMATE SAFETY NET: All filters returned 0 controls — auditing ALL {len(controls)} controls.", flush=True)
             all_results = []
     else:
+        print(f"[MANUAL/EXCEL SCOPE] Auditing all {len(controls)} controls selected by user/Excel checklist without auto-scoping pre-filter.", flush=True)
         all_results = []
+
+
+
+
 
     if not controls:
         all_results = []
@@ -587,11 +720,21 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             folder_name="Audit Evidence Package"
         )
 
+        total_files_cnt = len(file_names_list) if file_names_list else 0
+        file_size_mb = round(total_file_bytes / (1024 * 1024), 2)
+        file_size_kb = round(total_file_bytes / 1024, 1)
+        total_text_chunks = len([c for c in str(context or "").split("\n\n") if len(c.strip()) > 20])
+        if total_text_chunks == 0:
+            total_text_chunks = max(1, int(text_chars / 500))
+
         print("\n" + "="*85, flush=True)
         print(f"🏆 AUDIT EXECUTION COMPLETE — FINAL TOKEN & LATENCY BENCHMARK METRICS", flush=True)
         print("="*85, flush=True)
         print(f" • Session ID                  : {checkpoint_session_id or bg_key or 'SESSION-LATEST'}", flush=True)
         print(f" • Scoping Detection Mode      : {scoping_label}", flush=True)
+        print(f" • Total Evidence Files Count  : {total_files_cnt} Files", flush=True)
+        print(f" • Total Evidence File Size    : {file_size_mb} MB ({file_size_kb:,} KB)", flush=True)
+        print(f" • Total Text Chunks Analyzed  : {total_text_chunks} Chunks ({text_chars:,} Chars)", flush=True)
         print(f" • Total Controls Evaluated    : {total}", flush=True)
         print(f" • Compliant Controls          : {len(resolved_list)}", flush=True)
         print(f" • Non-Compliant Gaps          : {len(findings_list)}", flush=True)

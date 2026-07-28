@@ -699,6 +699,28 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         // Refresh UI components
         loadEvidenceFileList();
         populateAuditeeSelector();
+
+        // ── Persist session title to DB immediately so Recent Sessions shows real name ──
+        try {
+            const sessionBody = new FormData();
+            sessionBody.append("session_title", finalTitle);
+            sessionBody.append("framework", "ISO 27001");
+            sessionBody.append("username", currentUser ? currentUser.username : "admin");
+            const saveResp = await fetch(`${API_BASE}/audit/sessions`, {
+                method: "POST",
+                body: sessionBody
+            });
+            const saveData = await saveResp.json();
+            if (saveData.success && saveData.session_id) {
+                // Use the confirmed server-side session_id
+                activeSessionId = saveData.session_id;
+                const badgeEl = document.getElementById("active-session-badge");
+                if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
+            }
+        } catch (saveErr) {
+            console.warn("[Session] Could not persist session to DB:", saveErr.message);
+        }
+
         loadRecentSessions();
 
         if (!skipPrompt) {

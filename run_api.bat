@@ -54,12 +54,21 @@ echo.
 
 :: 3. Launching FastAPI & browser
 echo [3/3] Launching AICyberAuditBox Dashboard...
-if exist cert.pem if exist key.pem (
-    echo [🔒 SSL] Trusted Certificate detected! Starting HTTPS server...
-    start https://aicyberauditbox.com/
+
+:: Check for Let's Encrypt (Certbot) trusted certificates first
+set CERTBOT_CERT=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com\fullchain.pem
+set CERTBOT_KEY=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com\privkey.pem
+
+if exist "%CERTBOT_CERT%" if exist "%CERTBOT_KEY%" (
+    echo [🔒 TRUSTED SSL] Let's Encrypt Certificate detected! Starting HTTPS server...
+    start https://localauditshakti.centralindia.cloudapp.azure.com
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile "%CERTBOT_KEY%" --ssl-certfile "%CERTBOT_CERT%"
+) else if exist cert.pem if exist key.pem (
+    echo [🔒 SSL] Self-Signed Certificate detected! Starting HTTPS server...
+    start https://localauditshakti.centralindia.cloudapp.azure.com
     python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem
 ) else (
     echo [HTTP] Starting standard HTTP server...
-    start http://aicyberauditbox.com/
+    start http://localauditshakti.centralindia.cloudapp.azure.com
     python -m uvicorn src.api.main:app --host 0.0.0.0 --port 80
 )

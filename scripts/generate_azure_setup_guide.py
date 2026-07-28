@@ -137,7 +137,7 @@ def build_pdf():
         ("OS Architecture",   "Windows Server 2022 / Windows 10 Pro Pro"),
         ("Active Backend",    "llama.cpp (llama-server.exe) CPU-optimized"),
         ("Local Database",    "PostgreSQL Master-Slave Docker Containers"),
-        ("Web Interface",     "Streamlit (Port 8501 bound to 0.0.0.0)"),
+        ("Web Interface",     "FastAPI + Uvicorn (HTTPS Port 443, SSL Enabled)"),
         ("Auto-Start Trigger", "Windows Task Scheduler (On Windows Logon)"),
         ("Author / Owner",    "veeresh988V / LocalAuditShakti"),
         ("Report Date",       datetime.date.today().strftime("%B %d, %Y")),
@@ -188,7 +188,7 @@ def build_pdf():
     setup_txt = (
         "When creating the VM in the Microsoft Azure Portal, select a Windows Server 2022 Datacenter "
         "or Windows 10 Pro image. During provisioning, you must allow RDP (port 3389) and explicitly "
-        "allow inbound HTTP connections to the Streamlit dashboard."
+        "allow inbound HTTPS connections (port 443) to the AICyberAuditBox dashboard."
     )
     pdf.body(setup_txt)
     
@@ -202,11 +202,11 @@ def build_pdf():
     pdf.body("     - Source: Any", is_bold=True)
     pdf.body("     - Source Port Ranges: *", is_bold=True)
     pdf.body("     - Destination: Any", is_bold=True)
-    pdf.body("     - Destination Port Ranges: 8501", is_bold=True)
+    pdf.body("     - Destination Port Ranges: 443", is_bold=True)
     pdf.body("     - Protocol: TCP", is_bold=True)
     pdf.body("     - Action: Allow", is_bold=True)
     pdf.body("     - Priority: 1000", is_bold=True)
-    pdf.body("     - Name: Allow_Streamlit", is_bold=True)
+    pdf.body("     - Name: Allow_HTTPS", is_bold=True)
     
     # ════════════════════════════════════════════
     # PAGE 3 -- CLONING & MODEL DOWNLOAD
@@ -305,7 +305,7 @@ def build_pdf():
     pdf.body("  2. Do not log in using RDP.", indent=4)
     pdf.body("  3. Wait approximately 60 seconds (giving Windows time to load the model).", indent=4)
     pdf.body("  4. Open a browser on your laptop (or any other device) and go to:", indent=4)
-    pdf.body("     http://40.81.235.37:8501", is_bold=True, indent=8)
+    pdf.body("     https://localauditshakti.centralindia.cloudapp.azure.com", is_bold=True, indent=8)
     
     pdf.step_header("4.2", "Manual Startup & Shutdown (For Maintenance)")
     pdf.body("If you are logged into the VM via RDP, you can control the engine manually using PowerShell:")
@@ -325,7 +325,8 @@ def build_pdf():
     
     pdf.hline()
     pdf.body("Troubleshooting Notes:", is_bold=True)
-    pdf.body("  - Connection Timeout: Verify that Azure NSG port 8501 rule is active.", indent=4)
+    pdf.body("  - Connection Timeout: Verify that Azure NSG port 443 (HTTPS) inbound rule is active in the Network Security Group.", indent=4)
+    pdf.body("  - SSL Certificate Error: Ensure cert.pem and key.pem exist in the application root folder.", indent=4)
     pdf.body("  - LLM Server fails: Verify GGUF files exist in root folder and model name is correct.", indent=4)
     pdf.body("  - Database fails: Open Docker Desktop and verify that the WSL2 subsystem is active.", indent=4)
 

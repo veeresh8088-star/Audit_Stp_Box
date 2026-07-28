@@ -143,13 +143,16 @@ def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None)
     db = SessionLocal()
     try:
         query = db.query(AuditReport)
-        # Enforce session isolation: non-admin users only see their own sessions!
-        if role and role.lower() != "admin" and username:
+        # Enforce session visibility:
+        # Include sessions created by/assigned to user OR unassigned sessions (auditee_id IS NULL)
+        if username:
             user = db.query(User).filter(User.username == username).first()
             if user:
-                query = query.filter(AuditReport.auditee_id == user.id)
-            else:
-                return {"success": True, "sessions": []}
+                if role and role.lower() == "auditee":
+                    query = query.filter((AuditReport.auditee_id == user.id) | (AuditReport.auditee_id == None))
+                else:
+                    # Auditors/Admins see all sessions or unassigned/their sessions
+                    query = query.filter((AuditReport.auditee_id == user.id) | (AuditReport.auditee_id == None) | (AuditReport.auditee_id == 1))
 
         reports = query.order_by(AuditReport.created_at.desc()).all()
         result = []
@@ -218,14 +221,20 @@ def api_get_auditee_sessions():
     finally:
         db.close()
 
-def get_or_create_audit_report(db, session_id: str, default_title: str = None, default_framework: str = "ISO 27001"):
+def get_or_create_audit_report(db, session_id: str, default_title: str = None, default_framework: str = "ISO 27001", username: str = None):
     report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
     if not report:
         title = default_title or f"Audit Session ({session_id[:8]})"
+        user_id = None
+        if username:
+            u = db.query(User).filter(User.username == username).first()
+            if u:
+                user_id = u.id
         report = AuditReport(
             session_id=session_id,
             session_title=title,
             framework=default_framework,
+            auditee_id=user_id,
             status="Draft",
             created_at=datetime.now(timezone.utc).replace(tzinfo=None)
         )
