@@ -441,8 +441,9 @@ button {
     display: flex;
     flex-direction: column;
     padding: 16px;
-    overflow-y: auto !important;
+    height: 100vh;
     max-height: 100vh;
+    overflow: hidden !important;
 }
 
 /* ── UNIVERSAL LIGHT GREY SCROLLBAR STYLING (MATCHING SCREENSHOT) ── */
@@ -493,7 +494,6 @@ body[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
     scrollbar-color: #475569 #0f172a;
 }
 
-.sidebar,
 #recent-sessions-container,
 #sidebar-auditee-files-list,
 .chat-feed,
