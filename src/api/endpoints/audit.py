@@ -218,6 +218,22 @@ def api_get_auditee_sessions():
     finally:
         db.close()
 
+def get_or_create_audit_report(db, session_id: str, default_title: str = None, default_framework: str = "ISO 27001"):
+    report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+    if not report:
+        title = default_title or f"Audit Session ({session_id[:8]})"
+        report = AuditReport(
+            session_id=session_id,
+            session_title=title,
+            framework=default_framework,
+            status="Draft",
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None)
+        )
+        db.add(report)
+        db.commit()
+        db.refresh(report)
+    return report
+
 @router.post("/upload")
 def api_upload_evidence(
     session_id: str = Form(...),
@@ -227,10 +243,7 @@ def api_upload_evidence(
     db = SessionLocal()
     try:
         with force_master():
-            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-            if not report:
-                raise HTTPException(status_code=404, detail=f"Active audit session not found for session_id={session_id}.")
-            # Extract primitive values INSIDE context to avoid DetachedInstanceError
+            report = get_or_create_audit_report(db, session_id)
             report_id = report.id
 
         uploaded_details = []
@@ -343,9 +356,7 @@ def api_start_audit(req: StartAuditRequest):
     db = SessionLocal()
     try:
         with force_master():
-            report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
-            if not report:
-                raise HTTPException(status_code=404, detail="Session not found.")
+            report = get_or_create_audit_report(db, req.session_id)
             report_id = report.id
             report_framework = report.framework or ""
 
