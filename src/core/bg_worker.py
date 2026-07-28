@@ -434,7 +434,17 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
                 all_results.append(result)
             ctrl_duration = time.time() - control_start_time
             res_status = result.get("status", "Unknown") if result else "None"
-            log_dev_latency(f"[{idx + 1}/{total}] [SUCCESS] Control {c['control']} {c['label']} completed in {ctrl_duration:.2f}s (Result: {res_status})")
+            
+            c_mins = int(ctrl_duration // 60)
+            c_secs = round(ctrl_duration % 60, 1)
+            c_lat_str = f"{c_mins}m {c_secs}s" if c_mins > 0 else f"0m {c_secs}s"
+
+            ctrl_p_toks = int(len(str(control_context or "")) / 3.8) + 650
+            ctrl_c_toks = int(len(str(result.get("reasoning", "") if result else "")) / 3.8) + 120
+            ctrl_t_toks = ctrl_p_toks + ctrl_c_toks
+
+            print(f"[{time.strftime('%H:%M:%S')}] ⚡ [CONTROL EVALUATED] {c['control']} ({c['label']}) | Status: {res_status} | Latency: {c_lat_str} ({ctrl_duration:.1f}s) | Tokens Used: {ctrl_t_toks:,} (Prompt: {ctrl_p_toks:,}, Completion: {ctrl_c_toks:,})", flush=True)
+            log_dev_latency(f"[{idx + 1}/{total}] [SUCCESS] Control {c['control']} {c['label']} completed in {ctrl_duration:.2f}s ({c_lat_str}) | Tokens: {ctrl_t_toks:,}")
         except Exception as e:
             print(f"[AUDIT ERROR] Error evaluating control {c['control']}: {e}", flush=True)
             log_dev_latency(f"ERROR: Control {c['control']} failed: {e}")
@@ -454,11 +464,16 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     resolved_list = [r["control_id"] for r in all_results if (r.get("status") or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")]
     findings_list = [r for r in all_results if (r.get("status") or "").upper() not in ("COMPLIANT", "ACCEPTED", "PASS")]
     
-    end_msg = f"[AUDIT COMPLETE] Evaluated {total} controls in {time.time() - overall_start_time:.1f}s. Compliant: {len(resolved_list)}, Gaps: {len(findings_list)}"
+    total_audit_time = time.time() - overall_start_time
+    tot_mins = int(total_audit_time // 60)
+    tot_secs = round(total_audit_time % 60, 1)
+    tot_lat_str = f"{tot_mins}m {tot_secs}s" if tot_mins > 0 else f"0m {tot_secs}s"
+
+    end_msg = f"[AUDIT COMPLETE] Evaluated {total} controls in {tot_lat_str} ({total_audit_time:.1f}s). Compliant: {len(resolved_list)}, Gaps: {len(findings_list)}"
     print(f"[{time.strftime('%H:%M:%S')}] {end_msg}\n", flush=True)
     log_dev_latency(end_msg)
 
-    # Record benchmark metrics for Excel tracker
+    # Record benchmark metrics for Excel tracker & Terminal Summary Box
     try:
         from src.core.token_tracker import record_token_metrics
         text_chars = len(str(context or ""))
@@ -472,6 +487,13 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
 
         prompt_toks = int(text_chars / 3.8) + (total * 800)
         comp_toks = total * 175
+        tot_tokens_all = prompt_toks + comp_toks
+        avg_tokens_ctrl = round(tot_tokens_all / max(1, total), 1)
+
+        avg_lat_sec = total_audit_time / max(1, total)
+        avg_mins = int(avg_lat_sec // 60)
+        avg_secs = round(avg_lat_sec % 60, 1)
+        avg_lat_str = f"{avg_mins}m {avg_secs}s" if avg_mins > 0 else f"0m {avg_secs}s"
         
         mode_str = str(audit_mode).lower()
         if "excel" in mode_str or "manual" in mode_str:
@@ -490,13 +512,28 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
             controls_count=total,
             prompt_tokens=prompt_toks,
             completion_tokens=comp_toks,
-            total_latency_sec=time.time() - overall_start_time,
+            total_latency_sec=total_audit_time,
             compliant_count=len(resolved_list),
             non_compliant_count=len(findings_list),
             out_of_scope_count=len(out_of_scope_results) if 'out_of_scope_results' in locals() else 0,
             folder_name="Audit Evidence Package"
         )
-        print(f"[{time.strftime('%H:%M:%S')}] [BENCHMARK LOGGED] Successfully recorded session metrics in audit_token_benchmark.xlsx!", flush=True)
+
+        print("\n" + "="*85, flush=True)
+        print(f"🏆 AUDIT EXECUTION COMPLETE — FINAL TOKEN & LATENCY BENCHMARK METRICS", flush=True)
+        print("="*85, flush=True)
+        print(f" • Session ID                  : {checkpoint_session_id or bg_key or 'SESSION-LATEST'}", flush=True)
+        print(f" • Scoping Detection Mode      : {scoping_label}", flush=True)
+        print(f" • Total Controls Evaluated    : {total}", flush=True)
+        print(f" • Compliant Controls          : {len(resolved_list)}", flush=True)
+        print(f" • Non-Compliant Gaps          : {len(findings_list)}", flush=True)
+        print(f" • Prompt Input Tokens         : {prompt_toks:,} Tokens", flush=True)
+        print(f" • Completion Output Tokens    : {comp_toks:,} Tokens", flush=True)
+        print(f" • Total Audit Tokens Used     : {tot_tokens_all:,} Tokens", flush=True)
+        print(f" • Average Tokens per Control  : {avg_tokens_ctrl:,} Tokens/Control", flush=True)
+        print(f" • Overall Audit Latency       : {tot_lat_str} ({total_audit_time:.1f} seconds)", flush=True)
+        print(f" • Average Latency per Control : {avg_lat_str} ({avg_lat_sec:.1f} seconds/control)", flush=True)
+        print("="*85 + "\n", flush=True)
     except Exception as _bm_err:
         print(f"[BENCHMARK ERROR] Failed to record token metrics: {_bm_err}", flush=True)
 
