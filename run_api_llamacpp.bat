@@ -69,5 +69,5 @@ set OMP_NUM_THREADS=4
 set MKL_NUM_THREADS=4
 set OPENBLAS_NUM_THREADS=4
 
-start https://aicyberauditbox.com:8000/
-python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile key.pem --ssl-certfile cert.pem
+start https://aicyberauditbox.com/
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem

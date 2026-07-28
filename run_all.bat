@@ -13,7 +13,8 @@ taskkill /F /IM llama-server* /T >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11434 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11435 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
-echo [v] Port 8000 cleared.
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :443 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
+echo [v] Ports 8000 & 443 cleared.
 
 :: Ensure SSL Certificate Exists
 if not exist cert.pem (
@@ -59,9 +60,9 @@ set OPENBLAS_NUM_THREADS=4
 echo.
 echo ==================================================
 echo   AICyberAuditBox Secure HTTPS Server Active
-echo   Domain URL: https://aicyberauditbox.com:8000/
+echo   Domain URL: https://aicyberauditbox.com/
 echo   Press Ctrl+C in this terminal to stop server.
 echo ==================================================
-start https://aicyberauditbox.com:8000/
-python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile key.pem --ssl-certfile cert.pem
+start https://aicyberauditbox.com/
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem
 pause

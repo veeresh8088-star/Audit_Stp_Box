@@ -56,10 +56,10 @@ echo.
 echo [3/3] Launching AICyberAuditBox Dashboard...
 if exist cert.pem if exist key.pem (
     echo [🔒 SSL] Trusted Certificate detected! Starting HTTPS server...
-    start https://aicyberauditbox.com:8000/
-    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile key.pem --ssl-certfile cert.pem
+    start https://aicyberauditbox.com/
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem
 ) else (
     echo [HTTP] Starting standard HTTP server...
-    start http://aicyberauditbox.com:8000/
-    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    start http://aicyberauditbox.com/
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 80
 )
