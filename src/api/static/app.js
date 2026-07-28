@@ -4767,12 +4767,26 @@ async function populateBenchmarkSessionSelector() {
 // ── FORGOT PASSWORD TOTP RECOVERY ENGINE ──
 function openForgotPasswordModal() {
     const modal = document.getElementById("forgot-password-modal");
-    if (!modal) return;
-    document.getElementById("fp-step-1").style.display = "block";
-    document.getElementById("fp-step-2").style.display = "none";
-    document.getElementById("fp-username-input").value = "";
-    document.getElementById("fp-otp-input").value = "";
-    document.getElementById("fp-new-password-input").value = "";
+    if (!modal) {
+        console.error("forgot-password-modal element not found in DOM");
+        alert("Password recovery modal is loading. Please refresh your page.");
+        return;
+    }
+    
+    const step1 = document.getElementById("fp-step-1");
+    const step2 = document.getElementById("fp-step-2");
+    if (step1) step1.style.display = "block";
+    if (step2) step2.style.display = "none";
+    
+    const loginUser = document.getElementById("username-input") ? document.getElementById("username-input").value.trim() : "";
+    const fpUserInp = document.getElementById("fp-username-input");
+    if (fpUserInp) fpUserInp.value = loginUser || "";
+    
+    const fpOtp = document.getElementById("fp-otp-input");
+    if (fpOtp) fpOtp.value = "";
+    const fpPw = document.getElementById("fp-new-password-input");
+    if (fpPw) fpPw.value = "";
+    
     modal.style.display = "flex";
 }
 
