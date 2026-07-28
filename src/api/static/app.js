@@ -117,9 +117,9 @@ function resetAuthActionToLogin() {
     const toggleActionBtn = document.getElementById("toggle-action-btn");
     const toggleLabel = document.getElementById("toggle-label");
 
-    submitBtn.innerText = "Secure Sign In";
-    toggleActionBtn.innerText = "Create Account";
-    toggleLabel.innerText = "NEW USER?";
+    if (submitBtn) submitBtn.innerText = "Secure Sign In";
+    if (toggleActionBtn) toggleActionBtn.innerText = "Create Account";
+    if (toggleLabel) toggleLabel.innerText = "NEW USER?";
 }
 
 function toggleAuthAction() {
@@ -127,10 +127,10 @@ function toggleAuthAction() {
     const toggleActionBtn = document.getElementById("toggle-action-btn");
     const toggleLabel = document.getElementById("toggle-label");
 
-    if (submitBtn.innerText === "Secure Sign In") {
+    if (submitBtn && submitBtn.innerText === "Secure Sign In") {
         submitBtn.innerText = "Create Secure Account";
-        toggleActionBtn.innerText = "Back to Login";
-        toggleLabel.innerText = "ALREADY REGISTERED?";
+        if (toggleActionBtn) toggleActionBtn.innerText = "Back to Login";
+        if (toggleLabel) toggleLabel.innerText = "ALREADY REGISTERED?";
     } else {
         resetAuthActionToLogin();
     }
