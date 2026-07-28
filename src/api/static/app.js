@@ -198,14 +198,8 @@ async function handleLoginSubmit(e) {
             document.getElementById("otp-input").value = "";
             document.getElementById("otp-input").focus();
 
-            // Display 2FA TOTP QR code for authenticator apps
-            if (data.qr_code_base64) {
-                document.getElementById("admin-qr-container").style.display = "block";
-                document.getElementById("admin-qr-img").src = data.qr_code_base64;
-                document.getElementById("admin-qr-secret").innerText = data.totp_secret_preview;
-            } else {
-                document.getElementById("admin-qr-container").style.display = "none";
-            }
+            // Hide QR code container during regular sign in — only prompt for 6-digit OTP code!
+            document.getElementById("admin-qr-container").style.display = "none";
 
             // Stash user detail temporarily
             currentUser = { username: data.username, role: data.role };
