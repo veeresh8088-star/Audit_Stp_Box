@@ -286,7 +286,14 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
 
     # ── AI AUTO-SCOPING PRE-FILTER ─────────────────────────────────────
     # Pre-screen document text using vector embeddings to drop irrelevant controls BEFORE looping
-    if "quick" in str(audit_mode).lower() or "auto" in str(audit_mode).lower() or "scope" in str(audit_mode).lower():
+    is_auto_scoping = (
+        "quick" in str(audit_mode).lower() or 
+        "auto" in str(audit_mode).lower() or 
+        "scope" in str(audit_mode).lower() or 
+        len(controls) >= 30 or 
+        not custom_docs
+    )
+    if is_auto_scoping:
         from src.core.retrieval import _retrieve_rag_context
         filtered_controls = []
         out_of_scope_results = []
