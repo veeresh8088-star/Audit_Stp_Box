@@ -8,6 +8,8 @@ def generate_ssl_cert(cert_path="cert.pem", key_path="key.pem", domains=None):
     """Generates trusted SSL certificate using mkcert or cryptography fallback."""
     if domains is None:
         domains = [
+            "aicyberauditbox.com",
+            "www.aicyberauditbox.com",
             "aisecurityaudit.local",
             "localauditshakti.centralindia.cloudapp.azure.com",
             "localhost",

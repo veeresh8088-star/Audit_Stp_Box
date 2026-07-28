@@ -58,10 +58,10 @@ set OPENBLAS_NUM_THREADS=4
 
 echo.
 echo ==================================================
-echo   AISecurityAudit Secure HTTPS Server Active
-echo   Domain URL: https://aisecurityaudit.local:8000/
+echo   AICyberAuditBox Secure HTTPS Server Active
+echo   Domain URL: https://aicyberauditbox.com:8000/
 echo   Press Ctrl+C in this terminal to stop server.
 echo ==================================================
-start https://aisecurityaudit.local:8000/
+start https://aicyberauditbox.com:8000/
 python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile key.pem --ssl-certfile cert.pem
 pause
