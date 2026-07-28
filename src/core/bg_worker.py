@@ -357,13 +357,18 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     controls = _build_controls_for_audit(selected_sls, custom_evidence)
     scanned_files_str = ", ".join(file_names_list) if file_names_list else "None"
 
-    # ── CHECK IF AUTO-SCOPING MODE IS ACTIVE ─────────────────────────────
-    # Auto-scoping ONLY runs for AI Auto-Scoping mode or full pool scans (>=30 controls with no manual selection).
-    # Manual Control Selection and Excel Upload Scope will BYPASS auto-scoping and audit 100% of selected controls!
-    is_auto_scoping = (
+    # ── SCOPING MODE DETERMINATION & ISOLATION ─────────────────────────────
+    # Mode 1: EXCEL UPLOAD SCOPE (custom_evidence provided from uploaded Excel checklist)
+    # Mode 2: CUSTOM / MANUAL SCOPE (user manually selected specific subset of controls < 30)
+    # Mode 3: AI AUTO-SCOPING (full control pool scan; runs Evidence-First topic pre-filter)
+    is_excel_scope = custom_evidence is not None
+    is_manual_scope = (selected_sls is not None and len(selected_sls) < 30)
+
+    is_auto_scoping = (not is_excel_scope) and (not is_manual_scope) and (
         "auto" in str(audit_mode).lower() or 
         "scope" in str(audit_mode).lower() or 
-        (selected_sls is None and custom_evidence is None and len(controls) >= 30)
+        selected_sls is None or 
+        len(controls) >= 30
     )
 
     filtered_controls = []
