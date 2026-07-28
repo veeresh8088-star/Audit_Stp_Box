@@ -137,6 +137,23 @@ function toggleAuthAction() {
     showError("");
 }
 
+function togglePasswordVisibility() {
+    const pwInput = document.getElementById("password-input");
+    const eyeIcon = document.getElementById("eye-icon");
+    const eyeOffIcon = document.getElementById("eye-off-icon");
+    if (!pwInput) return;
+
+    if (pwInput.type === "password") {
+        pwInput.type = "text";
+        if (eyeIcon) eyeIcon.style.display = "none";
+        if (eyeOffIcon) eyeOffIcon.style.display = "block";
+    } else {
+        pwInput.type = "password";
+        if (eyeIcon) eyeIcon.style.display = "block";
+        if (eyeOffIcon) eyeOffIcon.style.display = "none";
+    }
+}
+
 async function handleLoginSubmit(e) {
     e.preventDefault();
     showError("");
