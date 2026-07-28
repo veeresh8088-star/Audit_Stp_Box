@@ -674,9 +674,7 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
     try:
         from src.db.database import AdminAuditLog
         with force_master():
-            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-            if not report:
-                raise HTTPException(status_code=404, detail="Session not found.")
+            report = get_or_create_audit_report(db, session_id)
                 
             all_findings = db.query(Finding).filter(Finding.report_id == report.id).all()
             # Exclude INFO severity items so count matches the 258 actionable findings in UI

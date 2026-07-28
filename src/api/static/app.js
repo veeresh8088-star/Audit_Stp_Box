@@ -1927,10 +1927,18 @@ async function commitSessionToShaktiDB(force = false) {
     }
     try {
         const auditorName = currentUser ? currentUser.username : "Lead Auditor";
-        console.log(`💾 Fetching: ${API_BASE}/audit/findings/commit-session/${activeSessionId}?force=${force}`);
         const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}?force=${force}&auditor_user=${encodeURIComponent(auditorName)}`, {
             method: "PUT"
         });
+        if (!response.ok) {
+            let errorMsg = `Server error ${response.status}`;
+            try {
+                const errJson = await response.json();
+                errorMsg = errJson.detail || errJson.message || errorMsg;
+            } catch(e) {}
+            alert(`Failed to commit findings: ${errorMsg}`);
+            return;
+        }
         const data = await response.json();
         console.log("💾 [commitSessionToShaktiDB] Response:", data);
 
