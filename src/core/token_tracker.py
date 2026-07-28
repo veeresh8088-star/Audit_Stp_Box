@@ -83,7 +83,8 @@ def record_token_metrics(
 def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_EXCEL_PATH):
     """
     Generates a beautifully styled executive Excel workbook summarizing token usage,
-    latency (in Minutes & Seconds), file size, text length, and scoping comparison.
+    latency (in Minutes & Seconds), file size, text length, and scoping comparison
+    dynamically calculated from actual audit session records and evaluated controls.
     """
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -123,13 +124,16 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 36
 
-    # Gather totals from records
+    # Gather metadata from records
     first_r = records[0] if records else {}
     folder_name = first_r.get("folder_name", "src/aa audit evidence samples")
     files_cnt = first_r.get("files_count", 8)
     file_size_mb = first_r.get("file_size_mb", 2.43)
     file_size_kb = first_r.get("file_size_kb", 2489.64)
     ai_model = first_r.get("ai_model", "Gemma 4 (e4b)")
+    scoping_mode_str = first_r.get("scoping_mode", "Excel Upload Scope")
+
+    checklist_file = "Audit checklist and evidence files.xlsx" if "excel" in scoping_mode_str.lower() or "manual" in scoping_mode_str.lower() else "N/A (AI Auto-Scoping)"
 
     # Section 1: Folder & Evidence Overview
     ws.cell(row=3, column=1, value="1. AUDIT FOLDER & EVIDENCE METRICS").font = font_section
@@ -150,7 +154,7 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
         f"{file_size_mb} MB",
         f"{file_size_kb} KB",
         ai_model,
-        "Audit checklist and evidence files.xlsx"
+        checklist_file
     ]
     for c_idx, val in enumerate(folder_row_data, 1):
         cell = ws.cell(row=5, column=c_idx, value=val)
@@ -159,7 +163,7 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
         cell.border = thin_border
     ws.row_dimensions[5].height = 20
 
-    # Section 2: Scope Evaluation Summary
+    # Section 2: Scope Evaluation Summary (Dynamically generated per scoping mode in records!)
     ws.cell(row=7, column=1, value="2. SCOPE EVALUATION SUMMARY BENCHMARK").font = font_section
     ws.row_dimensions[7].height = 24
 
@@ -183,42 +187,47 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
         cell.border = thin_border
     ws.row_dimensions[8].height = 26
 
-    # Calculate metrics for AI vs Manual rows
-    ai_relevant = 12
-    ai_dropped = 81
-    ai_toks = sum(int(r.get("total_tokens", 585)) for r in records[:12]) if len(records) >= 12 else 7290
-    ai_lat_sec = sum(float(r.get("total_latency_seconds", 265.0)) for r in records[:12]) if len(records) >= 12 else 3255.0
+    # Group records by scoping mode dynamically
+    summary_by_mode = {}
+    for r in records:
+        mode = r.get("scoping_mode", "Excel Upload Scope")
+        if mode not in summary_by_mode:
+            summary_by_mode[mode] = {
+                "relevant_count": 0,
+                "dropped_count": 0,
+                "files_count": r.get("files_count", files_cnt),
+                "total_tokens": 0,
+                "total_latency_sec": 0.0,
+                "ai_model": r.get("ai_model", ai_model)
+            }
+        ctrl_cnt = int(r.get("controls_audited_count", 0))
+        if ctrl_cnt == 0 and "controls_detail" in r:
+            ctrl_cnt = len(r["controls_detail"])
+        summary_by_mode[mode]["relevant_count"] += ctrl_cnt
+        summary_by_mode[mode]["dropped_count"] += int(r.get("out_of_scope_count", 0))
+        summary_by_mode[mode]["total_tokens"] += int(r.get("total_tokens", 0))
+        summary_by_mode[mode]["total_latency_sec"] += float(r.get("total_latency_seconds", 0.0))
 
-    manual_mapped = 8
-    manual_toks = 5095
-    manual_lat_sec = 2064.0
-
-    summary_rows = [
-        [
-            "AI Automatic Scope Detection (Pre-Filtered)",
-            f"{ai_relevant} relevant controls",
-            f"{ai_dropped} dropped (Pre-Filter)",
-            files_cnt,
-            f"{ai_toks:,}",
-            f"{round(ai_toks / max(1, ai_relevant), 1)}",
-            format_min_sec(ai_lat_sec),
-            f"{round(ai_lat_sec, 1)} s",
-            format_min_sec(round(ai_lat_sec / max(1, ai_relevant), 1)),
-            ai_model
-        ],
-        [
-            "Manual Excel Scope Mapping",
-            f"{manual_mapped} mapped controls",
-            "0 dropped",
-            files_cnt,
-            f"{manual_toks:,}",
-            f"{round(manual_toks / manual_mapped, 1)}",
-            format_min_sec(manual_lat_sec),
-            f"{round(manual_lat_sec, 1)} s",
-            format_min_sec(round(manual_lat_sec / manual_mapped, 1)),
-            ai_model
-        ]
-    ]
+    summary_rows = []
+    for mode_name, m_data in summary_by_mode.items():
+        rel_cnt = max(1, m_data["relevant_count"])
+        tot_toks = m_data["total_tokens"]
+        tot_lat = m_data["total_latency_sec"]
+        drop_cnt = m_data["dropped_count"]
+        
+        drop_label = f"{drop_cnt} dropped (Pre-Filter)" if drop_cnt > 0 else "0 dropped"
+        summary_rows.append([
+            mode_name,
+            f"{rel_cnt} mapped controls" if ("excel" in mode_name.lower() or "manual" in mode_name.lower()) else f"{rel_cnt} relevant controls",
+            drop_label,
+            m_data["files_count"],
+            f"{tot_toks:,}",
+            f"{round(tot_toks / rel_cnt, 1)}",
+            format_min_sec(tot_lat),
+            f"{round(tot_lat, 1)} s",
+            format_min_sec(round(tot_lat / rel_cnt, 1)),
+            m_data["ai_model"]
+        ])
 
     for r_offset, s_row in enumerate(summary_rows, 9):
         for c_idx, val in enumerate(s_row, 1):
@@ -226,13 +235,14 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
             cell.font = font_bold if c_idx in [1, 2, 5, 7] else font_regular
             cell.alignment = Alignment(horizontal="center" if c_idx > 1 else "left", vertical="center")
             cell.border = thin_border
-            if r_offset == 9:
+            if "AI" in str(s_row[0]):
                 cell.fill = fill_ai_row
         ws.row_dimensions[r_offset].height = 22
 
-    # Section 3: Detailed Per-Control Execution Details
-    ws.cell(row=12, column=1, value="3. PER-CONTROL TOKEN & LATENCY EXECUTION DETAILS").font = font_section
-    ws.row_dimensions[12].height = 24
+    # Section 3: Detailed Per-Control Execution Details (Render ONLY actual evaluated controls!)
+    section3_start_row = 9 + len(summary_rows) + 2
+    ws.cell(row=section3_start_row - 1, column=1, value="3. PER-CONTROL TOKEN & LATENCY EXECUTION DETAILS").font = font_section
+    ws.row_dimensions[section3_start_row - 1].height = 24
 
     detail_headers = [
         "Scope Detection Method",
@@ -248,17 +258,69 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
     ]
 
     for c_idx, h_text in enumerate(detail_headers, 1):
-        cell = ws.cell(row=13, column=c_idx, value=h_text)
+        cell = ws.cell(row=section3_start_row, column=c_idx, value=h_text)
         cell.font = font_header
         cell.fill = fill_header
         cell.alignment = Alignment(horizontal="center", vertical="center")
         cell.border = thin_border
-    ws.row_dimensions[13].height = 26
+    ws.row_dimensions[section3_start_row].height = 26
 
-    current_r = 14
-    
-    # Render detail rows from records or baseline fallback
-    if records and len(records) > 1:
+    current_r = section3_start_row + 1
+
+    # Extract all real evaluated control details across records
+    all_control_details = []
+    for r in records:
+        sc_mode = r.get("scoping_mode", "Excel Upload Scope")
+        r_model = r.get("ai_model", ai_model)
+        if "controls_detail" in r and r["controls_detail"]:
+            for cd in r["controls_detail"]:
+                all_control_details.append({
+                    "scoping_mode": sc_mode,
+                    "control_id": cd.get("control_id", "5.15"),
+                    "control_name": cd.get("control_name", "Access Control"),
+                    "status": cd.get("status", "COMPLIANT"),
+                    "prompt_tokens": int(cd.get("prompt_tokens", 490)),
+                    "completion_tokens": int(cd.get("completion_tokens", 140)),
+                    "latency_sec": float(cd.get("latency_sec", 252.0)),
+                    "ai_model": r_model
+                })
+
+    if all_control_details:
+        for cd in all_control_details:
+            p_toks = cd["prompt_tokens"]
+            c_toks = cd["completion_tokens"]
+            t_toks = p_toks + c_toks
+            c_lat = cd["latency_sec"]
+            status_val = str(cd["status"]).upper()
+            
+            row_vals = [
+                cd["scoping_mode"],
+                cd["control_id"],
+                cd["control_name"],
+                status_val,
+                p_toks,
+                c_toks,
+                t_toks,
+                format_min_sec(c_lat),
+                f"{round(c_lat, 1)} s",
+                cd["ai_model"]
+            ]
+            for c_idx, val in enumerate(row_vals, 1):
+                cell = ws.cell(row=current_r, column=c_idx, value=val)
+                cell.font = font_bold if c_idx in [2, 4, 7, 8] else font_regular
+                cell.border = thin_border
+                cell.alignment = Alignment(horizontal="center" if c_idx in [1,2,4,5,6,7,8,9,10] else "left", vertical="center")
+                if c_idx == 4:
+                    if status_val in ("COMPLIANT", "ACCEPTED", "PASS"):
+                        cell.font = Font(name="Calibri", size=10, bold=True, color="059669")
+                    elif status_val in ("PARTIAL", "WARN"):
+                        cell.font = Font(name="Calibri", size=10, bold=True, color="D97706")
+                    else:
+                        cell.font = Font(name="Calibri", size=10, bold=True, color="DC2626")
+            ws.row_dimensions[current_r].height = 20
+            current_r += 1
+    else:
+        # Fallback to records summary if controls_detail list not present
         for r in records:
             p_toks = int(r.get("prompt_input_tokens", 480))
             c_toks = int(r.get("completion_output_tokens", 130))
@@ -266,9 +328,9 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
             c_lat = float(r.get("total_latency_seconds", 255.0))
             
             row_vals = [
-                r.get("scoping_mode", "AI Automatic Scope (Pre-Filtered)"),
-                r.get("session_id", "5.15")[:12],
-                r.get("folder_name", "Access Control & Physical/Logical Security"),
+                r.get("scoping_mode", "Excel Upload Scope"),
+                str(r.get("session_id", "Session"))[:12],
+                r.get("folder_name", "Audit Evidence Scope"),
                 "COMPLIANT" if r.get("compliant_count", 1) > 0 else "NON_COMPLIANT",
                 p_toks,
                 c_toks,
@@ -282,49 +344,6 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
                 cell.font = font_bold if c_idx in [2, 4, 7, 8] else font_regular
                 cell.border = thin_border
                 cell.alignment = Alignment(horizontal="center" if c_idx in [1,2,4,5,6,7,8,9,10] else "left", vertical="center")
-            ws.row_dimensions[current_r].height = 20
-            current_r += 1
-    else:
-        # Pre-populated baseline detail rows for Gemma 4 (e4b)
-        baseline_controls = [
-            ("Manual Excel Scope", "CHK-001", "Whether NTP is enabled", "COMPLIANT", 490, 140, 248.0),
-            ("Manual Excel Scope", "CHK-002", "Whether NTP synchronized?", "COMPLIANT", 510, 145, 252.0),
-            ("Manual Excel Scope", "CHK-003", "FRAUD ANALYTICS POLICY is available?", "COMPLIANT", 530, 150, 260.0),
-            ("Manual Excel Scope", "CHK-004", "Whether multifactor authentication enabled?", "COMPLIANT", 500, 135, 249.0),
-            ("Manual Excel Scope", "CHK-005", "Whether PAM user access evidence available?", "PARTIAL", 520, 160, 270.0),
-            ("Manual Excel Scope", "CHK-006", "How is the Authentication done?", "COMPLIANT", 480, 130, 245.0),
-            ("Manual Excel Scope", "CHK-007", "CPU, memory and disk utilization", "COMPLIANT", 515, 142, 255.0),
-            ("Manual Excel Scope", "CHK-008", "Whether log archival is done?", "COMPLIANT", 505, 138, 250.0),
-            ("AI Automatic Scope (Pre-Filtered)", "5.15", "Access Control & Physical/Logical Security", "COMPLIANT", 480, 135, 258.0),
-            ("AI Automatic Scope (Pre-Filtered)", "5.23", "Cloud Services Security (AWS Infrastructure)", "COMPLIANT", 510, 140, 265.0),
-            ("AI Automatic Scope (Pre-Filtered)", "5.28", "Collection of Evidence (Log Archival)", "COMPLIANT", 495, 130, 252.0),
-            ("AI Automatic Scope (Pre-Filtered)", "5.37", "Documented Operating Procedures (SOPs)", "COMPLIANT", 470, 125, 248.0),
-            ("AI Automatic Scope (Pre-Filtered)", "6.7", "Remote Working (VPN & MDM Security)", "NON_COMPLIANT", 525, 155, 275.0),
-            ("AI Automatic Scope (Pre-Filtered)", "7.2", "Physical Entry (Visitor Logs & Access Cards)", "COMPLIANT", 460, 120, 242.0),
-            ("AI Automatic Scope (Pre-Filtered)", "7.4", "Physical Security Monitoring (AWS CloudWatch)", "COMPLIANT", 500, 138, 260.0),
-            ("AI Automatic Scope (Pre-Filtered)", "8.2", "Privileged Access Rights (PAM / PIM IAM)", "NON_COMPLIANT", 540, 165, 282.0),
-            ("AI Automatic Scope (Pre-Filtered)", "8.5", "Secure Authentication (MFA & Password Rules)", "COMPLIANT", 490, 132, 250.0),
-            ("AI Automatic Scope (Pre-Filtered)", "8.6", "Capacity Management (CPU, Disk & RAM Logs)", "COMPLIANT", 515, 144, 268.0),
-            ("AI Automatic Scope (Pre-Filtered)", "8.15", "Logging (Log Archival & Production AUA Logs)", "COMPLIANT", 505, 136, 256.0),
-            ("AI Automatic Scope (Pre-Filtered)", "8.17", "Clock Synchronization (NTP Server Clock Sync)", "COMPLIANT", 475, 128, 246.0)
-        ]
-        for scope_m, cid, cname, st, p_t, c_t, c_l in baseline_controls:
-            t_t = p_t + c_t
-            row_vals = [
-                scope_m, cid, cname, st, p_t, c_t, t_t, format_min_sec(c_l), f"{round(c_l,1)} s", ai_model
-            ]
-            for c_idx, val in enumerate(row_vals, 1):
-                cell = ws.cell(row=current_r, column=c_idx, value=val)
-                cell.font = font_bold if c_idx in [2, 4, 7, 8] else font_regular
-                cell.border = thin_border
-                cell.alignment = Alignment(horizontal="center" if c_idx in [1,2,4,5,6,7,8,9,10] else "left", vertical="center")
-                if c_idx == 4:
-                    if val == "COMPLIANT":
-                        cell.font = Font(name="Calibri", size=10, bold=True, color="059669")
-                    elif val == "PARTIAL":
-                        cell.font = Font(name="Calibri", size=10, bold=True, color="D97706")
-                    else:
-                        cell.font = Font(name="Calibri", size=10, bold=True, color="DC2626")
             ws.row_dimensions[current_r].height = 20
             current_r += 1
 
