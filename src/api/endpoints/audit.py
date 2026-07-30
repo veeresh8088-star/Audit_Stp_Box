@@ -609,7 +609,7 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 "evidence_found": f.evidence_found,
                 "evidence_snippet": f.evidence_snippet,
                 "recommendation": recom,
-                "reasoning": f.reasoning or "Semantic RAG compliance evaluation.",
+                "reasoning": f.reasoning or f.description or "",
                 "status": f.status,
                 "source_files": loc_src,
                 "evidence_location": loc_src,

@@ -838,7 +838,7 @@ async function loadAuditeeEvidenceDocs() {
                         <span style="font-weight: 700; font-size: 0.85rem; color: #fff;">${idx + 1}. ${f.control_id} - ${f.control_name || 'Control Finding'}</span>
                         <span style="font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; color: ${badgeColor}; background: ${badgeColor}20; border: 1px solid ${badgeColor}40;">${statusText}</span>
                     </div>
-                    <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 6px;">${f.reasoning || f.description || 'Finding description delivered by Lead Auditor.'}</div>
+                    <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 6px;">${getCleanFindingDescription(f)}</div>
                     <div style="font-size: 0.74rem; color: #60a5fa; font-weight: 600;">
                         <span>💡 Recommendation: ${f.recommendation || 'Remediate identified security gaps.'}${cvssText}</span>
                     </div>
@@ -2226,6 +2226,19 @@ function isVaptFinding(f) {
     return cid.startsWith("VAPT") || cat.includes("VAPT") || fw.includes("VAPT");
 }
 
+function getCleanFindingDescription(f) {
+    if (!f) return "Vulnerability or compliance finding evaluation.";
+    const candidate = f.description || f.gap_detected || f.gap_description || f.justification || f.reasoning;
+    if (candidate && String(candidate).trim() !== "Semantic RAG compliance evaluation.") {
+        return String(candidate).trim();
+    }
+    const backup = (f.description && String(f.description).trim()) ||
+                   (f.gap_detected && String(f.gap_detected).trim()) ||
+                   (f.gap_description && String(f.gap_description).trim()) ||
+                   (f.justification && String(f.justification).trim());
+    return backup || 'Detailed compliance and vulnerability finding evaluation.';
+}
+
 function isFindingCompliant(f) {
     const st = (f.status || "").toUpperCase().trim();
     const wf = (f.workflow_status || f.display_status || "").toUpperCase().trim();
@@ -2541,7 +2554,7 @@ function renderFindingsList() {
             
             <div class="finding-detail-row">
                 <label>Finding Description</label>
-                <p>${f.reasoning || f.description || f.gap_detected || 'Evaluated against ISO 27001 / VAPT compliance standards.'}</p>
+                <p>${getCleanFindingDescription(f)}</p>
             </div>
             
             ${showSnippetBox ? `
@@ -2694,7 +2707,7 @@ function openEditFindingModal(finding) {
 
     document.getElementById("edit-finding-snippet").value = finding.evidence_snippet || "";
     document.getElementById("edit-finding-recommendation").value = finding.recommendation || "";
-    document.getElementById("edit-finding-reasoning").value = finding.reasoning || finding.description || finding.gap_detected || "";
+    document.getElementById("edit-finding-reasoning").value = getCleanFindingDescription(finding);
 
     document.getElementById("edit-finding-modal").classList.add("active");
 }
