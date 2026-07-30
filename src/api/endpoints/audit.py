@@ -187,18 +187,25 @@ def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None)
         db.close()
 
 @router.get("/auditee-sessions")
-def api_get_auditee_sessions():
-    """Returns only sessions that belong to a real auditee OR have auditee-submitted evidence files."""
+def api_get_auditee_sessions(username: Optional[str] = None):
+    """Returns only sessions strictly scoped to the requesting auditee."""
+    if not username or not username.strip():
+        return {"success": True, "sessions": []}
+
     db = SessionLocal()
     try:
         with force_master():
-            auditee_ev_report_ids = [r[0] for r in db.query(EvidenceFile.report_id).filter(EvidenceFile.is_auditor_uploaded == False).distinct().all()]
-            
-            query_filter = (AuditReport.auditee_id != None)
-            if auditee_ev_report_ids:
-                query_filter = query_filter | (AuditReport.id.in_(auditee_ev_report_ids))
+            user = db.query(User).filter(User.username == username).first()
+            user_id = user.id if user else None
 
-            reports = db.query(AuditReport).filter(query_filter).order_by(AuditReport.created_at.desc()).all()
+            if user_id:
+                query = db.query(AuditReport).filter(
+                    (AuditReport.auditee_id == user_id) | (AuditReport.created_by == username)
+                )
+            else:
+                query = db.query(AuditReport).filter(AuditReport.created_by == username)
+
+            reports = query.order_by(AuditReport.created_at.desc()).all()
 
             result = []
             for r in reports:
@@ -217,7 +224,7 @@ def api_get_auditee_sessions():
                     "id": r.id,
                     "session_id": r.session_id,
                     "session_title": r.session_title,
-                    "auditee_username": auditee_username or "Auditee Client",
+                    "auditee_username": auditee_username or r.created_by or "Auditee Client",
                     "files_count": files_count,
                     "created_at": str(r.created_at)
                 })

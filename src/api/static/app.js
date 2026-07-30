@@ -3249,7 +3249,11 @@ async function loadAuditeeSessionsList() {
     select.innerHTML = `<option value="">— Select Audit Report —</option>`;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/auditee-sessions`);
+        let url = `${API_BASE}/audit/auditee-sessions`;
+        if (currentUser) {
+            url += `?username=${encodeURIComponent(currentUser.username)}`;
+        }
+        const response = await fetch(url);
         const data = await response.json();
 
         if (data.success && data.sessions && data.sessions.length > 0) {
@@ -3337,7 +3341,11 @@ async function loadSidebarAuditeeFiles() {
     // Refresh auditee sessions list
     try {
         const currentVal = sessionSelect.value;
-        const res = await fetch(`${API_BASE}/audit/auditee-sessions`);
+        let url = `${API_BASE}/audit/auditee-sessions`;
+        if (currentUser) {
+            url += `?username=${encodeURIComponent(currentUser.username)}`;
+        }
+        const res = await fetch(url);
         const data = await res.json();
         if (data.success && data.sessions && data.sessions.length > 0) {
             sessionSelect.innerHTML = `<option value="">— Select Auditee Account —</option>`;
