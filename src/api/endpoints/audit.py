@@ -120,13 +120,14 @@ def api_create_session(
     db = SessionLocal()
     try:
         user_row = db.query(User).filter(User.username == username).first()
-        user_id = user_row.id if user_row else None
+        auditee_id = user_row.id if (user_row and user_row.role and user_row.role.lower() == "auditee") else None
         
         with force_master():
             report = AuditReport(
                 session_id=session_id,
                 session_title=session_title,
-                auditee_id=user_id,
+                created_by=username,
+                auditee_id=auditee_id,
                 framework=framework,
                 status="Draft"
             )
@@ -140,19 +141,22 @@ def api_create_session(
 
 @router.get("/sessions")
 def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None):
+    """Retrieves list of active compliance sessions strictly isolated to the logged-in user."""
+    if not username or not username.strip():
+        return {"success": True, "sessions": []}
+
     db = SessionLocal()
     try:
-        query = db.query(AuditReport)
-        # Enforce session visibility:
-        # Include sessions created by/assigned to user OR unassigned sessions (auditee_id IS NULL)
-        if username:
-            user = db.query(User).filter(User.username == username).first()
-            if user:
-                if role and role.lower() == "auditee":
-                    query = query.filter((AuditReport.auditee_id == user.id) | (AuditReport.auditee_id == None))
-                else:
-                    # Auditors/Admins see all sessions or unassigned/their sessions
-                    query = query.filter((AuditReport.auditee_id == user.id) | (AuditReport.auditee_id == None) | (AuditReport.auditee_id == 1))
+        user = db.query(User).filter(User.username == username).first()
+        user_id = user.id if user else None
+
+        # Strict Account Isolation: User sees only sessions created by them OR assigned to their auditee_id
+        if user_id:
+            query = db.query(AuditReport).filter(
+                (AuditReport.created_by == username) | (AuditReport.auditee_id == user_id)
+            )
+        else:
+            query = db.query(AuditReport).filter(AuditReport.created_by == username)
 
         reports = query.order_by(AuditReport.created_at.desc()).all()
         result = []
@@ -228,12 +232,13 @@ def get_or_create_audit_report(db, session_id: str, default_title: str = None, d
         user_id = None
         if username:
             u = db.query(User).filter(User.username == username).first()
-            if u:
+            if u and u.role and u.role.lower() == "auditee":
                 user_id = u.id
         report = AuditReport(
             session_id=session_id,
             session_title=title,
             framework=default_framework,
+            created_by=username,
             auditee_id=user_id,
             status="Draft",
             created_at=datetime.now(timezone.utc).replace(tzinfo=None)
@@ -1085,29 +1090,25 @@ def api_get_auditee_submitted_sessions():
         finally:
             db.close()
 
-@router.get("/sessions")
-def api_get_audit_sessions(role: Optional[str] = None, username: Optional[str] = None):
-    """Retrieves list of active compliance sessions scoped to the logged-in role & user."""
-    return api_get_chat_sessions(role=role, username=username)
-
 @router.get("/chats/sessions")
 def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = None):
-    """Retrieves list of active compliance sessions scoped to the logged-in user."""
+    """Retrieves list of active compliance sessions strictly scoped to the logged-in user."""
+    if not username or not username.strip():
+        return {"success": True, "sessions": []}
+
     db = SessionLocal()
     try:
         sessions_dict = {}
-        # 1. AuditReports — filter by user/role to ensure no contradiction between Auditor and Auditee
-        if role == "auditee":
-            if username:
-                user = db.query(User).filter(User.username == username).first()
-                if user:
-                    reports = db.query(AuditReport).filter((AuditReport.auditee_id == user.id) | (AuditReport.status.in_(["Pending Review", "Reviewed & Finalized", "Completed"]))).all()
-                else:
-                    reports = db.query(AuditReport).filter(AuditReport.status.in_(["Pending Review", "Reviewed & Finalized", "Completed"])).all()
-            else:
-                reports = db.query(AuditReport).filter(AuditReport.status.in_(["Pending Review", "Reviewed & Finalized", "Completed"])).all()
+        user = db.query(User).filter(User.username == username).first()
+        user_id = user.id if user else None
+
+        if user_id:
+            reports = db.query(AuditReport).filter(
+                (AuditReport.created_by == username) | (AuditReport.auditee_id == user_id)
+            ).all()
         else:
-            reports = db.query(AuditReport).all()
+            reports = db.query(AuditReport).filter(AuditReport.created_by == username).all()
+
         for r in reports:
             sessions_dict[r.session_id] = {
                 "session_id": r.session_id,

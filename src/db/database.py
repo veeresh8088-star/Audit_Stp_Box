@@ -25,7 +25,8 @@ class AuditReport(Base):
     id                = Column(Integer, primary_key=True, autoincrement=True)
     session_id        = Column(String(100), unique=True, index=True) # maps to UI's UUID session_id
     session_title     = Column(String(300))
-    auditee_id        = Column(Integer, nullable=True) # maps to User.id (nullable if created anonymously)
+    auditee_id        = Column(Integer, nullable=True) # maps to User.id
+    created_by        = Column(String(100), nullable=True, index=True) # maps to User.username who created the session
     framework         = Column(String(100)) # ISO 27001, SOC 2, NIST, GDPR
     controls_selected = Column(Text) # JSON serialized list of control integers
     status            = Column(String(50), default="Draft") # Draft, Pending Review, Reviewed, Approved, Rejected

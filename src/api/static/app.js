@@ -3619,8 +3619,8 @@ async function loadSubmittedReports() {
 
     try {
         let url = `${API_BASE}/audit/sessions`;
-        if (currentUser && currentUser.role === "auditee") {
-            url += `?role=auditee&username=${currentUser.username}`;
+        if (currentUser) {
+            url += `?role=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username)}`;
         }
 
         const response = await fetch(url);
@@ -4259,7 +4259,11 @@ async function loadRecentSessionsList() {
     if (!container) return;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/sessions`);
+        let url = `${API_BASE}/audit/sessions`;
+        if (currentUser) {
+            url += `?role=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username)}`;
+        }
+        const response = await fetch(url);
         const data = await response.json();
 
         if (data.success && data.sessions.length > 0) {
