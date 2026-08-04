@@ -1,6 +1,36 @@
 import os
+import threading
 import requests
 import json
+
+# ── Round-Robin Load Balancer ─────────────────────────────────────────────────
+# When LLM_HOSTS env var is set (e.g. "11434,11436"), requests are distributed
+# across all configured LLM instances in a thread-safe round-robin fashion.
+# Falls back to single OLLAMA_HOST when LLM_HOSTS is not set.
+_rr_lock = threading.Lock()
+_rr_index = 0
+
+def _get_next_llm_host():
+    """Returns the next LLM host URL in round-robin order."""
+    global _rr_index
+    hosts_env = os.environ.get("LLM_HOSTS", "").strip()
+    if not hosts_env:
+        # Single instance mode — use OLLAMA_HOST as before
+        return os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
+    # Multi-instance mode — parse comma-separated ports or full URLs
+    raw_hosts = [h.strip() for h in hosts_env.split(",") if h.strip()]
+    hosts = []
+    for h in raw_hosts:
+        if h.isdigit():
+            hosts.append(f"http://127.0.0.1:{h}")
+        elif not h.startswith("http"):
+            hosts.append(f"http://{h}")
+        else:
+            hosts.append(h)
+    with _rr_lock:
+        host = hosts[_rr_index % len(hosts)]
+        _rr_index += 1
+    return host
 
 def get_llm_backend():
     """Reads LLM_BACKEND env var or auto-detects llama.cpp vs Ollama by probing port 11434."""
@@ -20,14 +50,14 @@ def get_llm_backend():
     return "ollama"
 
 def _resolve_host(url=None, default_port=11434):
-    """Resolves host URL, prepending http:// and appending default port if missing."""
+    """Resolves host URL. Uses round-robin when LLM_HOSTS is configured."""
     if url is None:
-        url = os.environ.get("OLLAMA_HOST", f"http://127.0.0.1:{default_port}").strip()
+        url = _get_next_llm_host()
     if url and not url.startswith("http://") and not url.startswith("https://"):
         url = f"http://{url}" if ":" in url else f"http://{url}:{default_port}"
     return url
 
-def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=4, timeout=600, stop=None):
+def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=600, stop=None):
     """Sends a non-streaming prompt completion request to the configured LLM backend."""
     backend = get_llm_backend()
     host = _resolve_host()
@@ -57,9 +87,10 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
         options_dict = {
             "temperature": temperature,
             "num_ctx": num_ctx,
-            "num_thread": num_thread,
             "num_predict": 1024 if format == "json" else 2048
         }
+        if num_thread is not None:
+            options_dict["num_thread"] = num_thread
         if stop:
             options_dict["stop"] = stop
             
@@ -97,7 +128,7 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
         else:
             raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
 
-def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=4):
+def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=None):
     """Generates streaming tokens from the LLM backend."""
     backend = get_llm_backend()
     host = _resolve_host()
@@ -127,15 +158,18 @@ def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=4)
     else:
         # Default: Ollama
         url = f"{host}/api/generate"
+        options_dict = {
+            "temperature": temperature,
+            "num_ctx": num_ctx
+        }
+        if num_thread is not None:
+            options_dict["num_thread"] = num_thread
+
         payload = {
             "model": model,
             "prompt": prompt,
             "stream": True,
-            "options": {
-                "temperature": temperature,
-                "num_ctx": num_ctx,
-                "num_thread": num_thread
-            },
+            "options": options_dict,
             "keep_alive": "15m"
         }
         r = requests.post(url, json=payload, stream=True, timeout=300)
@@ -162,11 +196,12 @@ def get_embedding(text, model="nomic-embed-text"):
     host_env = os.environ.get("EMBEDDING_HOST") or os.environ.get("OLLAMA_HOST")
     host = _resolve_host(host_env, default_port)
     
+    embed_timeout = int(os.environ.get("EMBEDDING_TIMEOUT", "60"))
     if backend in ("llama.cpp", "llamacpp"):
         # native llama.cpp /embedding endpoint
         url = f"{host}/embedding"
         try:
-            r = requests.post(url, json={"content": text_sample}, timeout=300)
+            r = requests.post(url, json={"content": text_sample}, timeout=embed_timeout)
             if r.status_code == 200:
                 emb = r.json().get("embedding")
                 if emb:
@@ -175,7 +210,7 @@ def get_embedding(text, model="nomic-embed-text"):
             # Fallback to OpenAI-compatible /v1/embeddings
             try:
                 url_v1 = f"{host}/v1/embeddings"
-                r = requests.post(url_v1, json={"input": text_sample, "model": model}, timeout=300)
+                r = requests.post(url_v1, json={"input": text_sample, "model": model}, timeout=embed_timeout)
                 if r.status_code == 200:
                     data = r.json().get("data")
                     if data and isinstance(data, list) and len(data) > 0:
@@ -186,7 +221,7 @@ def get_embedding(text, model="nomic-embed-text"):
         # Default Ollama
         url = f"{host}/api/embeddings"
         try:
-            r = requests.post(url, json={"model": model, "prompt": text_sample}, timeout=120)
+            r = requests.post(url, json={"model": model, "prompt": text_sample}, timeout=embed_timeout)
             if r.status_code == 200:
                 return r.json().get("embedding")
         except Exception as e:

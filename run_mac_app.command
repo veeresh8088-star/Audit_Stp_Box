@@ -13,7 +13,6 @@ echo ""
 # 1. Start Python API Backend in background
 echo "[1/2] Launching API Server on http://localhost:8000 ..."
 export LLM_BACKEND=llama.cpp
-export OMP_NUM_THREADS=4
 python3 -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 > /dev/null 2>&1 &
 API_PID=$!
 

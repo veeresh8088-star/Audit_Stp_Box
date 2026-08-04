@@ -22,7 +22,7 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-echo [v] OK: llama.cpp LLM & Embedding services are active.
+echo [v] OK: llama.cpp LLM ^& Embedding services are active.
 
 :: Ensure SSL Certificate Exists
 if not exist cert.pem (
@@ -65,9 +65,9 @@ echo.
 echo [3/3] Launching AISecurityAudit HTTPS Dashboard...
 set LLM_BACKEND=llama.cpp
 set EMBEDDING_HOST=http://127.0.0.1:11435
-set OMP_NUM_THREADS=4
-set MKL_NUM_THREADS=4
-set OPENBLAS_NUM_THREADS=4
+set OLLAMA_KEEP_ALIVE=24h
+set OLLAMA_NUM_PARALLEL=4
+set OLLAMA_MAX_LOADED_MODELS=3
 
 start https://aicyberauditbox.com/
 python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem

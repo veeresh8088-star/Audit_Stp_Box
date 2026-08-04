@@ -180,19 +180,32 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
         if state.get("audit_mode") == "Quick" or state["retry_count"] >= 1:
             mode_prefix = "Quick audit" if state.get("audit_mode") == "Quick" else "Self-correction"
             print(f"[LANGGRAPH] {mode_prefix} failed generation for control {state['control_id']}. Routing to fallback.", flush=True)
+            retrieved = str(state.get("retrieved_context") or "").strip()
+            has_retrieved = len(retrieved) > 40 and not any(kw in retrieved.lower() for kw in ["no relevant context found", "no evidence found"])
+            
+            ev_snippet = retrieved[:400] if has_retrieved else ""
+            ev_quote = retrieved[:200] if has_retrieved else "NOT_FOUND"
+            
+            err_details = state.get("validation_error") or "LLM generation timeout or parse error"
+            finding_text = f"Auditor engine encountered generation error for control {state['control_id']} ({err_details}). Technical verification required."
+            if has_retrieved:
+                gap_text = f"Document context retrieved for control {state['control_id']}, but LLM finding draft generation timed out or failed ({err_details}). Excerpt: {ev_snippet[:200]}..."
+            else:
+                gap_text = finding_text
+
             fallback = {
                 "status": "NON_COMPLIANT",
                 "requires_human_review": True,
                 "requires_review": True,
-                "review_note": f"Failed generation: {state['validation_error']}",
+                "review_note": f"Failed generation: {err_details}",
                 "control_id": state["control_id"],
                 "control": state["control_label"],
                 "severity": "P3 Medium",
-                "evidence_quote": "NOT_FOUND",
-                "evidence_snippet": "",
-                "finding": f"Auditor engine failed to generate/parse finding draft for control {state['control_id']}. Technical verification required.",
-                "gap_description": f"Auditor engine failed to generate/parse finding draft for control {state['control_id']}. Technical verification required.",
-                "reasoning": f"Graph execution failed: {state['validation_error']}",
+                "evidence_quote": ev_quote,
+                "evidence_snippet": ev_snippet,
+                "finding": finding_text,
+                "gap_description": gap_text,
+                "reasoning": f"Graph execution failed: {err_details}",
                 "recommendation": state.get("recommendation") or f"Review policies and verify implementation for {state['control_id']}."
             }
             return {

@@ -47,9 +47,6 @@ echo ""
 echo "[3/3] Launching Local API Dashboard..."
 export LLM_BACKEND=llama.cpp
 export EMBEDDING_HOST=http://127.0.0.1:11435
-export OMP_NUM_THREADS=4
-export MKL_NUM_THREADS=4
-export OPENBLAS_NUM_THREADS=4
 
 open http://127.0.0.1:8000/
 python3 -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000

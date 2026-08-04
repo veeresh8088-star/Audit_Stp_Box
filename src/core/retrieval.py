@@ -27,6 +27,151 @@ if os.path.exists(CACHE_FILE):
     except Exception as e:
         print(f"[EMBEDDING CACHE] Warning: failed to load persistent cache: {e}", flush=True)
 
+# ── Native vector engine (sqlite-vec or pgvector) ────────────────────────────
+# Lazy-initialised on first retrieval call to allow DB to boot first.
+_native_vec_engine = None
+_native_vec_lock = concurrent.futures.ThreadPoolExecutor.__new__
+
+def _get_native_vec_engine():
+    """Lazy-initialises and returns the best available native vector engine."""
+    global _native_vec_engine
+    if _native_vec_engine is None:
+        try:
+            from src.db.database import engine_master
+            if engine_master is not None and engine_master.dialect.name == "postgresql":
+                _native_vec_engine = _init_pgvector(engine_master)
+            else:
+                _native_vec_engine = _init_sqlite_vec()
+        except Exception as e:
+            print(f"[VEC SEARCH] Engine init failed ({e}); using Python cosine.", flush=True)
+            _native_vec_engine = "python"  # sentinel: use Python fallback
+    return _native_vec_engine
+
+def _init_sqlite_vec():
+    """Initialises sqlite-vec shadow table next to the active SQLite file."""
+    try:
+        import sqlite_vec, sqlite3, struct
+        from src.db.database import engine_master
+        if engine_master is None:
+            return "python"
+        db_url = str(engine_master.url)
+        db_path = db_url.replace("sqlite:///", "").replace("sqlite://", "")
+        if not os.path.exists(db_path):
+            return "python"
+        # timeout=0: fail instantly on lock (no waiting), WAL mode for concurrent reads
+        conn = sqlite3.connect(db_path, check_same_thread=False, timeout=0)
+        conn.execute("PRAGMA journal_mode=WAL")  # WAL: multiple readers + 1 writer simultaneously
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.enable_load_extension(False)
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks
+            USING vec0(chunk_id INTEGER PRIMARY KEY, embedding FLOAT[768])
+        """)
+        conn.commit()
+        conn.close()
+        print(f"[VEC SEARCH] sqlite-vec native engine ready (db: {db_path}).", flush=True)
+        return {"type": "sqlite-vec", "db_path": db_path}
+    except ImportError:
+        print("[VEC SEARCH] sqlite-vec not installed; using Python cosine.", flush=True)
+        return "python"
+    except Exception as e:
+        print(f"[VEC SEARCH] sqlite-vec init failed ({e}); using Python cosine.", flush=True)
+        return "python"
+
+def _init_pgvector(pg_engine):
+    """Initialises pgvector extension and HNSW index on PostgreSQL."""
+    try:
+        from sqlalchemy import text
+        with pg_engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS pg_vec_chunks (
+                    chunk_id INTEGER PRIMARY KEY,
+                    embedding vector(768)
+                )"""))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_pg_vec_hnsw
+                ON pg_vec_chunks USING hnsw (embedding vector_cosine_ops)
+                WITH (m=16, ef_construction=64)"""))
+        print("[VEC SEARCH] pgvector HNSW engine ready.", flush=True)
+        return {"type": "pgvector", "engine": pg_engine}
+    except Exception as e:
+        print(f"[VEC SEARCH] pgvector init failed ({e}); using Python cosine.", flush=True)
+        return "python"
+
+def _vec_store_embedding(chunk_db_id, vector, engine):
+    """Store a single embedding in the native vector engine."""
+    if engine is None or engine == "python" or vector is None:
+        return
+    try:
+        if engine.get("type") == "sqlite-vec":
+            import sqlite_vec, sqlite3, struct
+            packed = struct.pack(f"{len(vector)}f", *vector)
+            # timeout=0: if DB is locked by another user, skip instantly (no waiting)
+            conn = sqlite3.connect(engine["db_path"], check_same_thread=False, timeout=0)
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+            conn.execute("INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, ?)",
+                         (chunk_db_id, packed))
+            conn.commit()
+            conn.close()
+        elif engine.get("type") == "pgvector":
+            from sqlalchemy import text
+            vec_str = "[" + ",".join(str(v) for v in vector) + "]"
+            with engine["engine"].begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO pg_vec_chunks (chunk_id, embedding) VALUES (:cid, :emb::vector)
+                    ON CONFLICT (chunk_id) DO UPDATE SET embedding = EXCLUDED.embedding
+                """), {"cid": chunk_db_id, "emb": vec_str})
+    except Exception:
+        pass  # Never crash audit on vector storage failure — next run will retry
+
+def _vec_native_search(query_vector, filenames, top_k, engine):
+    """Perform KNN search using native engine. Returns {chunk_db_id: similarity}."""
+    if engine is None or engine == "python" or query_vector is None:
+        return {}
+    try:
+        if engine.get("type") == "sqlite-vec":
+            import sqlite_vec, sqlite3, struct
+            packed_q = struct.pack(f"{len(query_vector)}f", *query_vector)
+            # timeout=0: if DB is locked, fail instantly — never wait — Python cosine takes over
+            conn = sqlite3.connect(engine["db_path"], check_same_thread=False, timeout=0)
+            conn.enable_load_extension(True)
+            sqlite_vec.load(conn)
+            conn.enable_load_extension(False)
+            if filenames:
+                placeholders = ",".join(["?"]*len(filenames))
+                sql = (f"SELECT vc.chunk_id, vc.distance FROM vec_chunks vc "
+                       f"JOIN document_chunks dc ON dc.id=vc.chunk_id "
+                       f"WHERE dc.filename IN ({placeholders}) "
+                       f"AND vc.embedding MATCH ? AND K=? ORDER BY vc.distance")
+                rows = conn.execute(sql, [*filenames, packed_q, top_k*4]).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? AND K=? ORDER BY distance",
+                    [packed_q, top_k*4]).fetchall()
+            conn.close()
+            return {r[0]: max(0.0, 1.0-(r[1]/2.0)) for r in rows}
+        elif engine.get("type") == "pgvector":
+            from sqlalchemy import text
+            vec_str = "[" + ",".join(str(v) for v in query_vector) + "]"
+            if filenames:
+                f_list = ",".join(f"'{f}'" for f in filenames)
+                sql = (f"SELECT pvc.chunk_id, 1-(pvc.embedding <=> '{vec_str}'::vector) AS sim "
+                       f"FROM pg_vec_chunks pvc JOIN document_chunks dc ON dc.id=pvc.chunk_id "
+                       f"WHERE dc.filename IN ({f_list}) ORDER BY sim DESC LIMIT {top_k*4}")
+            else:
+                sql = (f"SELECT chunk_id, 1-(embedding <=> '{vec_str}'::vector) AS sim "
+                       f"FROM pg_vec_chunks ORDER BY sim DESC LIMIT {top_k*4}")
+            with engine["engine"].begin() as conn:
+                rows = conn.execute(text(sql)).fetchall()
+            return {r[0]: float(r[1]) for r in rows}
+    except Exception as e:
+        print(f"[VEC SEARCH] Native search error ({e}); falling back to Python cosine.", flush=True)
+    return {}
+
 # Cross-Encoder lazy-loading variables
 _RERANKER_MODEL = None
 _RERANKER_ACTIVE_MODE = None
@@ -455,19 +600,43 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
                 chunks_to_embed.append((chunk_key, sc[1]))
                 
         if chunks_to_embed:
-            status_text = None
-                
             def embed_worker(item):
                 key, content = item
                 vector = _get_ollama_embedding(content)
                 return key, vector
                 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-                results = list(executor.map(embed_worker, chunks_to_embed))
-                
-            for key, vector in results:
+            from src.core.llm_client import get_llm_backend
+            backend = os.environ.get("EMBEDDING_BACKEND", get_llm_backend()).lower()
+            max_embed_workers = 2 if backend in ("llama.cpp", "llamacpp") else 4
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_embed_workers) as executor:
+                embed_results = list(executor.map(embed_worker, chunks_to_embed))
+
+            # Store in pickle cache AND native vector engine
+            _native_engine = _get_native_vec_engine()
+            for key, vector in embed_results:
                 if vector is not None:
                     embeddings_store[key] = vector
+            
+            # Build chunk_db_id → key map to store in native engine
+            # key = (filename, chunk_index); we need the DB row id for sqlite-vec
+            if _native_engine != "python" and _native_engine is not None:
+                try:
+                    session_tmp = SessionLocal()
+                    for (fname, cidx), vector in zip(
+                        [item[0] for item in chunks_to_embed],
+                        [r[1] for r in embed_results]
+                    ):
+                        if vector is None:
+                            continue
+                        row = session_tmp.query(DocumentChunk).filter(
+                            DocumentChunk.filename == fname,
+                            DocumentChunk.chunk_index == cidx
+                        ).first()
+                        if row:
+                            _vec_store_embedding(row.id, vector, _native_engine)
+                    session_tmp.close()
+                except Exception as _vse:
+                    pass  # Never crash audit on vec store failure
             
             try:
                 with open(CACHE_FILE, "wb") as f:
@@ -475,18 +644,35 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
             except Exception as e:
                 print(f"[EMBEDDING CACHE] Warning: failed to save persistent cache: {e}", flush=True)
 
-            if status_text is not None:
-                try:
-                    status_text.empty()
-                except Exception:
-                    pass
-            
-        for sc in scored_chunks:
-            chunk_key = (sc[3], sc[2])
-            c_vec = embeddings_store.get(chunk_key)
-            if c_vec is not None:
-                sim = _cosine_similarity(query_vector, c_vec)
-                vector_similarities[chunk_key] = max(0.0, float(sim))
+        # ── Vector similarity: native engine first, Python cosine fallback ────
+        _native_engine = _get_native_vec_engine()
+        native_sims = _vec_native_search(query_vector, file_names_list, 40, _native_engine)
+
+        if native_sims:
+            # Map native chunk_db_id results back to (filename, chunk_index) keys
+            try:
+                session_tmp = SessionLocal()
+                ids_to_fetch = list(native_sims.keys())
+                rows = session_tmp.query(DocumentChunk).filter(
+                    DocumentChunk.id.in_(ids_to_fetch)
+                ).all()
+                for row in rows:
+                    chunk_key = (row.filename, row.chunk_index)
+                    vector_similarities[chunk_key] = native_sims[row.id]
+                session_tmp.close()
+                print(f"[VEC SEARCH] Native {_native_engine.get('type','?')} returned {len(native_sims)} chunk similarities.", flush=True)
+            except Exception as map_e:
+                print(f"[VEC SEARCH] Native result mapping failed ({map_e}); using Python cosine.", flush=True)
+                native_sims = {}
+
+        if not native_sims:
+            # Python cosine fallback (always accurate)
+            for sc in scored_chunks:
+                chunk_key = (sc[3], sc[2])
+                c_vec = embeddings_store.get(chunk_key)
+                if c_vec is not None:
+                    sim = _cosine_similarity(query_vector, c_vec)
+                    vector_similarities[chunk_key] = max(0.0, float(sim))
 
     # Merge Keyword & Vector Scores
     max_kw_score = max([sc[0] for sc in scored_chunks]) if scored_chunks else 0.0

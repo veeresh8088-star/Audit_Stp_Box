@@ -546,37 +546,38 @@ def reconcile_schemas(engine):
                         migration_success = False
                         
                 # ── AUTO-WIDEN VARCHAR COLUMNS ──────────────────────────
-                # Check if any existing VARCHAR columns need widening
-                try:
-                    with engine.begin() as conn:
-                        for col_name in existing_cols & expected_cols:
-                            col_obj = model_cls.__table__.columns.get(col_name)
-                            if col_obj is None:
-                                continue
-                            model_type = col_obj.type
-                            # Get current column info from inspector
-                            db_col_info = None
-                            for db_col in inspector.get_columns(table_name):
-                                if db_col["name"] == col_name:
-                                    db_col_info = db_col
-                                    break
-                            if db_col_info is None:
-                                continue
-                            db_type = db_col_info.get("type")
-                            # Case 1: Model says Text but DB has VARCHAR → widen to TEXT
-                            if isinstance(model_type, Text) and hasattr(db_type, 'length') and db_type.length is not None:
-                                alter_sql = f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" TYPE TEXT'
-                                print(f"[SCHEMA WIDEN] {alter_sql}")
-                                conn.execute(text(alter_sql))
-                            # Case 2: Model says String(N) and DB has VARCHAR(M) where M < N → widen
-                            elif isinstance(model_type, String) and model_type.length is not None:
-                                if hasattr(db_type, 'length') and db_type.length is not None:
-                                    if db_type.length < model_type.length:
-                                        alter_sql = f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" TYPE VARCHAR({model_type.length})'
-                                        print(f"[SCHEMA WIDEN] {alter_sql}")
-                                        conn.execute(text(alter_sql))
-                except Exception as widen_err:
-                    print(f"[SCHEMA WIDEN WARNING] Failed to widen columns for '{table_name}': {widen_err}")
+                # Check if any existing VARCHAR columns need widening (PostgreSQL only)
+                if engine.dialect.name != "sqlite":
+                    try:
+                        with engine.begin() as conn:
+                            for col_name in existing_cols & expected_cols:
+                                col_obj = model_cls.__table__.columns.get(col_name)
+                                if col_obj is None:
+                                    continue
+                                model_type = col_obj.type
+                                # Get current column info from inspector
+                                db_col_info = None
+                                for db_col in inspector.get_columns(table_name):
+                                    if db_col["name"] == col_name:
+                                        db_col_info = db_col
+                                        break
+                                if db_col_info is None:
+                                    continue
+                                db_type = db_col_info.get("type")
+                                # Case 1: Model says Text but DB has VARCHAR → widen to TEXT
+                                if isinstance(model_type, Text) and hasattr(db_type, 'length') and db_type.length is not None:
+                                    alter_sql = f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" TYPE TEXT'
+                                    print(f"[SCHEMA WIDEN] {alter_sql}")
+                                    conn.execute(text(alter_sql))
+                                # Case 2: Model says String(N) and DB has VARCHAR(M) where M < N → widen
+                                elif isinstance(model_type, String) and model_type.length is not None:
+                                    if hasattr(db_type, 'length') and db_type.length is not None:
+                                        if db_type.length < model_type.length:
+                                            alter_sql = f'ALTER TABLE "{table_name}" ALTER COLUMN "{col_name}" TYPE VARCHAR({model_type.length})'
+                                            print(f"[SCHEMA WIDEN] {alter_sql}")
+                                            conn.execute(text(alter_sql))
+                    except Exception as widen_err:
+                        print(f"[SCHEMA WIDEN WARNING] Failed to widen columns for '{table_name}': {widen_err}")
 
                 if not migration_success:
                     try:
@@ -716,6 +717,7 @@ def init_db():
                 conn.execute(text("PRAGMA journal_mode=WAL;"))
         except Exception:
             pass
+        reconcile_schemas(eng_sqlite)
         Base.metadata.create_all(bind=eng_sqlite)
         engine_master = eng_sqlite
         engine_slave1 = eng_sqlite

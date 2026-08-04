@@ -5,11 +5,13 @@ echo   Starting AICyberAuditBox with llama.cpp backend
 echo ==================================================
 
 echo.
-echo [1/4] Stopping any existing Ollama or llama-server processes...
+echo [1/5] Stopping any existing Ollama or llama-server processes...
 taskkill /F /IM ollama* /T >nul 2>&1
 taskkill /F /IM llama-server* /T >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11434 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11435 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11436 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
+echo [v] Ports 11434, 11435 and 11436 cleared.
 
 echo.
 set "LLAMA_SERVER_EXE="
@@ -21,23 +23,28 @@ if exist "C:\Users\veeresh988V\Desktop\llama\llama-server.exe" (
     set "LLAMA_SERVER_EXE=%~dp0llama-server.exe"
 )
 
-echo [2/4] Starting llama-server LLM on port 11434...
-start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 8192 -t 4 -b 512 --flash-attn on
+echo [2/5] Starting LLM Instance 1 on port 11434 (4 threads)...
+start "Llama LLM Server 1" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 16384 -t 4 -b 2048 -ub 512 --mlock --flash-attn on
 
 echo.
-echo [3/4] Starting llama-server Embeddings on port 11435...
-start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t 2 --embedding
+echo [3/5] Starting LLM Instance 2 on port 11436 (4 threads)...
+start "Llama LLM Server 2" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11436 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 16384 -t 4 -b 2048 -ub 512 --mlock --flash-attn on
 
 echo.
-echo Waiting 15 seconds for backend servers to initialize...
-timeout /t 15 >nul
+echo [4/5] Starting Embedding Server on port 11435 (2 threads)...
+start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t 2 --mlock --embedding
 
 echo.
-echo [4/4] Setting environment variables and launching Streamlit...
+echo Waiting 20 seconds for all 3 servers to initialize...
+timeout /t 20 >nul
+
+echo.
+echo [5/5] Setting environment variables and launching app...
 set LLM_BACKEND=llama.cpp
+set LLM_HOSTS=11434,11436
 set EMBEDDING_HOST=http://127.0.0.1:11435
-set OMP_NUM_THREADS=4
-set MKL_NUM_THREADS=4
-set OPENBLAS_NUM_THREADS=4
+set OLLAMA_KEEP_ALIVE=24h
+set OLLAMA_NUM_PARALLEL=4
+set OLLAMA_MAX_LOADED_MODELS=3
 
 call run_demo.bat

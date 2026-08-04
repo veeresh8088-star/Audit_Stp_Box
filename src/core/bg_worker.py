@@ -737,10 +737,23 @@ Return format: ["topic1", "topic2", ...]"""
 
     return resolved_list, findings_list, all_results
 
+_audit_semaphore = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_AUDITS", "2")))
+
 def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None):
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)
     _sid = session_id or bg_key
+    acquired_slot = False
     try:
+        if not _audit_semaphore.acquire(timeout=0.1):
+            print(f"[_run_ollama_bg] Task {bg_key} queued waiting for an available CPU slot...", flush=True)
+            with _bg_lock:
+                _bg_store["progress"][bg_key] = {
+                    "text": "⚡ Initializing Audit Engine...",
+                    "percent": 0
+                }
+            _audit_semaphore.acquire()
+        acquired_slot = True
+
         # ── Pre-flight: verify LLM server is reachable (3s timeout) ──────────
         import os as _os
         import requests as _req
@@ -910,6 +923,8 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             _bg_results[bg_key] = {"error": f"Error contacting {BACKEND_NAME}: {str(e)}"}
         _checkpoint_finish(_sid, "failed")
     finally:
+        if acquired_slot:
+            _audit_semaphore.release()
         with _bg_lock:
             _bg_running.discard(bg_key)
             _bg_store["progress"].pop(bg_key, None)
