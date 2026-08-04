@@ -2551,12 +2551,135 @@ function renderFindingsList() {
                     <span class="badge-pill">${displaySev}</span>
                 </div>
             </div>
-            
+
+            ${isVapt ? (() => {
+                // ── VAPT-specific rich fields ──────────────────────────────────
+                // Primary source: direct fields (available during active audit, from in-memory dict)
+                let _target  = String(f.target || f.host || "").trim();
+                let _cves    = Array.isArray(f.cve_list) ? f.cve_list : (f.cves ? f.cves.split(",").map(s=>s.trim()).filter(Boolean) : []);
+                let _cvssVec = String(f.cvss_vector || f.cvss_v3_vector || "").trim();
+                let _pluginId = String(f.plugin_id || "").trim();
+                let _tool     = String(f.source_tool || "").trim();
+                const _scanFile = String(f.source_files || "").trim();
+                const _poc      = String(f.evidence_snippet || f.evidence || "").trim();
+                const _desc     = String(f.description || f.finding || "").trim();
+                const _remed    = String(f.remediation || f.recommendation || "").trim();
+
+                // ── Fallback: parse from structured PoC block ──────────────────
+                // After page refresh, DB returns null for target/cve_list/plugin_id/cvss_vector.
+                // But evidence_snippet IS stored and contains our structured PoC block:
+                //   "Target Host: 13.126.199.93:443/tcp\nPlugin ID: 192805\nCVE(s): CVE-2024-38081\nScanner: Nessus\n..."
+                if (_poc) {
+                    if (!_target) {
+                        const m = _poc.match(/Target Host:\s*(.+)/);
+                        if (m) _target = m[1].trim();
+                    }
+                    if (!_cves.length) {
+                        const m = _poc.match(/CVE\(s\):\s*(.+)/);
+                        if (m) {
+                            _cves = m[1].split(",").map(s => s.trim()).filter(s => s.startsWith("CVE-"));
+                        }
+                    }
+                    if (!_pluginId) {
+                        const m = _poc.match(/Plugin ID:\s*(.+)/);
+                        if (m) _pluginId = m[1].trim();
+                    }
+                    if (!_tool) {
+                        const m = _poc.match(/Scanner:\s*(.+)/);
+                        if (m) _tool = m[1].trim();
+                    }
+                }
+                if (!_tool) _tool = "Scanner";
+
+                // CVE badges with NVD links
+                const cveBadges = _cves.length
+                    ? _cves.map(cve => `<a href="https://nvd.nist.gov/vuln/detail/${cve}" target="_blank"
+                        style="font-size:0.72rem; padding:2px 7px; border-radius:4px;
+                               background:rgba(239,68,68,0.12); color:#f87171;
+                               border:1px solid rgba(239,68,68,0.3); font-weight:700;
+                               text-decoration:none; margin-right:4px;" title="View on NVD">${cve} ↗</a>`).join("")
+                    : `<span style="font-size:0.72rem; color:var(--text-muted);">No CVE assigned</span>`;
+
+                // CVSS vector decoded hint
+                let vectorHint = "";
+                if (_cvssVec) {
+                    const isNetwork  = _cvssVec.includes("AV:N");
+                    const noAuth     = _cvssVec.includes("PR:N");
+                    const noUI       = _cvssVec.includes("UI:N");
+                    const hints = [];
+                    if (isNetwork)  hints.push("🌐 Exploitable Remotely");
+                    if (noAuth)     hints.push("🔓 No Auth Required");
+                    if (noUI)       hints.push("👤 No User Interaction");
+                    vectorHint = hints.length
+                        ? `<span style="font-size:0.72rem;color:#fbbf24;margin-left:8px;">${hints.join(" · ")}</span>`
+                        : "";
+                }
+
+                return `
+                <!-- ── Target Host ── -->
+                <div class="finding-detail-row" style="border-left: 3px solid #f87171; padding-left: 10px; margin-bottom: 10px;">
+                    <label style="color:#f87171;">🎯 Affected Host / Target</label>
+                    <p style="font-family: monospace; font-size: 0.95rem; color: var(--text-primary); font-weight: 700; margin: 2px 0;">
+                        ${_target || "Not specified in scan output"}
+                        ${_pluginId ? `<span style="font-size:0.78rem; color:var(--text-muted); font-weight:400; margin-left:10px;">Plugin: ${_pluginId} · ${_tool}</span>` : ""}
+                    </p>
+                </div>
+
+                <!-- ── CVE References ── -->
+                <div class="finding-detail-row" style="margin-bottom: 10px;">
+                    <label>🔴 CVE References (click to view on NVD)</label>
+                    <div style="margin-top: 4px;">${cveBadges}</div>
+                </div>
+
+                <!-- ── CVSS Vector ── -->
+                ${_cvssVec ? `
+                <div class="finding-detail-row" style="margin-bottom: 10px;">
+                    <label>📊 CVSS Vector</label>
+                    <p style="font-family: monospace; font-size: 0.82rem; color: #a78bfa; margin: 2px 0;">
+                        ${_cvssVec} ${vectorHint}
+                    </p>
+                </div>` : ""}
+
+                <!-- ── Finding Description ── -->
+                <div class="finding-detail-row" style="margin-bottom: 10px;">
+                    <label>Finding Description</label>
+                    <p>${_desc || getCleanFindingDescription(f)}</p>
+                </div>
+
+                <!-- ── Proof of Concept / Plugin Output ── -->
+                ${_poc ? `
+                <div class="finding-detail-row" style="margin-bottom: 10px;">
+                    <label style="color:#34d399;">📋 Proof of Concept (Scanner Plugin Output)</label>
+                    <pre class="finding-snippet" style="white-space: pre-wrap; background: rgba(16,185,129,0.07);
+                         border: 1px solid rgba(16,185,129,0.2); border-radius: 6px;
+                         padding: 10px 12px; font-size: 0.80rem; max-height: 220px;
+                         overflow-y: auto; color: var(--text-primary);">${_poc}</pre>
+                </div>` : ""}
+
+                <!-- ── Remediation ── -->
+                <div class="finding-detail-row" style="margin-bottom: 10px;">
+                    <label>🔧 Lead Auditor Recommendations</label>
+                    <p style="color: #2563eb;">${_remed || "Review and upgrade affected components to currently supported versions."}</p>
+                </div>
+
+                <!-- ── Footer ── -->
+                <div class="finding-actions" style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid rgba(148,163,184,0.15);">
+                    <div style="font-size:0.78rem; color:#2563eb; font-weight:600;">
+                        <span>📁 Scan File: <i style="color:var(--text-muted); font-weight:400;">${_scanFile || "Uploaded scan report"}</i></span>
+                    </div>
+                    <div class="btn-card-group" style="display:flex; gap:8px;">
+                        <button class="btn-secondary" style="color:#10b981;font-weight:700;border-color:rgba(16,185,129,0.4);" onclick="updateFindingWorkflowStatus(${f.id}, 'Accepted')">✓ Accept</button>
+                        <button class="btn-secondary" style="color:#3b82f6;font-weight:700;border-color:rgba(59,130,246,0.4);" onclick='openEditFindingModal(${findingJsonStr})'>✏️ Modify</button>
+                        <button class="btn-danger" style="font-weight:700;" onclick="updateFindingWorkflowStatus(${f.id}, 'Rejected')">✕ Reject</button>
+                    </div>
+                </div>`;
+            })() : `
+            <!-- ── ISO 27001 finding card (unchanged) ── -->
             <div class="finding-detail-row">
                 <label>Finding Description</label>
                 <p>${getCleanFindingDescription(f)}</p>
             </div>
-            
+
             ${showSnippetBox ? `
             <div class="finding-detail-row">
                 <label>Evidence Snippet</label>
@@ -2577,8 +2700,9 @@ function renderFindingsList() {
                     <button class="btn-secondary" style="color: #3b82f6; font-weight: 700; border-color: rgba(59, 130, 246, 0.4);" onclick='openEditFindingModal(${findingJsonStr})'>✏️ Modify</button>
                     <button class="btn-danger" style="font-weight: 700;" onclick="updateFindingWorkflowStatus(${f.id}, 'Rejected')">✕ Reject</button>
                 </div>
-            </div>
+            </div>`}
         `;
+
         container.appendChild(card);
     });
 }

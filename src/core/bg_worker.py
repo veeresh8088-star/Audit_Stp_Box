@@ -553,9 +553,14 @@ Return format: ["topic1", "topic2", ...]"""
         print(f"[{time.strftime('%H:%M:%S')}]   {start_msg}", flush=True)
         log_dev_latency(f"[{idx + 1}/{total}] {start_msg}")
 
-        # Target Document Mapping Integration (excel scope uploader)
+        # ── Strict Scoping: 1 control → 1 specific evidence file ─────────────
+        # When an Excel scope sheet maps a control to a specific evidence file,
+        # ONLY that file (+ shared policy docs) should be audited for that control.
+        # This prevents evidence bleed across controls (e.g. MFA screenshots
+        # appearing as evidence for Clock Sync or Capacity Management).
         control_context = context
         control_file_names = file_names_list
+        target_evidence_files = []   # Track which specific evidence files this control maps to
 
         target_doc_name = None
         docs_source = custom_docs if custom_docs is not None else {}
@@ -563,25 +568,70 @@ Return format: ["topic1", "topic2", ...]"""
             target_doc_name = docs_source[c["control"]]
 
         if target_doc_name:
-            # Robust normalized matching to check if any uploaded filename matches
+            # Normalise filenames for fuzzy matching (strip extension + punctuation)
             def _norm_fn(s):
                 if not s: return ""
                 s_no_ext = os.path.splitext(s)[0]
-                import re
-                return re.sub(r'[^a-z0-9]', '', s_no_ext.lower())
+                import re as _re
+                return _re.sub(r'[^a-z0-9]', '', s_no_ext.lower())
 
+            # ── Step A: Find which uploaded files are mapped to ANY control in Excel.
+            # Unmapped files are shared policy documents that apply to all controls.
+            all_mapped_norms = set()
+            for mapped_v in docs_source.values():
+                all_mapped_norms.add(_norm_fn(mapped_v))
+
+            policy_doc_files = []   # Files not mapped to any control = shared policy docs
+            for fname in file_names_list:
+                norm_fname = _norm_fn(fname)
+                is_any_mapped = any(
+                    norm_fname and nm and (norm_fname in nm or nm in norm_fname)
+                    for nm in all_mapped_norms
+                )
+                if not is_any_mapped:
+                    policy_doc_files.append(fname)
+
+            # ── Step B: Match the specific evidence file for THIS control.
             norm_target = _norm_fn(target_doc_name)
             matched_files = []
             for fname in file_names_list:
                 norm_fname = _norm_fn(fname)
                 if norm_target and norm_fname and (norm_target in norm_fname or norm_fname in norm_target):
                     matched_files.append(fname)
+
+            reg_source = file_registry if file_registry is not None else {}
+
             if matched_files:
-                control_file_names = matched_files
-                reg_source = file_registry if file_registry is not None else {}
+                # PRIMARY context: ONLY the evidence file mapped to this control.
                 matched_texts = [reg_source.get(fname, "") for fname in matched_files if reg_source.get(fname)]
-                if matched_texts:
-                    control_context = "\n\n".join(matched_texts)
+                # SECONDARY context: shared policy documents (not evidence-mapped to any control)
+                # e.g. an ISO policy.docx uploaded alongside evidence screenshots.
+                policy_texts = [reg_source.get(f, "") for f in policy_doc_files if reg_source.get(f)]
+                all_context_parts = matched_texts + policy_texts
+                if all_context_parts:
+                    control_context = "\n\n".join(all_context_parts)
+                # STRICT: RAG searches ONLY the matched evidence file + policy docs.
+                # This guarantees that e.g. NTP screenshots are never searched for MFA controls.
+                control_file_names = matched_files + policy_doc_files
+                target_evidence_files = matched_files   # Used for source_files provenance below
+                print(
+                    f"[SCOPING] Control {c['control']}: "
+                    f"Evidence={matched_files}, Policy docs={policy_doc_files}, "
+                    f"RAG pool={len(control_file_names)} files (strict — no bleed)",
+                    flush=True
+                )
+            else:
+                # Mapped file not found among uploads — fall back to all files.
+                print(
+                    f"[SCOPING WARNING] Control {c['control']}: Target '{target_doc_name}' "
+                    f"not matched among uploads {file_names_list}. "
+                    f"Falling back to full evidence pool.",
+                    flush=True
+                )
+                control_file_names = file_names_list
+                control_context = context
+
+        # If no Excel scoping for this control, use all uploaded files (unchanged).
 
         # Assemble graph inputs mapping exactly to LangGraph AuditState schema
         state_input = {
@@ -619,6 +669,18 @@ Return format: ["topic1", "topic2", ...]"""
             state_output = audit_graph.invoke(state_input)
             result = state_output.get("final_finding")
             if result:
+                # ── Evidence provenance fix ───────────────────────────────────────
+                # Validator sets source_files only when grounding succeeds (quote found).
+                # If validator did not set it (e.g. NOT_GROUNDED), fall back to the
+                # specific evidence file targeted for this control, NOT all 8 files.
+                # This ensures Evidence Source Location always shows 1 accurate file.
+                existing_src = result.get("source_files") or ""
+                if not existing_src.strip():
+                    if target_evidence_files:
+                        result["source_files"] = ", ".join(target_evidence_files)
+                    else:
+                        # No Excel scoping: leave empty — don't dump all filenames
+                        result["source_files"] = ""
                 all_results.append(result)
             ctrl_duration = time.time() - control_start_time
             res_status = result.get("status", "Unknown") if result else "None"
@@ -965,7 +1027,31 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
                 f_dict["control"] = f_dict.get("control") or c_id
                 f_dict["status"] = "Non-Compliant" if f_dict.get("severity") != "INFO" else "Informational"
                 f_dict["display_status"] = "Open"
-                f_dict["source_files"] = fname
+                f_dict["source_files"] = fname   # Scan FILE name, not host IP
+                # ── Build structured evidence snippet (Proof of Concept block) ──
+                # This is what auditors see as "Evidence". It must show:
+                #   Host/IP, Port, CVE, Plugin Output — not just the Nessus plugin description.
+                _target = f_dict.get("target") or ""
+                _cves = f_dict.get("cve_list") or []
+                _cve_str = ", ".join(_cves) if _cves else "No CVE assigned"
+                _plugin_id = f_dict.get("plugin_id") or ""
+                _plugin_out = f_dict.get("evidence") or ""   # Raw Plugin Output from scanner
+                _tool = f_dict.get("source_tool") or "Scanner"
+                # Structured PoC block
+                poc_lines = []
+                if _target:
+                    poc_lines.append(f"Target Host: {_target}")
+                if _plugin_id:
+                    poc_lines.append(f"Plugin ID:   {_plugin_id}")
+                if _cves:
+                    poc_lines.append(f"CVE(s):      {_cve_str}")
+                poc_lines.append(f"Scanner:     {_tool}")
+                if _plugin_out.strip():
+                    poc_lines.append(f"Plugin Output:\n{_plugin_out.strip()[:800]}")
+                else:
+                    poc_lines.append("Plugin Output: Not available in scan report")
+                poc_block = "\n".join(poc_lines)
+                f_dict["evidence_snippet"] = poc_block
                 all_findings.append(f_dict)
                 resolved_ctrls.add(c_id)
 
@@ -989,7 +1075,7 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
                             recommendation=f.get("remediation") or f.get("recommendation", ""),
                             reasoning=f.get("reasoning", ""),
                             status=f.get("status", "Non-Compliant"),
-                            source_files=f.get("target") or f.get("source_files", "")
+                            source_files=f.get("source_files", "")  # Now = scan filename, NOT host IP
                         ))
                     
                     # Update Compliance Score

@@ -92,9 +92,18 @@ class NessusParser(BaseParser):
                 targets = []
                 for h2 in w.find_all(['h2', 'h3']):
                     t_str = h2.get_text().strip()
-                    m_ip = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', t_str)
-                    if m_ip:
-                        targets.append(m_ip.group(1))
+                    # Try to match "IP / PORT / tcp" or "IP:PORT/tcp" (Nessus HTML format)
+                    m_full = re.search(
+                        r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+                        r'\s*[:/]\s*(\d{1,5})\s*[:/]\s*(tcp|udp)',
+                        t_str, re.IGNORECASE
+                    )
+                    if m_full:
+                        targets.append(f"{m_full.group(1)}:{m_full.group(2)}/{m_full.group(3).lower()}")
+                    else:
+                        m_ip = re.search(r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})', t_str)
+                        if m_ip:
+                            targets.append(m_ip.group(1))
 
                 t_host = ", ".join(sorted(list(set(targets)))) if targets else "Scoped Host Targets"
 
@@ -177,18 +186,32 @@ class NessusParser(BaseParser):
                 if m_sol:
                     remed = m_sol.group(1).strip()
 
-                # Extract Plugin Output & Targets
-                evidence = ""
+                # Extract target IP + port + protocol from Plugin Output
                 targets = []
                 m_out = re.search(r'Plugin Output\s*\n\s*(.*?)(?=\n\s*(?:Algorithm|Risk Factor|$))', txt, re.DOTALL)
                 if m_out:
                     evidence = m_out.group(1).strip()[:1500]
-                    # Extract target IP / Host
-                    ip_hits = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', evidence)
-                    if ip_hits:
-                        targets = list(set(ip_hits))
+                    # Try "IP:PORT/tcp" or "IP / PORT / tcp" patterns first
+                    full_hits = re.findall(
+                        r'(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})'
+                        r'[:\s/]+(\d{1,5})\s*[:/]\s*(tcp|udp)',
+                        evidence, re.IGNORECASE
+                    )
+                    if full_hits:
+                        for ip, port, proto in full_hits:
+                            targets.append(f"{ip}:{port}/{proto.lower()}")
+                    else:
+                        # Fallback: extract standalone IPs
+                        ip_hits = re.findall(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', evidence)
+                        if ip_hits:
+                            targets = list(set(ip_hits))
+                        # Also try "port 443/tcp" pattern to append port to IP
+                        if ip_hits:
+                            port_hits = re.findall(r'[Pp]ort\s+(\d{1,5})/(tcp|udp)', evidence)
+                            if port_hits and targets:
+                                targets = [f"{t}:{port_hits[0][0]}/{port_hits[0][1].lower()}" for t in targets]
 
-                target_str = ", ".join(targets) if targets else "Scoped Target Systems"
+                target_str = ", ".join(sorted(set(targets))) if targets else "Scoped Target Systems"
 
                 finding = Finding(
                     title=title,

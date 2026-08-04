@@ -904,7 +904,17 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         else:
             metrics = f"{score_val:.1f} {sev_val}"
 
-        poc_text = html.unescape(str(f.get("evidence") or f.get("evidence_quote") or f.get("evidence_snippet") or f.get("poc") or "Console / Log Audit Verification"))
+        # ── Proof of Concept text: structured PoC block built in bg_worker takes priority ──
+        # evidence_snippet = "Target Host: X.X.X.X\nPlugin ID: ...\nCVE(s): ...\nPlugin Output:\n..."
+        # This is already the rich, structured block we want to show in the report.
+        poc_text = html.unescape(str(
+            f.get("evidence_snippet") or   # Structured PoC block (built in bg_worker)
+            f.get("evidence") or           # Raw plugin output
+            f.get("evidence_quote") or     # LLM evidence quote
+            f.get("poc") or
+            "Console / Log Audit Verification"
+        ))
+
         remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
         remed = html.unescape(remed_raw) if remed_raw and ("no action" not in remed_raw.lower() and remed_raw != "NIL") else "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
         ref = html.unescape(str(f.get("references") or f.get("reference") or "OWASP / OSSTMM / NIST Security Recommendations"))
@@ -958,7 +968,25 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             r.cell("Status / Scanner", style=lbl_style)
             r.cell(clean_text(f"{status_str}  |  Tool: {scanner_name}"), style=body_style)
 
+            # ── CVE References row ──────────────────────────────────────────────
+            raw_cve_list = f.get("cve_list") or []
+            if isinstance(raw_cve_list, str):
+                import re as _re_cve
+                raw_cve_list = _re_cve.findall(r'CVE-\d{4}-\d{4,7}', raw_cve_list, re.IGNORECASE)
+            cve_str = ", ".join(raw_cve_list) if raw_cve_list else "No CVE assigned"
+            r = table.row()
+            r.cell("CVE References", style=lbl_style)
+            r.cell(clean_text(cve_str[:400]), style=body_style)
+
+            # ── Plugin ID row (when available) ─────────────────────────────────
+            plugin_id_val = str(f.get("plugin_id") or "").strip()
+            if plugin_id_val:
+                r = table.row()
+                r.cell("Scanner Plugin ID", style=lbl_style)
+                r.cell(clean_text(plugin_id_val), style=body_style)
+
         pdf.ln(3)
+
 
         # Issue Description Section
         pdf.set_font("Helvetica", "B", 9)
@@ -2227,14 +2255,56 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
 
     # ── EVIDENCE ──────────────────────────────────────────────────────────────
     _add_section_heading("Evidence:")
-    uploaded_files = list({f.get('source_files', '') for f in findings if f.get('source_files')})
-    if uploaded_files:
-        for uf in uploaded_files:
-            for fname in str(uf).split(','):
+    # Collect all evidence filenames from ALL available sources to ensure
+    # no uploaded file is silently excluded from the report header.
+    all_evidence_files = set()
+
+    # Source 1: 'source_files' field in each finding
+    for f in findings:
+        sf = f.get("source_files", "")
+        if sf:
+            for fname in str(sf).split(","):
                 fname = fname.strip()
                 if fname:
-                    p = doc.add_paragraph(style='List Bullet')
-                    p.add_run(fname)
+                    all_evidence_files.add(fname)
+
+    # Source 2: 'file_names' field in each finding (how bg_worker populates it)
+    for f in findings:
+        fn = f.get("file_names", "")
+        if fn:
+            if isinstance(fn, list):
+                for fname in fn:
+                    if fname:
+                        all_evidence_files.add(str(fname).strip())
+            else:
+                for fname in str(fn).split(","):
+                    fname = fname.strip()
+                    if fname:
+                        all_evidence_files.add(fname)
+
+    # Source 3: Query DB directly for ALL evidence files associated with this audit session.
+    # This is the most reliable source — doesn't depend on session_state being populated.
+    try:
+        from src.db.database import SessionLocal as _SL, EvidenceFile as _EF, AuditReport as _AR
+        _db = _SL()
+        try:
+            _report = _db.query(_AR).filter(_AR.session_title == session_title).first()
+            if _report:
+                _ev_files = _db.query(_EF).filter(_EF.report_id == _report.id).all()
+                for ev in _ev_files:
+                    if ev.filename:
+                        all_evidence_files.add(ev.filename.strip())
+        except Exception:
+            pass
+        finally:
+            _db.close()
+    except Exception:
+        pass
+
+    if all_evidence_files:
+        for fname in sorted(all_evidence_files):
+            p = doc.add_paragraph(style='List Bullet')
+            p.add_run(fname)
     else:
         doc.add_paragraph("No evidence files recorded.").italic = True
 

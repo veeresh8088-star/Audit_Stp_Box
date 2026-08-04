@@ -400,7 +400,17 @@ def api_start_audit(req: StartAuditRequest):
 
                 if chunk_contents:
                     text = " ".join(chunk_contents)
-                    print(f"[api_start_audit] Using {len(chunk_contents)} cached chunks for '{filename}' (skipping OCR)", flush=True)
+                    # If cached chunks produce very little text (< 200 chars),
+                    # they are likely stale from a first run that got empty paragraphs
+                    # (image-only docx). Re-run fresh OCR extraction in that case.
+                    if len(text.strip()) < 200:
+                        print(f"[api_start_audit] Cached chunks for '{filename}' are too short ({len(text.strip())} chars) — likely stale image-only file. Re-running OCR extraction.", flush=True)
+                        f_like = io.BytesIO(file_bytes)
+                        f_like.name = filename
+                        text = extract_text(f_like)
+                        print(f"[api_start_audit] Fresh OCR extraction for '{filename}' returned {len(text)} chars", flush=True)
+                    else:
+                        print(f"[api_start_audit] Using {len(chunk_contents)} cached chunks for '{filename}' ({len(text)} chars)", flush=True)
                 else:
                     f_like = io.BytesIO(file_bytes)
                     f_like.name = filename

@@ -547,7 +547,6 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
                 if norm_evidence in norm_chunk:
                     grounded_state = "GROUNDED"
                     matched_chunk_id = chunk.id
-                    found_in_chunk = True
                     # Extract source details from metadata_json if present (to map to specific files inside a ZIP)
                     if chunk.metadata_json:
                         try:
@@ -653,6 +652,77 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
                         best_ratio = ratio
                 if best_ratio >= 0.85:
                     grounded_state = "GROUNDED_WITH_OCR_WARNING"
+                    break
+
+    # ════════════════════════════════════════
+    # GATE 3.5: Image Key-Term Overlap Grounding
+    # ════════════════════════════════════════
+    # Problem: OCR text from images is noisy (e.g. "enablad" instead of "enabled").
+    # The LLM reads it and generates a cleaned paraphrase quote. Gates 2 and 3 both
+    # fail because the quote doesn't match verbatim or via 85% sliding-window.
+    # Fix: For image-sourced chunks only, check if ≥60% of meaningful domain words
+    # from the LLM's quote appear ANYWHERE in the OCR chunk text.
+    # e.g. LLM says "NTP enabled synchronized to time.google.com"
+    #      OCR text: "NTP enablad synchronizd timegoogl.com"
+    # Key terms: [ntp, enabled, synchronized, time, google, com] → 5/6 = 83% → GROUNDED
+    if grounded_state == "NOT_GROUNDED" and db_chunks:
+        import re as _re_g35
+        _STOPWORDS_G35 = {
+            "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+            "of", "with", "is", "are", "was", "were", "be", "been", "being",
+            "has", "have", "had", "do", "does", "did", "will", "would", "could",
+            "should", "may", "might", "shall", "can", "not", "no", "yes", "it",
+            "its", "this", "that", "these", "those", "from", "as", "by", "into",
+            "which", "who", "what", "when", "where", "how", "all", "any", "both"
+        }
+        # Extract meaningful words (≥3 chars, not stopwords) from the LLM's evidence quote
+        quote_key_terms = [
+            w for w in _re_g35.findall(r'\b[a-z0-9]{3,}\b', evidence_clean_lower)
+            if w not in _STOPWORDS_G35
+        ]
+        if len(quote_key_terms) >= 3:
+            for chunk in db_chunks:
+                # Only apply to image / OCR source chunks
+                chunk_source_type = ""
+                if chunk.metadata_json:
+                    try:
+                        import json as _json_g35
+                        _meta_g35 = _json_g35.loads(chunk.metadata_json)
+                        chunk_source_type = _meta_g35.get("source_type", "")
+                    except Exception:
+                        pass
+                chunk_fname = (chunk.filename or "").lower()
+                is_image_chunk = (
+                    chunk_source_type == "image"
+                    or chunk_fname.endswith((".png", ".jpg", ".jpeg", ".gif", ".tiff", ".bmp"))
+                    or "[embedded image ocr" in chunk.content.lower()
+                )
+                if not is_image_chunk:
+                    continue  # Gate 3.5 applies only to image/OCR chunks
+
+                chunk_text_lower = chunk.content.lower()
+                matched_terms = sum(1 for t in quote_key_terms if t in chunk_text_lower)
+                overlap = matched_terms / len(quote_key_terms)
+                if overlap >= 0.60:
+                    grounded_state = "GROUNDED_WITH_OCR_WARNING"
+                    matched_chunk_id = chunk.id
+                    print(
+                        f"[VALIDATOR] Gate 3.5 (Image Key-Term) PASS for {control_id}: "
+                        f"{matched_terms}/{len(quote_key_terms)} terms ({overlap:.0%}) "
+                        f"in '{chunk.filename}'",
+                        flush=True
+                    )
+                    if chunk.metadata_json:
+                        try:
+                            import json as _json_g35b
+                            _meta_g35b = _json_g35b.loads(chunk.metadata_json)
+                            if "source_file" in _meta_g35b:
+                                finding["evidence_source_file"] = _meta_g35b["source_file"]
+                                finding["source_files"] = _meta_g35b["source_file"]
+                            if "source_type" in _meta_g35b:
+                                finding["evidence_source_type"] = _meta_g35b["source_type"]
+                        except Exception:
+                            pass
                     break
 
     finding["chunk_id"] = matched_chunk_id
@@ -833,34 +903,65 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
     # Applies to ALL controls, not just technical ones.
     reasoning_lower = str(finding.get("reasoning") or "").lower()
     quote = str(finding.get("evidence_quote") or "").strip()
+    description_lower = str(finding.get("description") or "").lower()
     status_curr = str(finding.get("status") or "").strip().upper()
 
     if status_curr == "NON_COMPLIANT" and quote and quote.upper() != "NOT_FOUND":
-        # Check if the quote is actually stating that NO evidence was found or is explaining an absence
+        # Check if the quote is actually stating that NO evidence was found or is explaining an absence.
+        # Use broad regex-style matching to catch all "no X evidence" / "no X policy" phrasing.
         quote_lower = quote.lower()
-        is_negative_quote = any(neg in quote_lower for neg in [
+        import re as _re
+        _neg_exact = [
             "no evidence", "not found", "no mention", "not documented", "not provided",
-            "no evidence whatsoever", "focuses entirely on", "exclusively details"
-        ])
+            "no evidence whatsoever", "focuses entirely on", "exclusively details",
+            "no formal", "no explicit", "no clear", "no direct", "no specific",
+            "not available", "not present", "not observed", "not located",
+            "no information", "no detail", "no record", "no policy",
+            "could not", "unable to", "failed to", "does not contain",
+            "does not include", "does not address", "does not cover",
+            "does not mention", "does not document",
+            "not met", "requirement is not met", "control requirement is not met",
+            "no overarching", "was not established", "was not found",
+            "no approved", "not complied", "non-compliant"
+        ]
+        is_negative_quote = any(neg in quote_lower for neg in _neg_exact)
+        # Also check: if the observation/description text says evidence is absent,
+        # Rule 8 must NOT override to COMPLIANT (prevents self-contradiction in the report).
+        _neg_description = [
+            "no documentary evidence", "no formal policy", "no evidence was found",
+            "no explicit", "not documented", "not found", "not provided",
+            "not available", "no clear", "no direct", "could not locate",
+            "does not address", "does not contain", "not observed",
+            "not met", "requirement is not met", "control requirement is not met",
+            "no overarching", "was not established", "was not found",
+            "no approved", "not complied", "was not found"
+        ]
+        is_negative_description = any(neg in description_lower for neg in _neg_description)
 
-        # Evidence exists in the quote — check if the reasoning acknowledges it was found
-        evidence_acknowledged = any(kw in reasoning_lower for kw in [
-            "evidence was found", "demonstrating", "mfa", "pam", "multi-factor",
-            "privileged access", "db_backup", "backup", "implementation", "screenshot",
-            "cloudwatch", "ntp", "clock sync", "log archive", "policy", "approved",
-            "documented", "procedure", "control", "ciso", "information security",
-            "access control", "authentication", "isms", "records", "retention"
-        ])
-
-        if not is_negative_quote and (evidence_acknowledged or len(quote) >= 15):
+        if is_negative_quote or is_negative_description:
+            # Quote or observation explicitly states absence of evidence — do NOT upgrade.
             cid = finding.get("control_id") or ""
-            print(f"[RULE 8 GUARDRAIL] Control {cid}: Evidence present in any form (quote: '{quote[:40]}...'). Upgrading from NON_COMPLIANT to COMPLIANT under Workspace Audit Rule 8.", flush=True)
-            finding["status"] = "COMPLIANT"
-            finding["policy_present"] = "Compliant"
-            finding["evidence_present"] = "Compliant"
-            finding["severity"] = "N/A"
-            finding["recommendation"] = "No action required. Evidence satisfies the control objective. Continue periodic evidence review."
-            finding["review_note"] = "Rule 8 Applied: Evidence in any form (document/screenshot/log) satisfied control objective."
+            print(f"[RULE 8 SKIP] Control {cid}: Quote or description explicitly states evidence is absent. "
+                  f"Keeping NON_COMPLIANT to prevent self-contradiction.", flush=True)
+        else:
+            # Evidence exists in the quote — check if the reasoning acknowledges it was found
+            evidence_acknowledged = any(kw in reasoning_lower for kw in [
+                "evidence was found", "demonstrating", "mfa", "pam", "multi-factor",
+                "privileged access", "db_backup", "backup", "implementation", "screenshot",
+                "cloudwatch", "ntp", "clock sync", "log archive", "policy", "approved",
+                "documented", "procedure", "control", "ciso", "information security",
+                "access control", "authentication", "isms", "records", "retention"
+            ])
+
+            if evidence_acknowledged or len(quote) >= 15:
+                cid = finding.get("control_id") or ""
+                print(f"[RULE 8 GUARDRAIL] Control {cid}: Evidence present in any form (quote: '{quote[:40]}...'). Upgrading from NON_COMPLIANT to COMPLIANT under Workspace Audit Rule 8.", flush=True)
+                finding["status"] = "COMPLIANT"
+                finding["policy_present"] = "Compliant"
+                finding["evidence_present"] = "Compliant"
+                finding["severity"] = "N/A"
+                finding["recommendation"] = "No action required. Evidence satisfies the control objective. Continue periodic evidence review."
+                finding["review_note"] = "Rule 8 Applied: Evidence in any form (document/screenshot/log) satisfied control objective."
 
     # ── POLICY VS EVIDENCE COMBINATION MATRIX RULE ───────────────────────
     # Both Policy AND Evidence must be Compliant/YES for overall COMPLIANT.
