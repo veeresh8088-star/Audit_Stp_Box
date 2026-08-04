@@ -2020,13 +2020,239 @@ window.closeUnreviewedWarningModal = closeUnreviewedWarningModal;
 window.forceCommitSessionToShaktiDB = forceCommitSessionToShaktiDB;
 
 
-async function loadAdminAuditLogs() {
-    const modalEl = document.getElementById("admin-log-modal");
-    const tbody = document.getElementById("admin-log-table-body");
-    if (!modalEl || !tbody) return;
+function ensureAdminModalDOM() {
+    let modalEl = document.getElementById("admin-log-modal");
+    if (modalEl) return modalEl;
 
+    modalEl = document.createElement("div");
+    modalEl.id = "admin-log-modal";
+    modalEl.style.cssText = "display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(15,23,42,0.8); z-index:9999; justify-content:center; align-items:center; backdrop-filter:blur(4px);";
+
+    modalEl.innerHTML = `
+        <div style="background: var(--bg-card, #1e293b); width: 92%; max-width: 1200px; max-height: 90vh; border-radius: 14px; border: 1px solid rgba(148,163,184,0.2); box-shadow: 0 20px 40px rgba(0,0,0,0.4); display: flex; flex-direction: column; overflow: hidden; color: var(--text-primary, #f8fafc);">
+            <!-- Modal Header -->
+            <div style="padding: 16px 22px; background: rgba(15,23,42,0.6); border-bottom: 1px solid rgba(148,163,184,0.15); display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h3 style="margin: 0; font-size: 1.15rem; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                        <span>🛡️ Administrative Audit Logs & Telemetry Dashboard</span>
+                    </h3>
+                    <p style="margin: 3px 0 0 0; font-size: 0.78rem; color: #94a3b8;">Real Auditor Telemetry, Hardware Specs, Token Benchmark & Multi-Session Aggregator</p>
+                </div>
+                <button onclick="closeAdminLogModal()" style="background: transparent; border: none; color: #94a3b8; font-size: 1.4rem; cursor: pointer; padding: 4px 8px; border-radius: 6px;" title="Close Modal">✕</button>
+            </div>
+
+            <!-- Tab Navigation Bar -->
+            <div style="padding: 10px 22px; background: rgba(15,23,42,0.3); border-bottom: 1px solid rgba(148,163,184,0.15); display: flex; gap: 12px; align-items: center;">
+                <button id="tab-btn-benchmark" onclick="switchAdminTab('benchmark')" style="padding: 7px 16px; font-size: 0.8rem; font-weight: 700; border-radius: 7px; border: 1px solid rgba(99,102,241,0.4); background: rgba(99,102,241,0.25); color: #818cf8; cursor: pointer;">
+                    📊 Auditor Sessions & Hardware Telemetry
+                </button>
+                <button id="tab-btn-overrides" onclick="switchAdminTab('overrides')" style="padding: 7px 16px; font-size: 0.8rem; font-weight: 700; border-radius: 7px; border: 1px solid rgba(148,163,184,0.2); background: transparent; color: #94a3b8; cursor: pointer;">
+                    ⚠️ Admin Overrides & Security Log
+                </button>
+            </div>
+
+            <!-- Modal Content Area -->
+            <div style="padding: 20px; overflow-y: auto; flex: 1;">
+                <!-- TAB 1: AUDITOR BENCHMARK & MULTI-SESSION AGGREGATOR -->
+                <div id="admin-tab-benchmark" style="display: block;">
+                    <!-- Action Bar -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; background: rgba(15,23,42,0.4); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(148,163,184,0.15);">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <button class="btn-primary" onclick="aggregateSelectedAuditSessions()" style="padding: 7px 14px; font-size: 0.78rem; font-weight: 700; background: linear-gradient(135deg, #6366f1, #4f46e5); display: flex; align-items: center; gap: 6px;">
+                                <span>⚡ Combine Selected Sessions</span>
+                            </button>
+                            <span id="selected-sessions-count-badge" style="font-size: 0.76rem; color: #94a3b8;">0 sessions selected</span>
+                        </div>
+                        <button class="btn-secondary" onclick="exportAdminBenchmarkExcel()" style="padding: 7px 14px; font-size: 0.78rem; font-weight: 700; color: #10b981; border-color: rgba(16,185,129,0.4); display: flex; align-items: center; gap: 6px;">
+                            <span>📥 Download Executive Excel Report</span>
+                        </button>
+                    </div>
+
+                    <!-- Aggregated Multi-Session Summary Container (Hidden until user clicks Combine) -->
+                    <div id="aggregated-summary-box" style="display: none; margin-bottom: 16px; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; padding: 14px 18px;">
+                        <!-- Content populated dynamically by aggregateSelectedAuditSessions() -->
+                    </div>
+
+                    <!-- Benchmark Table -->
+                    <div style="overflow-x: auto; border: 1px solid rgba(148,163,184,0.15); border-radius: 8px;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.78rem;">
+                            <thead>
+                                <tr style="background: rgba(15,23,42,0.6); color: #94a3b8; font-weight: 700; border-bottom: 1px solid rgba(148,163,184,0.2);">
+                                    <th style="padding: 10px; width: 36px; text-align: center;">
+                                        <input type="checkbox" id="select-all-benchmark-chk" onchange="toggleSelectAllBenchmarkSessions(this.checked)" style="cursor: pointer;">
+                                    </th>
+                                    <th style="padding: 10px;">Session ID / Timestamp</th>
+                                    <th style="padding: 10px;">CPU Hardware</th>
+                                    <th style="padding: 10px;">Files & Types</th>
+                                    <th style="padding: 10px;">File Size</th>
+                                    <th style="padding: 10px;">Text Chars</th>
+                                    <th style="padding: 10px;">Tokens Used</th>
+                                    <th style="padding: 10px;">Audit Latency</th>
+                                    <th style="padding: 10px;">Compliance %</th>
+                                    <th style="padding: 10px; text-align: center;">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="benchmark-table-body">
+                                <tr><td colspan="10" style="text-align:center; padding:16px; color:#94a3b8;">Loading audit session telemetry...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- TAB 2: ADMIN OVERRIDES & SECURITY LOG -->
+                <div id="admin-tab-overrides" style="display: none;">
+                    <div style="overflow-x: auto; border: 1px solid rgba(148,163,184,0.15); border-radius: 8px;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.78rem;">
+                            <thead>
+                                <tr style="background: rgba(15,23,42,0.6); color: #94a3b8; font-weight: 700; border-bottom: 1px solid rgba(148,163,184,0.2);">
+                                    <th style="padding: 10px;">Timestamp</th>
+                                    <th style="padding: 10px;">Auditor User</th>
+                                    <th style="padding: 10px;">Action</th>
+                                    <th style="padding: 10px;">Unreviewed Controls</th>
+                                    <th style="padding: 10px;">Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-log-table-body">
+                                <tr><td colspan="5" style="text-align:center; padding:16px; color:#94a3b8;">Loading Admin Audit Log trail...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modalEl);
+    return modalEl;
+}
+
+window.switchAdminTab = function(tabName) {
+    const tabBench = document.getElementById("admin-tab-benchmark");
+    const tabOver = document.getElementById("admin-tab-overrides");
+    const btnBench = document.getElementById("tab-btn-benchmark");
+    const btnOver = document.getElementById("tab-btn-overrides");
+
+    if (tabName === "benchmark") {
+        if (tabBench) tabBench.style.display = "block";
+        if (tabOver) tabOver.style.display = "none";
+        if (btnBench) {
+            btnBench.style.background = "rgba(99,102,241,0.25)";
+            btnBench.style.color = "#818cf8";
+            btnBench.style.borderColor = "rgba(99,102,241,0.4)";
+        }
+        if (btnOver) {
+            btnOver.style.background = "transparent";
+            btnOver.style.color = "#94a3b8";
+            btnOver.style.borderColor = "rgba(148,163,184,0.2)";
+        }
+    } else {
+        if (tabBench) tabBench.style.display = "none";
+        if (tabOver) tabOver.style.display = "block";
+        if (btnOver) {
+            btnOver.style.background = "rgba(99,102,241,0.25)";
+            btnOver.style.color = "#818cf8";
+            btnOver.style.borderColor = "rgba(99,102,241,0.4)";
+        }
+        if (btnBench) {
+            btnBench.style.background = "transparent";
+            btnBench.style.color = "#94a3b8";
+            btnBench.style.borderColor = "rgba(148,163,184,0.2)";
+        }
+    }
+};
+
+window.allBenchmarkSessionsCache = [];
+
+async function loadAdminAuditLogs() {
+    const modalEl = ensureAdminModalDOM();
     modalEl.style.display = "flex";
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:#94a3b8;">Loading Admin Audit Log trail...</td></tr>`;
+
+    // Load Tab 1: Telemetry Sessions
+    loadBenchmarkSessionsData();
+
+    // Load Tab 2: Overrides
+    loadAdminOverridesData();
+}
+
+async function loadBenchmarkSessionsData() {
+    const tbody = document.getElementById("benchmark-table-body");
+    if (!tbody) return;
+
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:16px; color:#94a3b8;">Loading audit session telemetry...</td></tr>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/audit/benchmark/sessions`);
+        const data = await response.json();
+        if (data.success && data.sessions && data.sessions.length > 0) {
+            window.allBenchmarkSessionsCache = data.sessions;
+            tbody.innerHTML = data.sessions.map((s, idx) => {
+                const sid = s.session_id || `SESS-${idx}`;
+                const sidShort = sid.length > 12 ? sid.slice(0, 12) + "..." : sid;
+                const ts = s.timestamp || "N/A";
+                const cpu = s.cpu_cores ? `${s.cpu_cores} Cores` : "4 Cores";
+                const filesCnt = s.files_count || 0;
+                const fileMb = s.file_size_mb ? `${s.file_size_mb} MB` : `${s.file_size_kb || 0} KB`;
+                const chars = s.extracted_text_chars ? Number(s.extracted_text_chars).toLocaleString() : "0";
+                const tokens = s.total_tokens ? Number(s.total_tokens).toLocaleString() : "0";
+                
+                // Latency format
+                const latSec = floatVal(s.total_latency_seconds);
+                const latMins = Math.floor(latSec / 60);
+                const latRemSec = Math.round(latSec % 60);
+                const latStr = latMins > 0 ? `${latMins}m ${latRemSec}s` : `${latSec.toFixed(1)}s`;
+
+                // Compliance %
+                const compCnt = intVal(s.compliant_count);
+                const nonCompCnt = intVal(s.non_compliant_count);
+                const totalCtrls = compCnt + nonCompCnt;
+                const compPct = totalCtrls > 0 ? Math.round((compCnt / totalCtrls) * 100) : 0;
+                let compBadgeStyle = "background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3);";
+                if (compPct < 50) compBadgeStyle = "background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3);";
+                else if (compPct < 80) compBadgeStyle = "background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3);";
+
+                // File types badges
+                const fts = s.file_types_summary || {};
+                const ftsPills = Object.keys(fts).length
+                    ? Object.entries(fts).map(([ext, cnt]) => `<span style="font-size:0.68rem; padding:1px 5px; border-radius:3px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); margin-right:3px;">${ext.toUpperCase()}:${cnt}</span>`).join("")
+                    : `<span style="color:#94a3b8;">${filesCnt} files</span>`;
+
+                return `
+                    <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.15);">
+                        <td style="padding: 10px; text-align: center;">
+                            <input type="checkbox" class="benchmark-session-chk" value="${escapeHtml(sid)}" onchange="updateSelectedBenchmarkSessionsCount()" style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 10px;">
+                            <div style="font-family: monospace; font-weight: 700; color: #f8fafc;" title="${escapeHtml(sid)}">${escapeHtml(sidShort)}</div>
+                            <div style="font-size: 0.72rem; color: #94a3b8;">${escapeHtml(ts)}</div>
+                        </td>
+                        <td style="padding: 10px;">
+                            <span style="font-size: 0.72rem; padding: 2px 7px; border-radius: 4px; background: rgba(59,130,246,0.15); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); font-weight: 600;">💻 ${cpu}</span>
+                        </td>
+                        <td style="padding: 10px;">${ftsPills}</td>
+                        <td style="padding: 10px; font-weight: 600; color: #cbd5e1;">${fileMb}</td>
+                        <td style="padding: 10px; font-family: monospace; color: #cbd5e1;">${chars}</td>
+                        <td style="padding: 10px; font-family: monospace; font-weight: 700; color: #818cf8;">${tokens}</td>
+                        <td style="padding: 10px; font-weight: 700; color: #fbbf24;">${latStr}</td>
+                        <td style="padding: 10px;">
+                            <span style="font-size: 0.72rem; padding: 2px 7px; border-radius: 4px; ${compBadgeStyle} font-weight: 700;">${compPct}% (${compCnt}/${totalCtrls || s.controls_audited_count})</span>
+                        </td>
+                        <td style="padding: 10px; text-align: center;">
+                            <button onclick="exportAdminBenchmarkExcel()" style="padding: 4px 8px; font-size: 0.72rem; background: transparent; border: 1px solid rgba(16,185,129,0.4); color: #34d399; border-radius: 5px; cursor: pointer;" title="Download Excel Benchmark Report">📥 Report</button>
+                        </td>
+                    </tr>
+                `;
+            }).join("");
+        } else {
+            tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:16px; color:#94a3b8;">No real auditor session benchmarks recorded yet. Run an audit to log telemetry.</td></tr>`;
+        }
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:16px; color:#ef4444;">Failed to load benchmark telemetry: ${err.message}</td></tr>`;
+    }
+}
+
+async function loadAdminOverridesData() {
+    const tbody = document.getElementById("admin-log-table-body");
+    if (!tbody) return;
 
     try {
         const response = await fetch(`${API_BASE}/audit/admin-logs`);
@@ -2045,14 +2271,124 @@ async function loadAdminAuditLogs() {
             tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:#94a3b8;">No administrative overrides recorded yet.</td></tr>`;
         }
     } catch (err) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:#ef4444;">Failed to load logs: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:#ef4444;">Failed to load overrides log: ${err.message}</td></tr>`;
     }
+}
+
+window.toggleSelectAllBenchmarkSessions = function(checked) {
+    const chks = document.querySelectorAll(".benchmark-session-chk");
+    chks.forEach(c => c.checked = checked);
+    updateSelectedBenchmarkSessionsCount();
+};
+
+window.updateSelectedBenchmarkSessionsCount = function() {
+    const checkedChks = document.querySelectorAll(".benchmark-session-chk:checked");
+    const badge = document.getElementById("selected-sessions-count-badge");
+    if (badge) {
+        badge.innerText = `${checkedChks.length} session(s) selected`;
+    }
+};
+
+window.aggregateSelectedAuditSessions = async function() {
+    const checkedChks = document.querySelectorAll(".benchmark-session-chk:checked");
+    const sids = Array.from(checkedChks).map(c => c.value);
+
+    const summaryBox = document.getElementById("aggregated-summary-box");
+    if (!summaryBox) return;
+
+    summaryBox.style.display = "block";
+    summaryBox.innerHTML = `<div style="text-align:center; color:#818cf8; font-weight:600; padding:10px;">⚡ Combining and aggregating benchmark metrics across ${sids.length || 'all'} auditor sessions...</div>`;
+
+    try {
+        const response = await fetch(`${API_BASE}/audit/benchmark/aggregate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_ids: sids.length ? sids : null })
+        });
+        const data = await response.json();
+        if (data.success && data.aggregated && data.aggregated.selected_sessions_count > 0) {
+            const agg = data.aggregated;
+            const cnt = agg.selected_sessions_count;
+            const latStr = agg.combined_latency_formatted;
+            const tokStr = Number(agg.combined_total_tokens).toLocaleString();
+            const promptToks = Number(agg.combined_prompt_tokens).toLocaleString();
+            const compToks = Number(agg.combined_completion_tokens).toLocaleString();
+            const filesCnt = agg.combined_files_count;
+            const fileMb = agg.combined_file_size_mb;
+            const chars = Number(agg.combined_extracted_text_chars).toLocaleString();
+            const scorePct = agg.overall_compliance_score_pct;
+            const cpu = agg.cpu_cores;
+
+            const fts = agg.file_types_summary || {};
+            const ftsStr = Object.keys(fts).length ? Object.entries(fts).map(([ext, c]) => `${ext.toUpperCase()}: ${c}`).join(" · ") : "N/A";
+
+            summaryBox.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid rgba(99,102,241,0.25); padding-bottom: 10px; margin-bottom: 12px;">
+                    <h4 style="margin:0; color:#818cf8; font-size:1.0rem; font-weight:700;">
+                        🏆 AGGREGATED MULTI-AUDITOR BENCHMARK SUMMARY (${cnt} AUDITOR RUNS COMBINED)
+                    </h4>
+                    <button onclick="document.getElementById('aggregated-summary-box').style.display='none'" style="background:transparent; border:none; color:#94a3b8; cursor:pointer;">✕ Close Summary</button>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 14px;">
+                    <div style="background: rgba(15,23,42,0.5); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(99,102,241,0.2);">
+                        <div style="font-size: 0.72rem; color: #94a3b8;">Total Combined Latency</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #fbbf24;">${latStr}</div>
+                        <div style="font-size: 0.68rem; color: #64748b;">${agg.combined_latency_seconds} seconds</div>
+                    </div>
+                    <div style="background: rgba(15,23,42,0.5); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(99,102,241,0.2);">
+                        <div style="font-size: 0.72rem; color: #94a3b8;">Total Combined Tokens</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #818cf8;">${tokStr}</div>
+                        <div style="font-size: 0.68rem; color: #64748b;">Prompt: ${promptToks} · Output: ${compToks}</div>
+                    </div>
+                    <div style="background: rgba(15,23,42,0.5); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(99,102,241,0.2);">
+                        <div style="font-size: 0.72rem; color: #94a3b8;">Combined Evidence Files</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #34d399;">${filesCnt} Files (${fileMb} MB)</div>
+                        <div style="font-size: 0.68rem; color: #64748b;">${ftsStr}</div>
+                    </div>
+                    <div style="background: rgba(15,23,42,0.5); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(99,102,241,0.2);">
+                        <div style="font-size: 0.72rem; color: #94a3b8;">Overall Compliance Rate</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: ${scorePct >= 80 ? '#34d399' : (scorePct >= 50 ? '#fbbf24' : '#f87171')};">${scorePct}%</div>
+                        <div style="font-size: 0.68rem; color: #64748b;">Compliant: ${agg.combined_compliant_count} · Gaps: ${agg.combined_non_compliant_count}</div>
+                    </div>
+                    <div style="background: rgba(15,23,42,0.5); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(99,102,241,0.2);">
+                        <div style="font-size: 0.72rem; color: #94a3b8;">System Hardware</div>
+                        <div style="font-size: 1.1rem; font-weight: 700; color: #60a5fa;">${cpu} CPU Cores</div>
+                        <div style="font-size: 0.68rem; color: #64748b;">Total Extracted Text: ${chars} Chars</div>
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <button class="btn-secondary" onclick="exportAdminBenchmarkExcel()" style="padding: 6px 14px; font-size: 0.75rem; font-weight: 700; color: #10b981; border-color: rgba(16,185,129,0.4);">
+                        📥 Export Combined Executive Excel Report (.xlsx)
+                    </button>
+                </div>
+            `;
+        } else {
+            summaryBox.innerHTML = `<div style="text-align:center; color:#f87171; padding:10px;">No benchmark records found for the selected session IDs.</div>`;
+        }
+    } catch (err) {
+        summaryBox.innerHTML = `<div style="text-align:center; color:#ef4444; padding:10px;">Failed to aggregate sessions: ${err.message}</div>`;
+    }
+};
+
+window.exportAdminBenchmarkExcel = function() {
+    window.location.href = `${API_BASE}/audit/benchmark/export`;
+};
+
+function floatVal(val) {
+    const num = parseFloat(val);
+    return isNaN(num) ? 0.0 : num;
+}
+
+function intVal(val) {
+    const num = parseInt(val, 10);
+    return isNaN(num) ? 0 : num;
 }
 
 function closeAdminLogModal() {
     const modalEl = document.getElementById("admin-log-modal");
     if (modalEl) modalEl.style.display = "none";
 }
+
 
 function updateBrandingSummary() {
     const firm = document.getElementById("brand-firm")?.value || "XYZ Security Services Pvt. Ltd.";

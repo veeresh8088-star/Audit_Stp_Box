@@ -728,12 +728,40 @@ Return format: ["topic1", "topic2", ...]"""
         from src.core.token_tracker import record_token_metrics
         text_chars = len(str(context or ""))
         total_file_bytes = 0
+        file_details = []
+        file_types_summary = {}
+
         if file_registry:
             for fname, fmeta in file_registry.items():
+                sz = 0
+                txt_c = 0
                 if isinstance(fmeta, dict):
-                    total_file_bytes += fmeta.get("size_bytes", 0)
+                    sz = fmeta.get("size_bytes", 0)
+                    txt_c = len(fmeta.get("text", ""))
+                elif isinstance(fmeta, str):
+                    txt_c = len(fmeta)
+                    sz = max(512, txt_c * 2)
+
+                total_file_bytes += sz
+                ext = os.path.splitext(str(fname))[1].lower().replace('.', '') or 'doc'
+                file_types_summary[ext] = file_types_summary.get(ext, 0) + 1
+                file_details.append({
+                    "name": fname,
+                    "ext": ext,
+                    "size_bytes": sz,
+                    "size_kb": round(sz / 1024, 1),
+                    "char_count": txt_c
+                })
+
+        if not file_types_summary and file_names_list:
+            for fn in file_names_list:
+                ext = os.path.splitext(str(fn))[1].lower().replace('.', '') or 'doc'
+                file_types_summary[ext] = file_types_summary.get(ext, 0) + 1
+
         if total_file_bytes == 0:
             total_file_bytes = max(1024, text_chars * 2)
+
+        cpu_cores_cnt = os.cpu_count() or 4
 
         prompt_toks = int(text_chars / 3.8) + (total * 800)
         comp_toks = total * 175
@@ -766,7 +794,10 @@ Return format: ["topic1", "topic2", ...]"""
             compliant_count=len(resolved_list),
             non_compliant_count=len(findings_list),
             out_of_scope_count=len(out_of_scope_results) if 'out_of_scope_results' in locals() else 0,
-            folder_name="Audit Evidence Package"
+            folder_name="Audit Evidence Package",
+            cpu_cores=cpu_cores_cnt,
+            file_details=file_details,
+            file_types_summary=file_types_summary
         )
 
         total_files_cnt = len(file_names_list) if file_names_list else 0
@@ -776,12 +807,16 @@ Return format: ["topic1", "topic2", ...]"""
         if total_text_chunks == 0:
             total_text_chunks = max(1, int(text_chars / 500))
 
+        file_types_str = ", ".join([f"{ext.upper()}: {cnt}" for ext, cnt in file_types_summary.items()]) if file_types_summary else "N/A"
+
         print("\n" + "="*85, flush=True)
         print(f"🏆 AUDIT EXECUTION COMPLETE — FINAL TOKEN & LATENCY BENCHMARK METRICS", flush=True)
         print("="*85, flush=True)
         print(f" • Session ID                  : {checkpoint_session_id or bg_key or 'SESSION-LATEST'}", flush=True)
         print(f" • Scoping Detection Mode      : {scoping_label}", flush=True)
+        print(f" • System CPU Hardware Specs   : {cpu_cores_cnt} Logical CPU Cores", flush=True)
         print(f" • Total Evidence Files Count  : {total_files_cnt} Files", flush=True)
+        print(f" • File Extensions Breakdown   : {file_types_str}", flush=True)
         print(f" • Total Evidence File Size    : {file_size_mb} MB ({file_size_kb:,} KB)", flush=True)
         print(f" • Total Text Chunks Analyzed  : {total_text_chunks} Chunks ({text_chars:,} Chars)", flush=True)
         print(f" • Total Controls Evaluated    : {total}", flush=True)
@@ -794,6 +829,7 @@ Return format: ["topic1", "topic2", ...]"""
         print(f" • Overall Audit Latency       : {tot_lat_str} ({total_audit_time:.1f} seconds)", flush=True)
         print(f" • Average Latency per Control : {avg_lat_str} ({avg_lat_sec:.1f} seconds/control)", flush=True)
         print("="*85 + "\n", flush=True)
+
     except Exception as _bm_err:
         print(f"[BENCHMARK ERROR] Failed to record token metrics: {_bm_err}", flush=True)
 

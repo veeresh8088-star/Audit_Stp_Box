@@ -21,13 +21,26 @@ def record_token_metrics(
     compliant_count: int = 0,
     non_compliant_count: int = 0,
     out_of_scope_count: int = 0,
-    folder_name: str = ""
+    folder_name: str = "",
+    cpu_cores: int = 0,
+    file_details: list = None,
+    file_types_summary: dict = None
 ):
     """
-    Records detailed token consumption, text size, latency, and scoping metrics
-    for real document analysis sessions.
+    Records detailed token consumption, text size, latency, hardware CPU specs,
+    file type breakdown, and scoping metrics for real document analysis sessions.
     """
     os.makedirs("data", exist_ok=True)
+
+    if not cpu_cores:
+        cpu_cores = os.cpu_count() or 4
+
+    # Build file_types_summary if not provided
+    if not file_types_summary and file_names:
+        file_types_summary = {}
+        for fn in file_names:
+            ext = os.path.splitext(str(fn))[1].lower().replace('.', '') or 'unknown'
+            file_types_summary[ext] = file_types_summary.get(ext, 0) + 1
 
     total_tokens = prompt_tokens + completion_tokens
     avg_latency_per_ctrl = round(total_latency_sec / max(1, controls_count), 2)
@@ -40,8 +53,11 @@ def record_token_metrics(
         "session_id": session_id,
         "folder_name": folder_name or ("Folder Analysis" if file_names else "Single Document"),
         "scoping_mode": scoping_mode, # "AI Auto-Scoping" or "Excel / Manual Scoping"
+        "cpu_cores": cpu_cores,
         "files_count": len(file_names),
-        "file_names": ", ".join(file_names),
+        "file_names": ", ".join(file_names) if isinstance(file_names, list) else str(file_names),
+        "file_types_summary": file_types_summary or {},
+        "file_details": file_details or [],
         "file_size_kb": file_size_kb,
         "file_size_mb": file_size_mb,
         "extracted_text_chars": extracted_text_chars,
@@ -76,8 +92,97 @@ def record_token_metrics(
 
     # 2. Export Styled Excel Spreadsheet
     generate_excel_benchmark_report(records, BENCHMARK_EXCEL_PATH)
-    print(f"[TOKEN TRACKER] Recorded metrics for session {session_id[:8]} ({scoping_mode}): {total_tokens} tokens, {round(total_latency_sec,1)}s latency.", flush=True)
+    print(f"[TOKEN TRACKER] Recorded metrics for session {session_id[:8]} ({scoping_mode}): {total_tokens} tokens, {round(total_latency_sec,1)}s latency, {cpu_cores} CPU cores.", flush=True)
     return record
+
+
+def get_all_benchmark_records():
+    """Returns all recorded audit session benchmark metrics."""
+    if os.path.exists(BENCHMARK_JSON_PATH):
+        try:
+            with open(BENCHMARK_JSON_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+
+def aggregate_audit_sessions(session_ids: list = None):
+    """
+    Aggregates metrics across selected (or all) real auditor session logs.
+    Computes combined total latency, combined tokens, combined files/sizes,
+    overall compliance score, and side-by-side comparative matrix.
+    """
+    records = get_all_benchmark_records()
+    if not records:
+        return {}
+
+    if session_ids:
+        # Filter for specified session IDs
+        target_sids = set(session_ids)
+        records = [r for r in records if r.get("session_id") in target_sids or any(sid in str(r.get("session_id")) for sid in target_sids)]
+
+    if not records:
+        return {}
+
+    tot_latency = sum(float(r.get("total_latency_seconds", 0)) for r in records)
+    tot_prompt = sum(int(r.get("prompt_input_tokens", 0)) for r in records)
+    tot_comp = sum(int(r.get("completion_output_tokens", 0)) for r in records)
+    tot_tokens = tot_prompt + tot_comp
+    tot_files = sum(int(r.get("files_count", 0)) for r in records)
+    tot_mb = sum(float(r.get("file_size_mb", 0)) for r in records)
+    tot_chars = sum(int(r.get("extracted_text_chars", 0)) for r in records)
+    tot_ctrls = sum(int(r.get("controls_audited_count", 0)) for r in records)
+    tot_compliant = sum(int(r.get("compliant_count", 0)) for r in records)
+    tot_non_compliant = sum(int(r.get("non_compliant_count", 0)) for r in records)
+    tot_out_scope = sum(int(r.get("out_of_scope_count", 0)) for r in records)
+
+    # Format combined latency string (e.g. 1h 23m 45s or 45m 12s)
+    hours = int(tot_latency // 3600)
+    mins = int((tot_latency % 3600) // 60)
+    secs = round(tot_latency % 60, 1)
+    if hours > 0:
+        comb_lat_str = f"{hours}h {mins}m {secs}s"
+    elif mins > 0:
+        comb_lat_str = f"{mins}m {secs}s"
+    else:
+        comb_lat_str = f"{secs}s"
+
+    overall_score_pct = int((tot_compliant / max(1, tot_compliant + tot_non_compliant)) * 100) if (tot_compliant + tot_non_compliant) > 0 else 0
+
+    # Merge file types
+    merged_file_types = {}
+    for r in records:
+        fts = r.get("file_types_summary", {})
+        if isinstance(fts, dict):
+            for ext, cnt in fts.items():
+                merged_file_types[ext] = merged_file_types.get(ext, 0) + cnt
+
+    # Max CPU cores reported across sessions
+    cpu_cores_list = [int(r.get("cpu_cores", 0)) for r in records if r.get("cpu_cores")]
+    cpu_cores_display = max(cpu_cores_list) if cpu_cores_list else (os.cpu_count() or 4)
+
+    return {
+        "selected_sessions_count": len(records),
+        "session_ids": [r.get("session_id") for r in records],
+        "cpu_cores": cpu_cores_display,
+        "combined_latency_seconds": round(tot_latency, 2),
+        "combined_latency_formatted": comb_lat_str,
+        "combined_prompt_tokens": tot_prompt,
+        "combined_completion_tokens": tot_comp,
+        "combined_total_tokens": tot_tokens,
+        "combined_files_count": tot_files,
+        "combined_file_size_mb": round(tot_mb, 2),
+        "combined_extracted_text_chars": tot_chars,
+        "combined_controls_count": tot_ctrls,
+        "combined_compliant_count": tot_compliant,
+        "combined_non_compliant_count": tot_non_compliant,
+        "combined_out_of_scope_count": tot_out_scope,
+        "overall_compliance_score_pct": overall_score_pct,
+        "file_types_summary": merged_file_types,
+        "sessions_comparison": records
+    }
+
 
 
 def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_EXCEL_PATH):

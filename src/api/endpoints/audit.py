@@ -798,6 +798,54 @@ def api_get_admin_logs():
     finally:
         db.close()
 
+
+@router.get("/benchmark/sessions")
+def api_get_benchmark_sessions():
+    """Retrieves real auditor session telemetry logs recorded during audits."""
+    try:
+        from src.core.token_tracker import get_all_benchmark_records
+        records = get_all_benchmark_records()
+        return {"success": True, "count": len(records), "sessions": records}
+    except Exception as e:
+        return {"success": False, "error": str(e), "sessions": []}
+
+
+class AggregateSessionsRequest(BaseModel):
+    session_ids: Optional[List[str]] = None
+
+
+@router.post("/benchmark/aggregate")
+def api_aggregate_benchmark_sessions(body: AggregateSessionsRequest = None):
+    """Combines and aggregates metrics across selected real auditor sessions."""
+    try:
+        from src.core.token_tracker import aggregate_audit_sessions
+        sids = body.session_ids if body and body.session_ids else None
+        res = aggregate_audit_sessions(sids)
+        return {"success": True, "aggregated": res}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/benchmark/export")
+def api_export_benchmark_excel():
+    """Downloads styled executive Excel benchmark report."""
+    try:
+        from fastapi.responses import FileResponse
+        from src.core.token_tracker import BENCHMARK_EXCEL_PATH, get_all_benchmark_records, generate_excel_benchmark_report
+        records = get_all_benchmark_records()
+        if records:
+            generate_excel_benchmark_report(records, BENCHMARK_EXCEL_PATH)
+        if os.path.exists(BENCHMARK_EXCEL_PATH):
+            return FileResponse(
+                BENCHMARK_EXCEL_PATH,
+                filename="Executive_Audit_Token_Benchmark_Report.xlsx",
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        raise HTTPException(status_code=404, detail="Benchmark report not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/upload-scope-excel")
 def api_upload_scope_excel(file: UploadFile = File(...)):
     """Parses Excel scoping checklist and maps target ISO controls."""

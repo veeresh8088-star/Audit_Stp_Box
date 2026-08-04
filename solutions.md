@@ -133,10 +133,20 @@ flowchart TD
 
 ---
 
-### Fix 9: VAPT Target IP:Port/Protocol Parsing & PDF Export Parity
-* **Location:** `src/core/parsers/nessus_parser.py`, `src/core/report_exporter.py`
-* **Problem:** Nessus parser only extracted the raw IP address (discarding port and protocol), and PDF reports lacked CVE list and Plugin ID rows.
+### Fix 10: Enhanced Audit Telemetry & Multi-Auditor Log Aggregator
+* **Location:** `src/core/token_tracker.py`, `src/core/bg_worker.py`, `src/api/endpoints/audit.py`, `src/api/static/app.js`
+* **Problem:** Audit sessions lacked detailed hardware and file metrics (CPU cores, file types breakdown, character counts), and there was no mechanism for mentors/lead auditors to select and combine 2 to 10+ different auditor runs into a single aggregated benchmark report.
 * **Solution:**
-  1. Updated `nessus_parser.py` regex to extract full `IP:PORT/protocol` tuples (e.g. `13.126.199.93:443/tcp` or `13.126.199.93:3306/tcp`) from HTML section headers and plugin output text.
-  2. Updated `report_exporter.py` PDF generation to add **CVE References** and **Scanner Plugin ID** rows to the meta summary table, ensuring 100% parity between UI findings and final PDF reports.
+  1. **Telemetry Capture:** `bg_worker.py` and `token_tracker.py` now capture:
+     * `CPU Cores`: Logical CPU core count (`os.cpu_count()`).
+     * `File Types Breakdown`: Extensions count (`DOCX: 2, JPG: 3, PDF: 1, HTML: 2`).
+     * `File Details`: Per-file name, size in KB/MB, and character count.
+  2. **Terminal Output Box:** Prints system hardware CPU specs, file extensions breakdown, file sizes, tokens, and latency at the end of every audit execution.
+  3. **Admin Telemetry Dashboard:** Implemented a 2-tab modal in `app.js`:
+     * **Tab A (Auditor Sessions & Hardware Telemetry):** Renders real auditor sessions with checkboxes, CPU cores, file types pills, token counts, and compliance scores.
+     * **Tab B (Admin Overrides):** Displays admin override audit trails.
+  4. **Multi-Auditor Aggregator:**
+     * Selecting 2 to 10+ auditor sessions and clicking **"⚡ Combine Selected Sessions"** calculates combined total latency (e.g. 1h 03m 25s), combined tokens, total files/sizes, overall compliance score, and side-by-side comparative matrix.
+     * Provides 1-click **"📥 Download Executive Excel Report"** (`.xlsx`).
+
 
