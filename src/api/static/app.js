@@ -2615,6 +2615,18 @@ function renderFindingsList() {
                         : "";
                 }
 
+                // Clean PoC text: strip header lines (Target Host, CVE, Scanner, Plugin ID)
+                // since they are already displayed in dedicated UI card rows above.
+                let _cleanPoc = _poc;
+                if (_cleanPoc.includes("Plugin Output:\n")) {
+                    _cleanPoc = _cleanPoc.split("Plugin Output:\n")[1].trim();
+                } else if (_cleanPoc.includes("Plugin Output:")) {
+                    _cleanPoc = _cleanPoc.split("Plugin Output:")[1].trim();
+                } else {
+                    // Strip any leading "Target Host:...", "CVE(s):...", "Scanner:...", "Plugin ID:..." lines
+                    _cleanPoc = _cleanPoc.replace(/^(Target Host|Plugin ID|CVE\(s\)|Scanner):[^\n]*\n?/gm, '').trim();
+                }
+
                 return `
                 <!-- ── Target Host ── -->
                 <div class="finding-detail-row" style="border-left: 3px solid #f87171; padding-left: 10px; margin-bottom: 10px;">
@@ -2647,14 +2659,15 @@ function renderFindingsList() {
                 </div>
 
                 <!-- ── Proof of Concept / Plugin Output ── -->
-                ${_poc ? `
+                ${_cleanPoc ? `
                 <div class="finding-detail-row" style="margin-bottom: 10px;">
                     <label style="color:#34d399;">📋 Proof of Concept (Scanner Plugin Output)</label>
                     <pre class="finding-snippet" style="white-space: pre-wrap; background: rgba(16,185,129,0.07);
                          border: 1px solid rgba(16,185,129,0.2); border-radius: 6px;
-                         padding: 10px 12px; font-size: 0.80rem; max-height: 220px;
-                         overflow-y: auto; color: var(--text-primary);">${_poc}</pre>
+                         padding: 10px 12px; font-size: 0.82rem; line-height: 1.45; max-height: 220px;
+                         overflow-y: auto; color: var(--text-primary); font-family: 'Consolas', 'Fira Code', monospace;">${_cleanPoc}</pre>
                 </div>` : ""}
+
 
                 <!-- ── Remediation ── -->
                 <div class="finding-detail-row" style="margin-bottom: 10px;">
