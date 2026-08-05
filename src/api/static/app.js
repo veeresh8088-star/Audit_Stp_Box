@@ -2056,8 +2056,15 @@ function ensureAdminModalDOM() {
                 <!-- TAB 1: AUDITOR BENCHMARK & MULTI-SESSION AGGREGATOR -->
                 <div id="admin-tab-benchmark" style="display: block;">
                     <!-- Action Bar -->
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; background: rgba(15,23,42,0.4); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(148,163,184,0.15);">
-                        <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; background: rgba(15,23,42,0.4); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(148,163,184,0.15); flex-wrap: wrap; gap: 10px;">
+                        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                            <!-- Auditor Dropdown Filter -->
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                                <label style="font-size: 0.76rem; font-weight: 700; color: #818cf8;">👤 Filter Auditor:</label>
+                                <select id="benchmark-auditor-filter" onchange="filterBenchmarkSessionsByAuditor()" style="padding: 5px 10px; font-size: 0.76rem; font-weight: 600; border-radius: 6px; background: #0f172a; color: #f8fafc; border: 1px solid rgba(99,102,241,0.4); outline: none; cursor: pointer;">
+                                    <option value="ALL">All Auditors (All Sessions)</option>
+                                </select>
+                            </div>
                             <button class="btn-primary" onclick="aggregateSelectedAuditSessions()" style="padding: 7px 14px; font-size: 0.78rem; font-weight: 700; background: linear-gradient(135deg, #6366f1, #4f46e5); display: flex; align-items: center; gap: 6px;">
                                 <span>⚡ Combine Selected Sessions</span>
                             </button>
@@ -2174,6 +2181,94 @@ async function loadAdminAuditLogs() {
     loadAdminOverridesData();
 }
 
+function filterBenchmarkSessionsByAuditor() {
+    const filterVal = (document.getElementById("benchmark-auditor-filter")?.value || "ALL").toLowerCase();
+    const tbody = document.getElementById("benchmark-table-body");
+    if (!tbody || !window.allBenchmarkSessionsCache) return;
+
+    let filtered = window.allBenchmarkSessionsCache;
+    if (filterVal !== "all") {
+        filtered = filtered.filter(s => {
+            const u = String(s.auditor_username || s.folder_name || "").toLowerCase();
+            return u === filterVal;
+        });
+    }
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:16px; color:#fbbf24;">No audit session logs found for selected auditor.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = renderBenchmarkRowsHTML(filtered);
+    updateSelectedBenchmarkSessionsCount();
+}
+
+function renderBenchmarkRowsHTML(sessions) {
+    return sessions.map((s, idx) => {
+        const sid = s.session_id || `SESS-${idx}`;
+        const sidShort = sid.length > 12 ? sid.slice(0, 12) + "..." : sid;
+        const ts = s.timestamp || "N/A";
+        const cpu = s.cpu_cores ? `${s.cpu_cores} Cores` : "4 Cores";
+        const filesCnt = s.files_count || 0;
+        const fileMb = s.file_size_mb ? `${s.file_size_mb} MB` : `${s.file_size_kb || 0} KB`;
+        const chars = s.extracted_text_chars ? Number(s.extracted_text_chars).toLocaleString() : "0";
+        const tokens = s.total_tokens ? Number(s.total_tokens).toLocaleString() : "0";
+        const auditorName = s.auditor_username || s.folder_name || "Auditor";
+
+        // Latency format
+        const latSec = floatVal(s.total_latency_seconds);
+        const latMins = Math.floor(latSec / 60);
+        const latRemSec = Math.round(latSec % 60);
+        const latStr = latMins > 0 ? `${latMins}m ${latRemSec}s` : `${latSec.toFixed(1)}s`;
+
+        // Compliance %
+        const compCnt = intVal(s.compliant_count);
+        const nonCompCnt = intVal(s.non_compliant_count);
+        const totalCtrls = compCnt + nonCompCnt;
+        const compPct = totalCtrls > 0 ? Math.round((compCnt / totalCtrls) * 100) : 0;
+        let compBadgeStyle = "background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.3);";
+        if (compPct < 50) compBadgeStyle = "background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3);";
+        else if (compPct < 80) compBadgeStyle = "background: rgba(245,158,11,0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3);";
+
+        // File types badges
+        const fts = s.file_types_summary || {};
+        const ftsPills = Object.keys(fts).length
+            ? Object.entries(fts).map(([ext, cnt]) => `<span style="font-size:0.68rem; padding:1px 5px; border-radius:3px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); margin-right:3px;">${ext.toUpperCase()}:${cnt}</span>`).join("")
+            : `<span style="color:#94a3b8;">${filesCnt} files</span>`;
+
+        return `
+            <tr style="border-bottom: 1px solid rgba(148, 163, 184, 0.15);">
+                <td style="padding: 10px; text-align: center;">
+                    <input type="checkbox" class="benchmark-session-chk" value="${escapeHtml(sid)}" onchange="updateSelectedBenchmarkSessionsCount()" style="cursor: pointer;">
+                </td>
+                <td style="padding: 10px;">
+                    <div style="font-family: monospace; font-weight: 700; color: #f8fafc;" title="${escapeHtml(sid)}">${escapeHtml(sidShort)}</div>
+                    <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 2px;">${escapeHtml(ts)}</div>
+                </td>
+                <td style="padding: 10px;">
+                    <span style="font-size:0.72rem; padding:2px 8px; border-radius:12px; background:rgba(99,102,241,0.18); color:#818cf8; font-weight:700; border:1px solid rgba(99,102,241,0.35);">👤 ${escapeHtml(auditorName)}</span>
+                </td>
+                <td style="padding: 10px;">
+                    <span style="font-size:0.72rem; padding:2px 6px; border-radius:4px; background:rgba(30,41,59,0.8); color:#cbd5e1; font-weight:600; border:1px solid rgba(148,163,184,0.2);">${escapeHtml(cpu)}</span>
+                </td>
+                <td style="padding: 10px;">
+                    <div>${ftsPills}</div>
+                    <div style="font-size: 0.7rem; color: #94a3b8; margin-top: 2px;">${filesCnt} files (${fileMb})</div>
+                </td>
+                <td style="padding: 10px; font-family: monospace; font-size: 0.8rem;">${chars}</td>
+                <td style="padding: 10px; font-family: monospace; font-size: 0.8rem; font-weight: 700; color: #818cf8;">${tokens}</td>
+                <td style="padding: 10px; font-family: monospace; font-size: 0.8rem; color: #38bdf8;">${latStr}</td>
+                <td style="padding: 10px;">
+                    <span style="padding: 3px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; ${compBadgeStyle}">${compPct}% (${compCnt}/${totalCtrls})</span>
+                </td>
+                <td style="padding: 10px; text-align: center;">
+                    <button class="btn-secondary" onclick="downloadBenchmarkReportForSession('${escapeHtml(sid)}')" style="padding: 3px 8px; font-size: 0.72rem; font-weight: 700; color: #38bdf8; border-color: rgba(56,189,248,0.3);">Excel</button>
+                </td>
+            </tr>
+        `;
+    }).join("");
+}
+
 async function loadBenchmarkSessionsData() {
     const tbody = document.getElementById("benchmark-table-body");
     if (!tbody) return;
@@ -2185,7 +2280,16 @@ async function loadBenchmarkSessionsData() {
         const data = await response.json();
         if (data.success && data.sessions && data.sessions.length > 0) {
             window.allBenchmarkSessionsCache = data.sessions;
-            tbody.innerHTML = data.sessions.map((s, idx) => {
+
+            // Populate Auditor Filter Dropdown
+            const filterSel = document.getElementById("benchmark-auditor-filter");
+            if (filterSel) {
+                const uniqueAuditors = Array.from(new Set(data.sessions.map(s => s.auditor_username || s.folder_name || "Auditor"))).sort();
+                filterSel.innerHTML = `<option value="ALL">All Auditors (${data.sessions.length} Sessions)</option>` +
+                    uniqueAuditors.map(u => `<option value="${escapeHtml(u.toLowerCase())}">👤 ${escapeHtml(u)}</option>`).join("");
+            }
+
+            tbody.innerHTML = renderBenchmarkRowsHTML(data.sessions);
                 const sid = s.session_id || `SESS-${idx}`;
                 const sidShort = sid.length > 12 ? sid.slice(0, 12) + "..." : sid;
                 const ts = s.timestamp || "N/A";

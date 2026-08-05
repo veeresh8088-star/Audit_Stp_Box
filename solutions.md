@@ -168,3 +168,36 @@ flowchart TD
      * **4 Physical Cores / 8 Logical Cores:** `--workers 4`, `MAX_CONCURRENT_AUDITS=2` (Optimal for 4-core laptops/desktops).
      * **8 Physical Cores / 16 Logical Cores:** `--workers 8`, `MAX_CONCURRENT_AUDITS=4`.
      * **16 Physical Cores / 32 Logical Cores:** `--workers 16`, `MAX_CONCURRENT_AUDITS=8`.
+
+---
+
+### Fix 12: Per-Document 1-Click Rejection & Active Knowledge Loop Integration
+* **Location:** `src/api/static/app.js`, `src/api/endpoints/audit.py`, `src/ai/knowledge_loop.py`
+* **Problem:** When an AI audit cited 3 evidence documents for a control, auditors had no simple way to reject an invalid 3rd document without discarding the entire finding or manually re-typing text. Additionally, auditor rejections needed to be stored so the LLM learns in real-time for future scans.
+* **Solution Implemented:**
+  1. **Per-Document Inline `[✕ Reject]` Buttons:** Replaced the single Evidence Snippet text block with per-document grouped rows. Each document row features a 1-click `[✕ Reject]` button.
+  2. **Automated Evidence Pruning:** Clicking `[✕ Reject]` strips that document from the finding's `source_files` in Shakthi DB and re-renders the card instantly.
+  3. **Knowledge Loop Store (`AuditorFeedback`):** Document rejections write a record to `AuditorFeedback` table in Shakthi DB (`control_id`, `evidence_snippet`, `corrected_status = "REJECTED"`).
+  4. **LLM Real-Time Adaptation (`get_auditor_feedback_few_shot()`):** On future audit runs for that control, `knowledge_loop.py` fetches the 15 most recent rejections and injects them as **Strict Negative Constraint System Prompts** (`"Do NOT repeat or cite this rejected document for Control X"`), teaching the LLM in real-time.
+
+---
+
+### Fix 13: Unified Admin Log Aggregator & Auditor Filter Telemetry Dashboard
+* **Location:** `src/api/endpoints/audit.py`, `src/api/static/app.js`
+* **Problem:** The Admin Log modal previously queried only `AdminAuditLog` (manual force-commit overrides), appearing empty when no overrides occurred. Additionally, there was no way for admins to filter session telemetry by specific auditor usernames.
+* **Solution Implemented:**
+  1. **Unified Log Feed (`api_get_admin_logs`):** Merged 3 database log sources into a single chronologically sorted feed:
+     * **Admin Audit Logs:** Overrides & Force-commits.
+     * **Auditor Feedback Logs:** Document rejections (`[✕ Reject]`) and finding status changes.
+     * **System Event Logs (`system_events`):** `INFO`, `WARNING`, `ERROR`, and `CRITICAL` system events, failovers, crashes, timeouts, and security scan logs.
+  2. **Auditor Dropdown Filter (`👤 Filter Auditor:`):** Added a dynamic filter dropdown to the Admin Telemetry Dashboard that lists all active auditor usernames (`rk1@gmail.com`, `rk2@gmail.com`, `admin`, etc.). Selecting an auditor filters the table in real-time to analyze only their specific runs.
+  3. **Multi-Auditor Aggregator:** Selecting 2 to 10+ auditor session checkboxes and clicking **"⚡ Combine Selected Sessions"** calculates combined total latency (`1h 45m 22s`), combined tokens, total file sizes, document type breakdown (`DOCX: 6, PDF: 2...`), and side-by-side comparative matrix.
+
+---
+
+### Fix 14: Hybrid FIFO Task Scheduling & Round-Robin LLM Load Balancing
+* **Location:** `src/core/bg_worker.py`, `src/core/llm_client.py`
+* **Problem:** Ambiguity around how concurrent audit scans with varying control counts (e.g. Auditor 1 with 2 controls, Auditor 2 with 10 controls, Auditor 3 with 4 controls) are queued and executed without thread starvation.
+* **Solution Implemented:**
+  1. **Layer 1: FIFO Task Semaphore Queue (`src/core/bg_worker.py`):** Multi-auditor scan requests are queued in First-In, First-Out order. As soon as a short job (e.g. Auditor 1's 2-control scan) completes in ~45s, its thread slot is immediately released and assigned to the next waiting auditor scan (Auditor 3), even while a long job (Auditor 2's 10-control scan) continues running in parallel.
+  2. **Layer 2: Round-Robin LLM Load Balancer (`src/core/llm_client.py`):** Outgoing prompt requests across all running audit threads are load-balanced across configured LLM ports (`LLM_HOSTS="11434,11435,11436"`) in a thread-safe Round-Robin cycle (`_get_next_llm_host()`).

@@ -813,22 +813,53 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
 
 @router.get("/admin-logs")
 def api_get_admin_logs():
-    """Retrieves admin audit trail log records for force acceptances and overrides."""
+    """Retrieves unified admin audit logs: overrides, auditor feedback/rejections, and system events/errors."""
     db = SessionLocal()
     try:
-        from src.db.database import AdminAuditLog
-        logs = db.query(AdminAuditLog).order_by(AdminAuditLog.id.desc()).limit(100).all()
+        from src.db.database import AdminAuditLog, AuditorFeedback, SystemEvent
         result = []
-        for l in logs:
+
+        # 1. Admin Overrides & Force Commits
+        override_logs = db.query(AdminAuditLog).order_by(AdminAuditLog.id.desc()).limit(50).all()
+        for l in override_logs:
             result.append({
-                "id": l.id,
+                "id": f"override-{l.id}",
                 "timestamp": l.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC") if l.timestamp else "",
-                "auditor_user": l.auditor_user,
-                "session_id": l.session_id,
-                "action": l.action,
-                "unreviewed_controls": l.unreviewed_controls,
-                "details": l.details
+                "auditor_user": l.auditor_user or "Admin",
+                "session_id": l.session_id or "N/A",
+                "action": l.action or "OVERRIDE",
+                "unreviewed_controls": l.unreviewed_controls or "N/A",
+                "details": l.details or ""
             })
+
+        # 2. Auditor Feedback & Document Rejections ([✕ Reject])
+        feedback_logs = db.query(AuditorFeedback).order_by(AuditorFeedback.id.desc()).limit(50).all()
+        for fb in feedback_logs:
+            result.append({
+                "id": f"feedback-{fb.id}",
+                "timestamp": fb.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") if fb.created_at else "",
+                "auditor_user": "Auditor",
+                "session_id": f"Control {fb.control_id}",
+                "action": fb.corrected_status or "FEEDBACK",
+                "unreviewed_controls": fb.control_id or "N/A",
+                "details": f"{fb.finding or ''} | Comments: {fb.auditor_comments or ''}"
+            })
+
+        # 3. System Events, Warnings & Errors
+        system_logs = db.query(SystemEvent).order_by(SystemEvent.id.desc()).limit(50).all()
+        for se in system_logs:
+            result.append({
+                "id": f"sys-{se.id}",
+                "timestamp": se.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") if se.created_at else "",
+                "auditor_user": se.actor or "SYSTEM",
+                "session_id": se.session_id or "System",
+                "action": f"[{se.severity}] {se.event_type}",
+                "unreviewed_controls": se.framework or "N/A",
+                "details": se.meta or ""
+            })
+
+        # Sort all combined log entries by timestamp descending
+        result.sort(key=lambda x: str(x.get("timestamp", "")), reverse=True)
         return {"success": True, "logs": result}
     finally:
         db.close()
@@ -840,6 +871,19 @@ def api_get_benchmark_sessions():
     try:
         from src.core.token_tracker import get_all_benchmark_records
         records = get_all_benchmark_records()
+        db = SessionLocal()
+        try:
+            with force_master():
+                for r in records:
+                    sid = r.get("session_id")
+                    if sid and not r.get("auditor_username"):
+                        rep = db.query(AuditReport).filter(AuditReport.session_id == sid).first()
+                        if rep and rep.created_by:
+                            r["auditor_username"] = rep.created_by
+                        else:
+                            r["auditor_username"] = r.get("folder_name") or "Auditor"
+        finally:
+            db.close()
         return {"success": True, "count": len(records), "sessions": records}
     except Exception as e:
         return {"success": False, "error": str(e), "sessions": []}
