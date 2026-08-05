@@ -3029,11 +3029,60 @@ function renderFindingsList() {
                 <p>${getCleanFindingDescription(f)}</p>
             </div>
 
-            ${showSnippetBox ? `
-            <div class="finding-detail-row">
-                <label>Evidence Snippet</label>
-                <pre class="finding-snippet">"${snipRaw}"</pre>
-            </div>` : ''}
+            ${showSnippetBox ? (() => {
+                // ── Multi-Document Evidence Snippet with per-doc [Reject] buttons ──
+                // If source_files has multiple docs, split and render each separately.
+                const srcDocs = (f.source_files || '').split(',').map(s => s.trim()).filter(Boolean);
+                const snippetText = snipRaw || '';
+
+                // Split snippet by document separators (e.g. "filename:\n" blocks if present)
+                // Otherwise show full snippet under each doc label.
+                let docRows = '';
+                if (srcDocs.length > 1) {
+                    // Render each document with its own Reject button
+                    docRows = srcDocs.map(docName => {
+                        const safeDoc = escapeHtml(docName);
+                        const safeId = escapeHtml(String(f.id));
+                        const safeCtrl = escapeHtml(f.control_id || '');
+                        // File type icon
+                        const ext = docName.split('.').pop().toLowerCase();
+                        const icon = ext === 'pdf' ? '📕' : (ext === 'jpg' || ext === 'png' || ext === 'jpeg') ? '🖼️' : '📄';
+                        return `
+                        <div class="doc-evidence-row" style="
+                            border: 1px solid rgba(148,163,184,0.15);
+                            border-radius: 8px;
+                            padding: 10px 12px;
+                            margin-bottom: 8px;
+                            background: rgba(15,23,42,0.4);
+                        ">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <span style="font-size:0.78rem; font-weight:700; color:#60a5fa;">${icon} ${safeDoc}</span>
+                                <button
+                                    onclick="rejectDocFromFinding(${safeId}, '${docName.replace(/'/g, "\\'").replace(/"/g, '&quot;')}', '${safeCtrl}')"
+                                    style="
+                                        font-size:0.72rem; padding:2px 10px; border-radius:5px;
+                                        border:1px solid rgba(239,68,68,0.45);
+                                        background:rgba(239,68,68,0.08);
+                                        color:#f87171; cursor:pointer; font-weight:700;
+                                        transition:all 0.15s;
+                                    "
+                                    onmouseover="this.style.background='rgba(239,68,68,0.2)'"
+                                    onmouseout="this.style.background='rgba(239,68,68,0.08)'"
+                                >✕ Reject</button>
+                            </div>
+                        </div>`;
+                    }).join('');
+                } else {
+                    // Single document: show full snippet as before, no per-doc reject needed
+                    docRows = `<pre class="finding-snippet" style="margin:0;">&quot;${escapeHtml(snippetText)}&quot;</pre>`;
+                }
+
+                return `
+                <div class="finding-detail-row">
+                    <label>Evidence Snippet</label>
+                    ${docRows}
+                </div>`;
+            })() : ''}
 
             <div class="finding-detail-row">
                 <label>Lead Auditor Recommendations</label>
@@ -3073,6 +3122,37 @@ async function updateFindingWorkflowStatus(id, status) {
         }
     } catch (err) {
         alert(err.message);
+    }
+}
+
+// ── PER-DOCUMENT REJECT (Knowledge Loop) ──────────────────────────────────────
+// Strips a single rejected document from the finding's source_files and saves
+// the rejection to AuditorFeedback so the LLM avoids citing it again.
+async function rejectDocFromFinding(findingId, docName, controlId) {
+    try {
+        const response = await fetch(`${API_BASE}/audit/findings/${findingId}/reject-doc`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ doc_name: docName, control_id: controlId })
+        });
+        const data = await response.json();
+        if (data.success) {
+            // Update local findingsList to reflect stripped source_files
+            const idx = findingsList.findIndex(f => f.id === findingId);
+            if (idx !== -1) {
+                const remaining = (findingsList[idx].source_files || '')
+                    .split(',')
+                    .map(s => s.trim())
+                    .filter(s => s && s !== docName)
+                    .join(', ');
+                findingsList[idx].source_files = remaining;
+            }
+            renderFindingsList();
+        } else {
+            alert('Failed to reject document: ' + (data.detail || 'Unknown error'));
+        }
+    } catch (err) {
+        alert('Reject failed: ' + err.message);
     }
 }
 

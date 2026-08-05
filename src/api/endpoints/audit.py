@@ -1747,3 +1747,44 @@ def api_export_token_benchmark(session_id: Optional[str] = None):
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=target_filename
     )
+
+
+@router.post('/findings/{finding_id}/reject-doc')
+def api_reject_doc_from_finding(finding_id: int, req: dict):
+    db = SessionLocal()
+    try:
+        doc_name = req.get('doc_name', '').strip()
+        control_id = req.get('control_id', '').strip()
+        if not doc_name:
+            raise HTTPException(status_code=400, detail='Missing doc_name')
+        with force_master():
+            finding = db.query(Finding).filter(Finding.id == finding_id).first()
+            if not finding:
+                raise HTTPException(status_code=404, detail='Finding not found')
+            current_docs = [s.strip() for s in (finding.source_files or '').split(',') if s.strip()]
+            updated_docs = [s for s in current_docs if s != doc_name]
+            finding.source_files = ', '.join(updated_docs)
+            finding.is_saved_to_shakthi = True
+            finding.human_verified = True
+            ctrl_id = control_id or finding.control_id
+            existing_fb = db.query(AuditorFeedback).filter(
+                AuditorFeedback.control_id == ctrl_id,
+                AuditorFeedback.evidence_snippet.like(f'%{doc_name}%')
+            ).first()
+            if not existing_fb:
+                db.add(AuditorFeedback(
+                    control_id=ctrl_id,
+                    evidence_snippet=f'Rejected evidence document: {doc_name} for control {ctrl_id}',
+                    corrected_status='REJECTED',
+                    finding=f'Document {doc_name} was rejected by auditor for control {ctrl_id}',
+                    auditor_comments=f'Auditor manually rejected document {doc_name} from evidence list.'
+                ))
+            db.commit()
+            return {'success': True, 'message': f'Document {doc_name} rejected and removed.', 'remaining_source_files': finding.source_files}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f'Reject document failed: {e}')
+    finally:
+        db.close()
