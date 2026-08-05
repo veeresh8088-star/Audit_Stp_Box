@@ -1394,18 +1394,20 @@ body[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
 
 .terminal-box {
     flex: 1;
-    background-color: #020617;
-    border: 1px solid rgba(148, 163, 184, 0.15);
+    background-color: #090d16;
+    border: 1px solid rgba(56, 189, 248, 0.25);
     border-radius: 12px;
-    padding: 14px;
-    font-family: var(--font-mono);
-    font-size: 0.78rem;
+    padding: 16px;
+    font-family: 'Consolas', 'Fira Code', 'Courier New', monospace !important;
+    font-size: 0.82rem !important;
+    line-height: 1.5 !important;
     color: #38bdf8;
-    /* terminal blue */
-    overflow-y: auto;
-    white-space: pre-wrap;
+    overflow-x: auto !important;
+    overflow-y: auto !important;
+    white-space: pre !important;
     resize: none;
     outline: none;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6);
 }
 
 /* ── MODALS (EDIT FINDINGS) ── */
@@ -2689,5 +2691,62 @@ body[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
 [data-theme="light"] .preview-meta-block,
 [data-theme="light"] .preview-footer-block {
     color: #475569 !important;
+}
+
+/* ── DEVELOPER TERMINAL FULL-WIDTH & DRAGGABLE RESIZE STYLES ── */
+.logs-grid {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 24px !important;
+    width: 100% !important;
+}
+
+.system-logs-panel,
+.developer-terminal-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.developer-terminal-panel .logs-header-actions {
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    margin-bottom: 12px !important;
+}
+
+#developer-terminal,
+.terminal-box {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    min-height: 450px !important;
+    height: 550px !important;
+    font-family: 'Consolas', 'Fira Code', 'Courier New', monospace !important;
+    font-size: 0.84rem !important;
+    line-height: 1.55 !important;
+    white-space: pre !important;
+    overflow: auto !important;
+    background: #090d16 !important;
+    color: #38bdf8 !important;
+    padding: 18px !important;
+    border-radius: 10px !important;
+    border: 2px solid rgba(56, 189, 248, 0.4) !important;
+    box-shadow: inset 0 2px 12px rgba(0, 0, 0, 0.6) !important;
+    resize: both !important; /* ENABLE DRAG RESIZING FOR THE USER! */
+    cursor: auto !important;
+}
+
+/* Fullscreen expanded state */
+.terminal-fullscreen {
+    position: fixed !important;
+    top: 20px !important;
+    left: 20px !important;
+    right: 20px !important;
+    bottom: 20px !important;
+    z-index: 999999 !important;
+    height: calc(100vh - 40px) !important;
+    max-height: none !important;
+    border-color: #38bdf8 !important;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.9) !important;
 }
 

@@ -36,8 +36,8 @@ if exist "C:\Users\veeresh988V\Desktop\llama\llama-server.exe" (
 set /a LLM_THREADS=%NUMBER_OF_PROCESSORS%
 if %LLM_THREADS% LSS 1 set LLM_THREADS=4
 
-set /a EMBED_THREADS=2
-if %NUMBER_OF_PROCESSORS% GEQ 12 set EMBED_THREADS=4
+set /a EMBED_THREADS=%NUMBER_OF_PROCESSORS%
+if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 
 echo.
 echo [2/5] Starting llama.cpp LLM Server (Port 11434 with %LLM_THREADS% threads, --mlock locked RAM, 16k context)...

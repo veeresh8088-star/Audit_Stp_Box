@@ -954,7 +954,7 @@
                                 </p>
                             </div>
                             <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-                                <select id="benchmark-session-select" style="padding: 7px 10px; font-size: 0.78rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.7); color: var(--text-main); max-width: 260px;">
+                                <select id="benchmark-session-select" onchange="onBenchmarkSessionChange()" style="padding: 7px 10px; font-size: 0.78rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(15, 23, 42, 0.7); color: var(--text-main); max-width: 260px;">
                                     <option value="all">📊 All Audit Sessions (Combined)</option>
                                     <option value="active">⚡ Current Active Audit Session</option>
                                 </select>
@@ -1005,6 +1005,7 @@
                             <div class="logs-header-actions">
                                 <h4>Developer Terminal Output</h4>
                                 <div>
+                                    <button class="btn-primary" style="background:#3b82f6; font-weight:700;" onclick="toggleTerminalFullscreen()">↔ Expand / Fullscreen</button>
                                     <button class="btn-secondary" onclick="loadDeveloperLogs()">Refresh Console</button>
                                     <button class="btn-danger" onclick="clearDeveloperLogs()">Clear Log File</button>
                                 </div>

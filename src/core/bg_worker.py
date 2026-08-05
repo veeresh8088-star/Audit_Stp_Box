@@ -15,9 +15,27 @@ from src.db.database import (
     ComplianceScore,
     AuditCheckpoint,
     AuditTrail,
+    SystemEvent,
     force_master,
     get_all_custom_controls
 )
+
+def log_system_event(event_type, severity, details, session_id=None, actor="rk1@gmail.com"):
+    """Logs an audit error/warning/event into SystemEvent for the Privacy-Safe System Log Trail."""
+    try:
+        with force_master():
+            db = SessionLocal()
+            db.add(SystemEvent(
+                event_type=event_type,
+                severity=severity,
+                actor=actor or "Auditor",
+                session_id=session_id or "System",
+                meta=details
+            ))
+            db.commit()
+            db.close()
+    except Exception as _e:
+        print(f"[SYSTEM EVENT LOG ERROR] {_e}", flush=True)
 from src.core.controls_data import USE_CASES
 from src.core.input_guardrail import scan_file_security
 from src.core.parsers.doc_parsers import extract_text
@@ -542,6 +560,15 @@ Return format: ["topic1", "topic2", ...]"""
     # Generate context summary
     summary_text = _generate_context_summary(context, ollama_model)
 
+    # ── Universal Pre-Ingest for Top 6 RAG Vector Retrieval across ALL Scoping Modes (Manual, AI Auto-Scoping, Excel) ──
+    if file_registry:
+        for fname, ftext in file_registry.items():
+            if fname and ftext:
+                try:
+                    save_document_chunks(fname, ftext)
+                except Exception as _e_ingest:
+                    print(f"[RAG INGEST WARNING] Pre-ingest for '{fname}' failed: {_e_ingest}", flush=True)
+
     for idx, c in enumerate(controls):
         # ── STOP FLAG CHECK ─────────────────────────────────────────────
         if _bg_stop_flags.get(bg_key):
@@ -808,27 +835,30 @@ Return format: ["topic1", "topic2", ...]"""
             total_text_chunks = max(1, int(text_chars / 500))
 
         file_types_str = ", ".join([f"{ext.upper()}: {cnt}" for ext, cnt in file_types_summary.items()]) if file_types_summary else "N/A"
+        auditor_user = getattr(locals().get("req", None), "auditor_username", None) or os.environ.get("CURRENT_AUDITOR", "rk1@gmail.com")
 
-        print("\n" + "="*85, flush=True)
-        print(f"🏆 AUDIT EXECUTION COMPLETE — FINAL TOKEN & LATENCY BENCHMARK METRICS", flush=True)
-        print("="*85, flush=True)
-        print(f" • Session ID                  : {checkpoint_session_id or bg_key or 'SESSION-LATEST'}", flush=True)
-        print(f" • Scoping Detection Mode      : {scoping_label}", flush=True)
-        print(f" • System CPU Hardware Specs   : {cpu_cores_cnt} Logical CPU Cores", flush=True)
-        print(f" • Total Evidence Files Count  : {total_files_cnt} Files", flush=True)
-        print(f" • File Extensions Breakdown   : {file_types_str}", flush=True)
-        print(f" • Total Evidence File Size    : {file_size_mb} MB ({file_size_kb:,} KB)", flush=True)
-        print(f" • Total Text Chunks Analyzed  : {total_text_chunks} Chunks ({text_chars:,} Chars)", flush=True)
-        print(f" • Total Controls Evaluated    : {total}", flush=True)
-        print(f" • Compliant Controls          : {len(resolved_list)}", flush=True)
-        print(f" • Non-Compliant Gaps          : {len(findings_list)}", flush=True)
-        print(f" • Prompt Input Tokens         : {prompt_toks:,} Tokens", flush=True)
-        print(f" • Completion Output Tokens    : {comp_toks:,} Tokens", flush=True)
-        print(f" • Total Audit Tokens Used     : {tot_tokens_all:,} Tokens", flush=True)
-        print(f" • Average Tokens per Control  : {avg_tokens_ctrl:,} Tokens/Control", flush=True)
-        print(f" • Overall Audit Latency       : {tot_lat_str} ({total_audit_time:.1f} seconds)", flush=True)
-        print(f" • Average Latency per Control : {avg_lat_str} ({avg_lat_sec:.1f} seconds/control)", flush=True)
-        print("="*85 + "\n", flush=True)
+        summary_box = f"""====================================================================================
+ • Session ID                      : {checkpoint_session_id or bg_key or 'SESSION-LATEST'}
+ • Auditor Username                : {auditor_user}
+ • Scoping Detection Mode          : {scoping_label}
+ • System CPU Hardware Specs       : {cpu_cores_cnt} Logical CPU Cores
+ • Total Evidence Files Count      : {total_files_cnt} Files
+ • File Extensions Breakdown       : {file_types_str}
+ • Total Evidence File Size        : {file_size_mb} MB ({file_size_kb:,} KB)
+ • Total Text Chunks Analyzed      : {total_text_chunks} Chunks ({text_chars:,} Chars)
+ • Total Controls Evaluated        : {total}
+ • Compliant Controls              : {len(resolved_list)}
+ • Non-Compliant Gaps              : {len(findings_list)}
+ • Prompt Input Tokens             : {prompt_toks:,} Tokens
+ • Completion Output Tokens        : {comp_toks:,} Tokens
+ • Total Audit Tokens Used         : {tot_tokens_all:,} Tokens
+ • Average Tokens per Control      : {avg_tokens_ctrl:,} Tokens/Control
+ • Overall Audit Latency           : {tot_lat_str} ({total_audit_time:.1f} seconds)
+ • Average Latency per Control     : {avg_lat_str} ({avg_lat_sec:.1f} seconds/control)
+====================================================================================
+"""
+        print("\n" + summary_box, flush=True)
+        log_dev_latency(summary_box)
 
     except Exception as _bm_err:
         print(f"[BENCHMARK ERROR] Failed to record token metrics: {_bm_err}", flush=True)
@@ -876,6 +906,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 "Please start the service before running audits."
             )
             print(f"[_run_ollama_bg ERROR] {_err_msg}", flush=True)
+            log_system_event("LLM_OFFLINE_ERROR", "ERROR", _err_msg, session_id=_sid)
             with _bg_lock:
                 _bg_store["progress"][bg_key] = {"text": f"Error: {_backend_label} offline", "percent": 0}
             _checkpoint_finish(_sid, "failed")
@@ -897,6 +928,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             is_clean, reason = scan_file_security(f_like)
             if not is_clean:
                 print(f"[_run_ollama_bg] Security alert! Malware scan failed for file {name}: {reason}", flush=True)
+                log_system_event("MALWARE_BLOCKED", "CRITICAL", f"File blocked by security scan: {name} ({reason})", session_id=_sid)
                 with _bg_lock:
                     _bg_results[bg_key] = {"error": f"🚨 SECURITY ALERT: '{name}' BLOCKED! {reason}"}
                     _bg_store["progress"].pop(bg_key, None)
@@ -1021,6 +1053,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         _checkpoint_finish(_sid, "completed")
     except Exception as e:
         print(f"[_run_ollama_bg] Exception raised in background thread: {str(e)}", flush=True)
+        log_system_event("AUDIT_EXCEPTION", "CRITICAL", f"Background audit thread exception: {str(e)}", session_id=_sid)
         with _bg_lock:
             _bg_results[bg_key] = {"error": f"Error contacting {BACKEND_NAME}: {str(e)}"}
         _checkpoint_finish(_sid, "failed")

@@ -17,16 +17,22 @@ LOG_PATH = "data/audit_run_latency.log"
 def api_get_system_events(
     severity: str = Query("All", description="Filter by severity level"),
     event_type: str = Query("", description="Filter by event type substring"),
+    session_id: Optional[str] = Query(None, description="Filter by session ID"),
+    actor: Optional[str] = Query(None, description="Filter by auditor username or actor"),
     page: int = Query(0, ge=0),
     page_size: int = Query(20, ge=1, le=100)
 ):
     db = SessionLocal()
     try:
         query = db.query(SystemEvent)
-        if severity != "All":
+        if severity and severity != "All":
             query = query.filter(SystemEvent.severity == severity)
-        if event_type.strip():
+        if event_type and event_type.strip():
             query = query.filter(SystemEvent.event_type.ilike(f"%{event_type.strip()}%"))
+        if session_id and session_id.lower() not in ("all", "active"):
+            query = query.filter(SystemEvent.session_id == session_id)
+        if actor and actor.strip() and actor.lower() != "all":
+            query = query.filter(SystemEvent.actor.ilike(f"%{actor.strip()}%"))
         
         total_count = query.count()
         rows = query.order_by(SystemEvent.created_at.desc()).offset(page * page_size).limit(page_size).all()

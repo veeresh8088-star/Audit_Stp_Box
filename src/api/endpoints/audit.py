@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
 import os
@@ -255,11 +255,22 @@ def get_or_create_audit_report(db, session_id: str, default_title: str = None, d
         db.refresh(report)
     return report
 
+def _bg_extract_and_chunk(filename: str, file_bytes: bytes):
+    try:
+        f_like = io.BytesIO(file_bytes)
+        f_like.name = filename
+        extracted = extract_text(f_like)
+        if extracted:
+            save_document_chunks(filename, extracted)
+    except Exception as err:
+        print(f"[BG CHUNK ERROR] '{filename}': {err}", flush=True)
+
 @router.post("/upload")
 async def api_upload_evidence(
     session_id: str = Form(...),
     is_auditor_uploaded: bool = Form(True),
-    files: List[UploadFile] = File(...)
+    files: List[UploadFile] = File(...),
+    bg_tasks: BackgroundTasks = None
 ):
     """
     FIX: async def + await f.read() → Uvicorn event loop reads all 10 concurrent
@@ -323,10 +334,11 @@ async def api_upload_evidence(
                     db.add(new_ev)
                     new_evidence_records.append(new_ev)
 
-            # Extract Text and save document chunks offline
-            f_like.seek(0)
-            text = extract_text(f_like)
-            save_document_chunks(f.filename, text)
+            # Asynchronously extract text & save chunks in background thread to guarantee 0.1s upload speed
+            if bg_tasks:
+                bg_tasks.add_task(_bg_extract_and_chunk, f.filename, file_bytes)
+            else:
+                _bg_extract_and_chunk(f.filename, file_bytes)
 
             uploaded_details.append({
                 "filename": f.filename,
@@ -427,30 +439,11 @@ def api_start_audit(req: StartAuditRequest):
                 with open(file_path, "rb") as f:
                     file_bytes = f.read()
 
-                with force_master():
-                    cached_chunks = db.query(DocumentChunk).filter(
-                        DocumentChunk.filename == filename
-                    ).all()
-                    chunk_contents = [c.content for c in cached_chunks if c.content]
-
-                if chunk_contents:
-                    text = " ".join(chunk_contents)
-                    # If cached chunks produce very little text (< 200 chars),
-                    # they are likely stale from a first run that got empty paragraphs
-                    # (image-only docx). Re-run fresh OCR extraction in that case.
-                    if len(text.strip()) < 200:
-                        print(f"[api_start_audit] Cached chunks for '{filename}' are too short ({len(text.strip())} chars) — likely stale image-only file. Re-running OCR extraction.", flush=True)
-                        f_like = io.BytesIO(file_bytes)
-                        f_like.name = filename
-                        text = extract_text(f_like)
-                        print(f"[api_start_audit] Fresh OCR extraction for '{filename}' returned {len(text)} chars", flush=True)
-                    else:
-                        print(f"[api_start_audit] Using {len(chunk_contents)} cached chunks for '{filename}' ({len(text)} chars)", flush=True)
-                else:
-                    f_like = io.BytesIO(file_bytes)
-                    f_like.name = filename
-                    text = extract_text(f_like)
-                    print(f"[api_start_audit] Fresh extraction for '{filename}' ({len(text)} chars)", flush=True)
+                # Force fresh text parsing on every upload (No stale chunk caching)
+                f_like = io.BytesIO(file_bytes)
+                f_like.name = filename
+                text = extract_text(f_like)
+                print(f"[api_start_audit] Fresh extraction for '{filename}' ({len(text)} chars)", flush=True)
 
                 file_registry[filename] = text
                 files_data.append({
@@ -796,6 +789,16 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
                     framework=report.framework or "ISO 27001",
                     score_percent=score_pct
                 ))
+
+            # Record entry in AdminAuditLog for Privacy-Safe System Log Trail
+            db.add(AdminAuditLog(
+                auditor_user=username or "Auditor",
+                session_id=session_id,
+                action="FORCE_COMMIT" if force else "COMMIT_SHAKTHI_DB",
+                unreviewed_controls=str(len(unreviewed)) if force else "0",
+                details=f"Committed {total_ctrls} audit record(s) to Shakthi DB (Compliance Score: {score_pct}%)."
+            ))
+
             db.commit()
             return {
                 "success": True, 
@@ -970,13 +973,11 @@ def api_upload_scope_excel(file: UploadFile = File(...)):
         if col_control is None or col_evidence is None:
             raise HTTPException(status_code=400, detail="Columns for 'Control' and 'Evidence' could not be identified.")
 
-        custom_evidence = {}
-        custom_documents = {}
-        matched_sls = set()
+        matched_sls_list = []
         digit_re = _re.compile(r'(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)')
         vapt_re = _re.compile(r'(vapt-\d{1,2})', _re.IGNORECASE)
 
-        for _, row in df.iterrows():
+        for row_idx, row in df.iterrows():
             ctrl_val = str(row[col_control]).strip()
             ev_val = str(row[col_evidence]).strip()
             if not ctrl_val or ctrl_val == "nan" or not ev_val or ev_val == "nan":
@@ -1005,25 +1006,25 @@ def api_upload_scope_excel(file: UploadFile = File(...)):
                     uc_id = uc["use_case"].split(" ")[0]
                     uc_uc = str(uc.get("use_case", "")).lower()
                     
-                    if 'ntp' in c_lower and uc_id == "8.17":
+                    if 'ntp' in c_lower and uc_id in ("8.14", "8.17"):
                         matched_uc = uc
                         break
-                    elif ('multifactor' in c_lower or 'mfa' in c_lower) and uc_id in ("5.17", "8.5"):
+                    elif ('multifactor' in c_lower or 'mfa' in c_lower) and uc_id in ("5.17", "8.5", "5.15"):
                         matched_uc = uc
                         break
                     elif 'pam' in c_lower and uc_id in ("5.15", "8.2", "5.18"):
                         matched_uc = uc
                         break
-                    elif 'fraud' in c_lower and uc_id in ("5.1", "5.15"):
+                    elif 'fraud' in c_lower and uc_id in ("5.4", "5.1", "5.15"):
                         matched_uc = uc
                         break
                     elif ('archived' in c_lower or 'archival' in c_lower or 'logging' in c_lower) and uc_id in ("8.15", "5.33"):
                         matched_uc = uc
                         break
-                    elif any(k in c_lower for k in ('cpu', 'memory', 'disk', 'utilization')) and uc_id in ("8.16", "8.6"):
+                    elif any(k in c_lower for k in ('cpu', 'memory', 'disk', 'utilization')) and uc_id in ("8.6", "8.16"):
                         matched_uc = uc
                         break
-                    elif 'authentication' in c_lower and uc_id in ("5.17", "5.15"):
+                    elif 'authentication' in c_lower and uc_id in ("8.5", "5.17", "5.15"):
                         matched_uc = uc
                         break
                     elif c_lower in uc_uc:
@@ -1032,27 +1033,32 @@ def api_upload_scope_excel(file: UploadFile = File(...)):
 
             if matched_uc:
                 uc_key = matched_uc["use_case"]
-                if uc_key in custom_evidence:
-                    custom_evidence[uc_key] += f" | {ev_val}"
-                else:
-                    custom_evidence[uc_key] = ev_val
+                uc_id = uc_key.split(" ")[0]
+
+                for target_k in (uc_key, uc_id, ctrl_val):
+                    if target_k in custom_evidence:
+                        if ev_val not in custom_evidence[target_k]:
+                            custom_evidence[target_k] += f" | {ev_val}"
+                    else:
+                        custom_evidence[target_k] = ev_val
 
                 if col_document is not None:
                     doc_val = str(row[col_document]).strip()
                     if doc_val and doc_val != "nan":
-                        if uc_key in custom_documents:
-                            if doc_val not in custom_documents[uc_key]:
-                                custom_documents[uc_key] += f", {doc_val}"
-                        else:
-                            custom_documents[uc_key] = doc_val
-                matched_sls.add(matched_uc["sl"])
+                        for target_k in (uc_key, uc_id, ctrl_val):
+                            if target_k in custom_documents:
+                                if doc_val not in custom_documents[target_k]:
+                                    custom_documents[target_k] += f", {doc_val}"
+                            else:
+                                custom_documents[target_k] = doc_val
+                matched_sls_list.append(matched_uc["sl"])
 
         return {
             "success": True,
-            "matched_sls": list(matched_sls),
+            "matched_sls": matched_sls_list,
             "custom_evidence": custom_evidence,
             "custom_documents": custom_documents,
-            "message": f"Successfully matched {len(matched_sls)} standard compliance controls."
+            "message": f"Successfully matched {len(matched_sls_list)} Excel audit checklist items."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1799,6 +1805,7 @@ def api_reject_doc_from_finding(finding_id: int, req: dict):
     try:
         doc_name = req.get('doc_name', '').strip()
         control_id = req.get('control_id', '').strip()
+        reason = req.get('reason', '').strip()
         if not doc_name:
             raise HTTPException(status_code=400, detail='Missing doc_name')
         with force_master():
@@ -1811,18 +1818,15 @@ def api_reject_doc_from_finding(finding_id: int, req: dict):
             finding.is_saved_to_shakthi = True
             finding.human_verified = True
             ctrl_id = control_id or finding.control_id
-            existing_fb = db.query(AuditorFeedback).filter(
-                AuditorFeedback.control_id == ctrl_id,
-                AuditorFeedback.evidence_snippet.like(f'%{doc_name}%')
-            ).first()
-            if not existing_fb:
-                db.add(AuditorFeedback(
-                    control_id=ctrl_id,
-                    evidence_snippet=f'Rejected evidence document: {doc_name} for control {ctrl_id}',
-                    corrected_status='REJECTED',
-                    finding=f'Document {doc_name} was rejected by auditor for control {ctrl_id}',
-                    auditor_comments=f'Auditor manually rejected document {doc_name} from evidence list.'
-                ))
+            
+            fb_comments = f"Auditor rejected document '{doc_name}'. Reason: {reason}" if reason else f"Auditor manually rejected document '{doc_name}' from evidence list."
+            db.add(AuditorFeedback(
+                control_id=ctrl_id,
+                evidence_snippet=f'Rejected evidence document: {doc_name} for control {ctrl_id}',
+                corrected_status='REJECTED',
+                finding=f'Document {doc_name} was rejected by auditor for control {ctrl_id}',
+                auditor_comments=fb_comments
+            ))
             db.commit()
             return {'success': True, 'message': f'Document {doc_name} rejected and removed.', 'remaining_source_files': finding.source_files}
     except HTTPException:
@@ -1830,5 +1834,31 @@ def api_reject_doc_from_finding(finding_id: int, req: dict):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f'Reject document failed: {e}')
+    finally:
+        db.close()
+
+@router.post('/findings/{finding_id}/restore-doc')
+def api_restore_doc_to_finding(finding_id: int, req: dict):
+    db = SessionLocal()
+    try:
+        doc_name = req.get('doc_name', '').strip()
+        if not doc_name:
+            raise HTTPException(status_code=400, detail='Missing doc_name')
+        with force_master():
+            finding = db.query(Finding).filter(Finding.id == finding_id).first()
+            if not finding:
+                raise HTTPException(status_code=404, detail='Finding not found')
+            current_docs = [s.strip() for s in (finding.source_files or '').split(',') if s.strip()]
+            if doc_name not in current_docs:
+                current_docs.append(doc_name)
+                finding.source_files = ', '.join(current_docs)
+                finding.is_saved_to_shakthi = True
+                db.commit()
+            return {'success': True, 'message': f'Document {doc_name} restored.', 'remaining_source_files': finding.source_files}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f'Restore document failed: {e}')
     finally:
         db.close()
