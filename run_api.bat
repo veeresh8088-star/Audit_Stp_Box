@@ -59,16 +59,19 @@ echo [3/3] Launching AICyberAuditBox Dashboard...
 set CERTBOT_CERT=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com\fullchain.pem
 set CERTBOT_KEY=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com\privkey.pem
 
+:: FIX: --workers 4 spawns 4 parallel Python processes.
+:: 10 simultaneous users are distributed across 4 workers instead of queuing through 1.
+:: --reload is incompatible with --workers (removed for production multi-user mode).
 if exist "%CERTBOT_CERT%" if exist "%CERTBOT_KEY%" (
     echo [🔒 TRUSTED SSL] Let's Encrypt Certificate detected! Starting HTTPS server...
     start https://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile "%CERTBOT_KEY%" --ssl-certfile "%CERTBOT_CERT%"
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --workers 4 --ssl-keyfile "%CERTBOT_KEY%" --ssl-certfile "%CERTBOT_CERT%"
 ) else if exist cert.pem if exist key.pem (
     echo [🔒 SSL] Self-Signed Certificate detected! Starting HTTPS server...
     start https://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --workers 4 --ssl-keyfile key.pem --ssl-certfile cert.pem
 ) else (
     echo [HTTP] Starting standard HTTP server...
     start http://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 80
+    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 80 --workers 4
 )

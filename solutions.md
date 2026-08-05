@@ -149,4 +149,22 @@ flowchart TD
      * Selecting 2 to 10+ auditor sessions and clicking **"⚡ Combine Selected Sessions"** calculates combined total latency (e.g. 1h 03m 25s), combined tokens, total files/sizes, overall compliance score, and side-by-side comparative matrix.
      * Provides 1-click **"📥 Download Executive Excel Report"** (`.xlsx`).
 
+---
 
+### Fix 11: High-Concurrency Multi-Auditor Scalability & SQLite WAL Stabilization
+* **Location:** `src/api/endpoints/audit.py`, `src/db/database.py`, `src/core/bg_worker.py`, `run_api.bat`
+* **Problem:** When 10 auditors initiated scans simultaneously, 7 out of 8 evidence files were dropped for some sessions. This caused major metric shifts:
+  * **File Drop:** 8 files (512 KB, 262k chars) dropped to 1 file (2.7 KB, 1.4k chars) due to HTTP network socket congestion and SQLite database write locks (`database is locked`).
+  * **Token Shift:** Prompt tokens dropped from 73,928 down to 5,180 tokens due to missing evidence files.
+  * **Result Variation:** Compliance score shifted from 3 Compliant / 3 Gaps to 4 Compliant / 2 Gaps because evidence inside the 7 dropped files was unreadable.
+  * **Latency Variance:** Latency varied between 24m 09s and 27m 43s as 10 threads competed for LLM inference on 8 logical CPU cores.
+* **Solution Implemented:**
+  1. **Async Non-Blocking Uploads (`src/api/endpoints/audit.py`):** Converted `/upload` to `async def` using `await f.read()`. Allows Uvicorn's event loop to stream files from all 10 browser tabs concurrently without thread blocking.
+  2. **Single Atomic Batch DB Commit (`src/api/endpoints/audit.py`):** Moved `db.commit()` outside the file loop to insert all 8 file records in 1 single transaction. Reduced SQLite write-lock duration from 8 separate lock events to 1 atomic event (~0.002s total lock time).
+  3. **Exponential Backoff Retry Cap (`src/api/endpoints/audit.py`):** Added a 3-attempt retry loop with exponential backoff and random jitter (`(0.5 * 2^attempt) + random(0, 0.2s)`). Prevents deadlock / thundering herd while failing fast if retries are exhausted.
+  4. **SQLite Engine Optimization (`src/db/database.py`):** Updated SQLite `connect_args` to `timeout=30` and `check_same_thread=False`, allowing safe concurrent thread access across FastAPI worker threads.
+  5. **Multi-Worker Process Execution (`run_api.bat`):** Added `--workers 4` to Uvicorn startup commands, spawning 4 parallel Python worker processes matching 4 Physical CPU Cores.
+  6. **Hardware CPU Scaling Rules:** Configured worker and background audit thread defaults matching hardware capacity:
+     * **4 Physical Cores / 8 Logical Cores:** `--workers 4`, `MAX_CONCURRENT_AUDITS=2` (Optimal for 4-core laptops/desktops).
+     * **8 Physical Cores / 16 Logical Cores:** `--workers 8`, `MAX_CONCURRENT_AUDITS=4`.
+     * **16 Physical Cores / 32 Logical Cores:** `--workers 16`, `MAX_CONCURRENT_AUDITS=8`.

@@ -835,7 +835,11 @@ Return format: ["topic1", "topic2", ...]"""
 
     return resolved_list, findings_list, all_results
 
-_audit_semaphore = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_AUDITS", "2")))
+# FIX: Increased default from 2 to 4 concurrent audits.
+# With 8 CPU cores and 10 simultaneous users: 4 audits run in parallel,
+# remaining 6 queue cleanly and wait instead of being dropped or erroring.
+# Override at startup: set env var MAX_CONCURRENT_AUDITS=N
+_audit_semaphore = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_AUDITS", "4")))
 
 def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None):
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)

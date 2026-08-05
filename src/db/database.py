@@ -710,7 +710,10 @@ def init_db():
         sqlite_path = "data/sqlite/shakthidb_sqlite.db"
         eng_sqlite = create_engine(
             f"sqlite:///{sqlite_path}",
-            connect_args={"timeout": 15}
+            connect_args={
+                "timeout": 30,          # FIX: wait up to 30s for DB lock (was 15s)
+                "check_same_thread": False  # FIX: allow multi-thread access from FastAPI workers
+            }
         )
         try:
             with eng_sqlite.connect() as conn:
