@@ -594,10 +594,27 @@ Return format: ["topic1", "topic2", ...]"""
         control_file_names = file_names_list
         target_evidence_files = []   # Track which specific evidence files this control maps to
 
+        def _match_control_key(c_id, docs_source):
+            if not c_id or not docs_source: return None
+            if c_id in docs_source: return docs_source[c_id]
+            import re
+            def _clean(s): return re.sub(r'[^a-z0-9]', '', str(s).lower())
+            clean_cid = _clean(c_id)
+            for k, v in docs_source.items():
+                clean_k = _clean(k)
+                if clean_cid and clean_k and (clean_cid in clean_k or clean_k in clean_cid):
+                    return v
+            num_cid = re.sub(r'[^0-9\.]', '', str(c_id)).strip('.')
+            for k, v in docs_source.items():
+                num_k = re.sub(r'[^0-9\.]', '', str(k)).strip('.')
+                if num_cid and num_k and (num_cid == num_k or num_cid.endswith('.' + num_k) or num_k.endswith('.' + num_cid)):
+                    return v
+            return None
+
         target_doc_name = None
         docs_source = custom_docs if custom_docs is not None else {}
-        if docs_source and c["control"] in docs_source:
-            target_doc_name = docs_source[c["control"]]
+        if docs_source:
+            target_doc_name = _match_control_key(c["control"], docs_source)
 
         if target_doc_name:
             # Normalise filenames for fuzzy matching (strip extension + punctuation)
