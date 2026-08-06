@@ -315,3 +315,16 @@ flowchart TD
 * **Solution Implemented:**
   1. Added `irrox`, `sudarsnanzatna`, `wom` stripping rules to `_cleanOcrText()` and added fallback handling for `"JPG"` / `"PNG"` extensions in `formatEvidenceSnippet()` (`app.js`).
   2. Deduplicated control IDs (`seen_controls.add(ctrl_id)`) in `_build_controls_for_audit()` in `bg_worker.py`, guaranteeing **exactly 1 unified card per control**.
+
+---
+
+### Fix 26: Local LLM Backend Auto-Detection & Windows Encoding Stabilization
+* **Location:** `src/core/llm_client.py`, `src/core/bg_worker.py`, `src/api/static/app.js`
+* **Problem:** 
+  1. `get_llm_backend()` was probing `GET /health` to detect `llama.cpp`. Since Ollama also returns `200 OK` on `/health`, Ollama servers were misidentified as `llama.cpp`, routing prompts to `/completion` instead of `/api/generate` and throwing `500 - context does not logits computation`.
+  2. Windows console stdout using `cp1252` encoding crashed with `UnicodeEncodeError` when background worker printed the `⚡` emoji.
+  3. Linux terminal screenshot OCR text (`timedatectl status`) appeared as raw unformatted shell text inside evidence cards.
+* **Solution Implemented:**
+  1. Updated `get_llm_backend()` in `llm_client.py` to probe `GET /props` and verify `"default_generation_settings"`, accurately distinguishing `llama.cpp` from `ollama`.
+  2. Replaced `⚡` with `[CONTROL EVALUATED]` in `bg_worker.py` L728 to guarantee zero `cp1252` charmap crashes on Windows stdout.
+  3. Enhanced `formatEvidenceSnippet()` in `app.js` with regex parsers for Linux NTP (`timedatectl`, `ntp enabled: yes`, `ntp synchronized: yes`) and PAM screens, formatting raw terminal output into auditor-ready bullet points.
