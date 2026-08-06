@@ -2,6 +2,7 @@ import os
 import threading
 import requests
 import json
+from src.core.port_pool import port_pool_manager
 
 # ── Round-Robin Load Balancer ─────────────────────────────────────────────────
 # When LLM_HOSTS env var is set (e.g. "11434,11436"), requests are distributed
@@ -37,13 +38,13 @@ def get_llm_backend():
     env = os.environ.get("LLM_BACKEND", "").strip().lower()
     if env:
         return env
-    # Auto-detect: probe /health endpoint on 11434 (llama.cpp returns 200 OK)
+    # Auto-detect: probe llama.cpp vs Ollama endpoints on 11434
     try:
         host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
         if not host.startswith("http"):
             host = f"http://{host}"
-        r = requests.get(f"{host}/health", timeout=1)
-        if r.status_code == 200:
+        r = requests.get(f"{host}/props", timeout=1)
+        if r.status_code == 200 and "default_generation_settings" in r.text:
             return "llama.cpp"
     except Exception:
         pass
@@ -57,76 +58,73 @@ def _resolve_host(url=None, default_port=11434):
         url = f"http://{url}" if ":" in url else f"http://{url}:{default_port}"
     return url
 
-def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=600, stop=None):
-    """Sends a non-streaming prompt completion request to the configured LLM backend."""
+def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=600, stop=None, session_id=None):
+    """Sends a non-streaming prompt completion request through port_pool_manager per-port lock."""
     backend = get_llm_backend()
-    host = _resolve_host()
     
-    if backend in ("llama.cpp", "llamacpp"):
-        if "gemma" in model.lower():
-            prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
-        url = f"{host}/completion"
-        payload = {
-            "prompt": prompt,
-            "temperature": temperature,
-            "stream": False,
-            "n_predict": 1024,
-            "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>", "</audit_finding>", "</gap_analysis>", "</vapt_finding>", "</finding>", "```"]
-        }
-        if format == "json":
-            payload["response_format"] = {"type": "json_object"}
-            
-        r = requests.post(url, json=payload, timeout=timeout)
-        if r.status_code == 200:
-            return r.json().get("content", "").strip()
-        else:
-            raise Exception(f"llama.cpp server error: {r.status_code} - {r.text}")
-    else:
-        # Default: Ollama
-        url = f"{host}/api/generate"
-        options_dict = {
-            "temperature": temperature,
-            "num_ctx": num_ctx,
-            "num_predict": 1024 if format == "json" else 2048
-        }
-        if num_thread is not None:
-            options_dict["num_thread"] = num_thread
-        if stop:
-            options_dict["stop"] = stop
-            
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": options_dict,
-            "keep_alive": "15m"
-        }
-        if format:
-            payload["format"] = format
-            
-        r = requests.post(url, json=payload, timeout=timeout)
-        if r.status_code == 200:
-            return r.json().get("response", "").strip()
-        elif r.status_code == 404:
-            # Fallback check for llama.cpp server running on same host
-            l_url = f"{host}/completion"
-            l_prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n" if "gemma" in model.lower() else prompt
-            l_payload = {
-                "prompt": l_prompt,
+    with port_pool_manager.acquire_control_slot(session_id=session_id, timeout=timeout) as host:
+        if backend in ("llama.cpp", "llamacpp"):
+            if "gemma" in model.lower():
+                prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
+            url = f"{host}/completion"
+            payload = {
+                "prompt": prompt,
                 "temperature": temperature,
                 "stream": False,
                 "n_predict": 1024,
                 "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>", "</audit_finding>", "</gap_analysis>", "</vapt_finding>", "</finding>", "```"]
             }
-            try:
-                lr = requests.post(l_url, json=l_payload, timeout=timeout)
-                if lr.status_code == 200:
-                    return lr.json().get("content", "").strip()
-            except Exception:
-                pass
-            raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
+            if format == "json":
+                payload["response_format"] = {"type": "json_object"}
+                
+            r = requests.post(url, json=payload, timeout=timeout)
+            if r.status_code == 200:
+                return r.json().get("content", "").strip()
+            else:
+                raise Exception(f"llama.cpp server error: {r.status_code} - {r.text}")
         else:
-            raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
+            # Default: Ollama
+            url = f"{host}/api/generate"
+            options_dict = {
+                "temperature": temperature,
+                "num_ctx": num_ctx,
+                "num_predict": 1024 if format == "json" else 2048
+            }
+            if num_thread is not None:
+                options_dict["num_thread"] = num_thread
+            if stop:
+                options_dict["stop"] = stop
+                
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": options_dict,
+                "keep_alive": "15m"
+            }
+            if format:
+                payload["format"] = format
+                
+            r = requests.post(url, json=payload, timeout=timeout)
+            if r.status_code == 200:
+                return r.json().get("response", "").strip()
+            elif r.status_code == 404:
+                # Fallback check for llama.cpp server running on same host
+                l_url = f"{host}/completion"
+                l_prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n" if "gemma" in model.lower() else prompt
+                l_payload = {
+                    "prompt": l_prompt,
+                    "temperature": temperature,
+                    "stream": False,
+                    "n_predict": 1024,
+                    "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>", "</audit_finding>", "</gap_analysis>", "</vapt_finding>", "</finding>", "```"]
+                }
+                l_r = requests.post(l_url, json=l_payload, timeout=timeout)
+                if l_r.status_code == 200:
+                    return l_r.json().get("content", "").strip()
+                raise Exception(f"Ollama server error: 404 - Model '{model}' not found or endpoint invalid")
+            else:
+                raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
 
 def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=None):
     """Generates streaming tokens from the LLM backend."""

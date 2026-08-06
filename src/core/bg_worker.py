@@ -205,10 +205,15 @@ def _get_expected_evidence(uc, custom_evidence=None):
 def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
     all_ucs = list(USE_CASES) + _load_custom_use_cases()
     controls = []
+    seen_controls = set()
     for uc in all_ucs:
+        ctrl_id = uc["use_case"]
+        if ctrl_id in seen_controls:
+            continue
         if selected_sls is None or uc["sl"] in selected_sls:
+            seen_controls.add(ctrl_id)
             controls.append({
-                "control": uc["use_case"],
+                "control": ctrl_id,
                 "label": uc["label"],
                 "expected": _get_expected_evidence(uc, custom_evidence),
                 "prompt_hint": uc["prompt_hint"],
@@ -720,7 +725,7 @@ Return format: ["topic1", "topic2", ...]"""
             ctrl_c_toks = int(len(str(result.get("reasoning", "") if result else "")) / 3.8) + 120
             ctrl_t_toks = ctrl_p_toks + ctrl_c_toks
 
-            print(f"[{time.strftime('%H:%M:%S')}] ⚡ [CONTROL EVALUATED] {c['control']} ({c['label']}) | Status: {res_status} | Latency: {c_lat_str} ({ctrl_duration:.1f}s) | Tokens Used: {ctrl_t_toks:,} (Prompt: {ctrl_p_toks:,}, Completion: {ctrl_c_toks:,})", flush=True)
+            print(f"[{time.strftime('%H:%M:%S')}] [CONTROL EVALUATED] {c['control']} ({c['label']}) | Status: {res_status} | Latency: {c_lat_str} ({ctrl_duration:.1f}s) | Tokens Used: {ctrl_t_toks:,} (Prompt: {ctrl_p_toks:,}, Completion: {ctrl_c_toks:,})", flush=True)
             log_dev_latency(f"[{idx + 1}/{total}] [SUCCESS] Control {c['control']} {c['label']} completed in {ctrl_duration:.2f}s ({c_lat_str}) | Tokens: {ctrl_t_toks:,}")
         except Exception as e:
             print(f"[AUDIT ERROR] Error evaluating control {c['control']}: {e}", flush=True)
