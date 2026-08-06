@@ -37,12 +37,9 @@ class LLMPortPoolManager:
                 else:
                     self.ports.append(p)
         else:
-            # Auto-detect optimal ports based on CPU cores
-            total_cores = os.cpu_count() or 8
-            if total_cores >= 8:
-                self.ports = ["http://127.0.0.1:11434", "http://127.0.0.1:11435"]
-            else:
-                self.ports = ["http://127.0.0.1:11434"]
+            # Default completion port is 11434 (11435 is dedicated for embeddings)
+            embed_host = os.environ.get("EMBEDDING_HOST", "11435")
+            self.ports = ["http://127.0.0.1:11434"]
                 
         # Per-port mutex locks to guarantee 0 prompt collisions on any single port
         self.port_locks = {port: threading.Lock() for port in self.ports}

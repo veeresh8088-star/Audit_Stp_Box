@@ -40,8 +40,8 @@ set /a EMBED_THREADS=%NUMBER_OF_PROCESSORS%
 if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 
 echo.
-echo [2/5] Starting llama.cpp LLM Server (Port 11434 with %LLM_THREADS% threads, --mlock locked RAM, 16k context)...
-start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 16384 -t %LLM_THREADS% -b 2048 -ub 512 --mlock --flash-attn on
+echo [2/5] Starting llama.cpp LLM Server (Port 11434 with %LLM_THREADS% threads, --mlock locked RAM, dynamic context -c 0)...
+start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 0 -t %LLM_THREADS% -b 2048 -ub 512 --mlock --flash-attn on
 
 echo.
 echo [3/5] Starting llama.cpp Embedding Server (Port 11435 with %EMBED_THREADS% threads, --mlock locked RAM)...
