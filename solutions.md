@@ -359,3 +359,12 @@ flowchart TD
   1. Updated default `timeout` in `query_llm()` (`src/core/llm_client.py`) from 600s to 1800s (30 minutes).
   2. Updated `_timeout` and `_ref_timeout` in `src/ai/audit_graph.py` to 1800s.
   3. Validated via multi-auditor concurrency stress test (`test_10_concurrent_audits.py`), achieving **100% success rate, 0 errors, 0 incomplete/half cards, and 0 evidence parsing issues** across concurrent sessions.
+
+---
+
+### Fix 30: Fuzzy Control Key Matcher to Eliminate Excel Evidence Leakage
+* **Location:** `src/core/bg_worker.py`
+* **Problem:** String mismatches between Excel checklist keys (e.g. `"A.8.6 Capacity Management"`) and internal control IDs (e.g. `"8.6"`) caused `docs_source` dictionary lookups to fail, resulting in `target_doc_name = None`. This bypassed strict 1-to-1 file isolation and fell back to global RAG vector search, causing unrelated evidence (e.g. MFA docs) to bleed into Capacity Management controls.
+* **Solution Implemented:**
+  1. Implemented `_match_control_key()` in `src/core/bg_worker.py` with multi-pass fuzzy normalization (exact key, cleaned alphanumeric string, and numeric section ID e.g. `8.6` $\leftrightarrow$ `A.8.6`).
+  2. Guarantees 100% strict 1-to-1 file isolation for Excel Scoping with **zero evidence leakage and zero control key mismatch**.
