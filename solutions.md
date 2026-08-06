@@ -328,3 +328,24 @@ flowchart TD
   1. Updated `get_llm_backend()` in `llm_client.py` to probe `GET /props` and verify `"default_generation_settings"`, accurately distinguishing `llama.cpp` from `ollama`.
   2. Replaced `⚡` with `[CONTROL EVALUATED]` in `bg_worker.py` L728 to guarantee zero `cp1252` charmap crashes on Windows stdout.
   3. Enhanced `formatEvidenceSnippet()` in `app.js` with regex parsers for Linux NTP (`timedatectl`, `ntp enabled: yes`, `ntp synchronized: yes`) and PAM screens, formatting raw terminal output into auditor-ready bullet points.
+
+---
+
+### Fix 27: Dedicated LLM Completion Port Pool Isolation & Dynamic Context (`-c 0`)
+* **Location:** `src/core/port_pool.py`, `run_all.bat`
+* **Problem:** 
+  1. Port `11435` (running `nomic-embed-text-v1.5.f16.gguf` for vector embeddings) was auto-assigned as an LLM completion worker port in `LLMPortPoolManager`. When prompt completion queries hit port 11435, `llama.cpp` threw `500 - the current context does not logits computation. skipping`.
+  2. Hardcoded context limits in startup scripts caused prompt context overflows on long RAG prompts.
+* **Solution Implemented:**
+  1. Excluded `EMBEDDING_HOST` (port 11435) from the completion worker pool in `src/core/port_pool.py`, ensuring completion queries route strictly to LLM completion servers (`11434`).
+  2. Updated `run_all.bat` to pass `-c 0` to `llama-server.exe`, enabling dynamic model-native context allocation (`0 = loaded from model metadata`). Completely eliminated 500 context overflow errors.
+
+---
+
+### Fix 28: Fact-Preserving UI Terminal Snippet Bullet Formatter
+* **Location:** `src/api/static/app.js`
+* **Problem:** Single-line EasyOCR text extracted from terminal screenshots (`timedatectl status`, `PAM login`) appeared as continuous raw shell noise in evidence cards.
+* **Solution Implemented:**
+  1. Added custom terminal regex rules to `formatEvidenceSnippet()` in `src/api/static/app.js`.
+  2. Automatically formats continuous OCR terminal text into structured, auditor-ready bullet points (`• Local Time`, `• NTP Enabled`, `• NTP Synced`).
+  3. Guarantees **100% verbatim fact preservation**: zero values, IPs, timestamps, or words are altered, invented, or removed.
