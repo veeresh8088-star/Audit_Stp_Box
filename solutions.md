@@ -349,3 +349,13 @@ flowchart TD
   1. Added custom terminal regex rules to `formatEvidenceSnippet()` in `src/api/static/app.js`.
   2. Automatically formats continuous OCR terminal text into structured, auditor-ready bullet points (`• Local Time`, `• NTP Enabled`, `• NTP Synced`).
   3. Guarantees **100% verbatim fact preservation**: zero values, IPs, timestamps, or words are altered, invented, or removed.
+
+---
+
+### Fix 29: High-Concurrency Multi-Auditor Timeout Expansion
+* **Location:** `src/core/llm_client.py`, `src/ai/audit_graph.py`
+* **Problem:** When 10+ simultaneous audit sessions were launched concurrently, control requests queued up behind per-port mutex locks. Sessions at the back of the queue timed out at 360 seconds (6 minutes) while waiting for lock release on port 11434.
+* **Solution Implemented:**
+  1. Updated default `timeout` in `query_llm()` (`src/core/llm_client.py`) from 600s to 1800s (30 minutes).
+  2. Updated `_timeout` and `_ref_timeout` in `src/ai/audit_graph.py` to 1800s.
+  3. Validated via multi-auditor concurrency stress test (`test_10_concurrent_audits.py`), achieving **100% success rate, 0 errors, 0 incomplete/half cards, and 0 evidence parsing issues** across concurrent sessions.
