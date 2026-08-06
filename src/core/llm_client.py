@@ -58,7 +58,7 @@ def _resolve_host(url=None, default_port=11434):
         url = f"http://{url}" if ":" in url else f"http://{url}:{default_port}"
     return url
 
-def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=600, stop=None, session_id=None):
+def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=1800, stop=None, session_id=None):
     """Sends a non-streaming prompt completion request through port_pool_manager per-port lock."""
     backend = get_llm_backend()
     

@@ -140,8 +140,8 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
                 result_holder["error"] = str(ex)
         t = threading.Thread(target=_run, daemon=True)
         t.start()
-        # 360s (6 min) hard limit — llama.cpp needs ~5 min per control for deep models
-        _timeout = 360
+        # 1800s (30 min) limit — supports multi-auditor queuing across concurrent sessions
+        _timeout = 1800
         # ── Heartbeat: update progress every 15s so UI never shows stuck 0% ──
         _elapsed = 0
         _heartbeat_interval = 15
@@ -386,7 +386,7 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
         t = threading.Thread(target=_run_reflect, daemon=True)
         t.start()
         # 300s (5 min) hard limit per reflection pass — same reason as generate_node
-        _ref_timeout = 300
+        _ref_timeout = 1800
         # ── Heartbeat: keep progress moving between 85%→95% during reflection ──
         _ref_elapsed = 0
         _ref_hb = 15
