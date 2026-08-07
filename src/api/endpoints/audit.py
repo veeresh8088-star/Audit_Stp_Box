@@ -510,7 +510,6 @@ def api_stop_audit(session_id: str):
     return {"success": True, "message": "Scan stopped successfully."}
 
 @router.get("/status/{session_id}")
-
 def api_get_status(session_id: str):
     with _bg_lock:
         is_running = session_id in _bg_running
@@ -554,6 +553,16 @@ def api_get_status(session_id: str):
         }
         
     return {"status": "idle", "checkpoint": checkpoint_data}
+
+
+@router.get("/progress")
+def api_get_progress(session_id: str):
+    """
+    Alias for /status/{session_id} using query parameter instead of path parameter.
+    Frontend calls /api/audit/progress?session_id=... — this endpoint handles that.
+    Previously returned 404 because only /status/{session_id} existed.
+    """
+    return api_get_status(session_id)
 
 @router.get("/findings")
 def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bool = False, include_info: bool = False):
