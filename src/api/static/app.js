@@ -447,7 +447,7 @@ async function loadRecentSessions() {
         if (currentUser) {
             url += `?role=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username)}`;
         }
-        const response = await fetch(url);
+        const response = await authFetch(url);
         const data = await response.json();
 
         if (data.success && data.sessions.length > 0) {
@@ -835,7 +835,7 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
             sessionBody.append("session_title", finalTitle);
             sessionBody.append("framework", "ISO 27001");
             sessionBody.append("username", currentUser ? currentUser.username : "admin");
-            const saveResp = await fetch(`${API_BASE}/audit/sessions`, {
+            const saveResp = await authFetch(`${API_BASE}/audit/sessions`, {
                 method: "POST",
                 body: sessionBody
             });
@@ -846,6 +846,13 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
             }
         } catch (saveErr) {
             console.warn("[Session] Could not persist session to DB:", saveErr.message);
+        }
+
+        // ── Reload controls list fresh for the new session ────────────────────────────
+        try {
+            await loadFrameworkControls();
+        } catch (e) {
+            console.warn("[Session] Controls reload warning:", e);
         }
 
         loadRecentSessions();
@@ -873,7 +880,7 @@ async function checkInterruptedAuditSessions() {
 
     try {
         const username = currentUser.username || "auditor";
-        const resp = await fetch(`${API_BASE}/audit/interrupted-checkpoints?username=${encodeURIComponent(username)}`);
+        const resp = await authFetch(`${API_BASE}/audit/interrupted-checkpoints?username=${encodeURIComponent(username)}`);
         const data = await resp.json();
 
         if (data.success && data.interrupted_sessions && data.interrupted_sessions.length > 0) {
