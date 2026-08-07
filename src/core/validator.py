@@ -171,6 +171,12 @@ def map_new_schema_to_legacy(finding):
                      "policy document", "uploaded document", "evidence document",
                      "context", "evidence", "document", ""}
     
+    _loc = (
+        finding.get("evidence_source_file") or
+        finding.get("source_files") or
+        finding.get("evidence_location") or ""
+    ).strip()
+
     # Combine Parent Document and Child Image Filename (e.g. "Monitoring AWS CloudWatch.docx (image1.png)")
     parent_file = (finding.get("source_files") or finding.get("parent_document") or "").strip()
     child_file = (finding.get("evidence_source_file") or "").strip()
@@ -178,11 +184,12 @@ def map_new_schema_to_legacy(finding):
     if child_file and parent_file and child_file != parent_file:
         if child_file.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff")) and parent_file not in child_file:
             _loc = f"{parent_file} ({child_file})"
-        elif parent_file not in _loc and child_file in _loc:
+        elif _loc and parent_file not in _loc and child_file in _loc:
             _loc = _loc.replace(child_file, f"{parent_file} ({child_file})")
 
     if _loc and _loc.lower() not in _FAKE_SOURCES:
         mapped["evidence_location"] = _loc
+
 
 
     mapped["evidence_quote"] = evidence_quote
