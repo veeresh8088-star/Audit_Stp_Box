@@ -651,17 +651,38 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
             return;
         }
 
+        // ── FULL SESSION STATE RESET ─────────────────────────────────────────────────
+        // Reset every global variable that belongs to a session so nothing bleeds
+        // from a previous session into the new one.
+
         const shortId = Math.random().toString(36).substring(2, 8);
         activeSessionId = `session-${Date.now()}-${shortId}`;
         activeSessionTitle = finalTitle;
-        findingsList = [];
 
+        // Data state
+        findingsList = [];
+        uploadedFilesList = [];
+        customEvidenceMappings = null;
+        customControlDocuments = null;
+        activeSeverityFilter = "";
+        activeStatusFilter = "All";
+        activeComplianceFilter = "";
+        currentInterruptedSession = null;
+
+        // Stop any in-progress polling from the old session
+        if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+        if (typeof stopAnalysisPolling === "function") stopAnalysisPolling();
+        if (typeof analysisInterval !== "undefined" && analysisInterval) {
+            clearInterval(analysisInterval); analysisInterval = null;
+        }
+
+        // ── Reset UI: Session header ─────────────────────────────────────────────────
         const badgeEl = document.getElementById("active-session-badge");
         const titleEl = document.getElementById("workspace-title");
         if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
         if (titleEl) titleEl.innerText = activeSessionTitle;
 
-        // Reset workspace UI for fresh session
+        // ── Reset UI: File upload area ───────────────────────────────────────────────
         const emptyMsg = `<div class="empty-state">No files uploaded yet. Upload files to verify compliance.</div>`;
         const evidenceRegistry = document.getElementById("uploaded-files-registry");
         const auditeeRegistry = document.getElementById("auditee-files-registry");
@@ -670,27 +691,20 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         if (auditeeRegistry) auditeeRegistry.innerHTML = emptyMsg;
         if (countBadge) countBadge.innerText = "0 files";
 
+        // ── Reset UI: Report preview ─────────────────────────────────────────────────
         const previewContainer = document.getElementById("report-preview-container");
         if (previewContainer) previewContainer.innerHTML = "";
 
-        // Clear findings list
+        // ── Reset UI: Findings panel ─────────────────────────────────────────────────
         const container = document.getElementById("findings-container");
-        if (container) {
-            container.innerHTML = `<div class="empty-state">No audit findings generated yet. Upload evidence documents and click Run Audit.</div>`;
-        }
+        if (container) container.innerHTML = `<div class="empty-state">No audit findings generated yet. Upload evidence documents and click Run Audit.</div>`;
 
-        // Clear KPI counters
-        ["count-compliant", "count-noncompliant", "count-p1", "count-p2", "count-p3", "count-p4"].forEach(id => {
+        // ── Reset UI: KPI counters ───────────────────────────────────────────────────
+        ["count-compliant","count-noncompliant","count-p1","count-p2","count-p3","count-p4"].forEach(id => {
             const el = document.getElementById(id); if (el) el.innerText = "0";
         });
 
-        // Reset analysis scan progress UI & stop any polling from previous session
-        if (typeof stopAnalysisPolling === "function") stopAnalysisPolling();
-        if (typeof analysisInterval !== "undefined" && analysisInterval) {
-            clearInterval(analysisInterval);
-            analysisInterval = null;
-        }
-
+        // ── Reset UI: Scan run button ─────────────────────────────────────────────────
         const runBtn = document.getElementById("run-analysis-btn");
         const stopBtn = document.getElementById("stop-analysis-btn");
         if (runBtn) {
@@ -699,24 +713,57 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
             runBtn.style.opacity = "1";
             runBtn.style.cursor = "pointer";
         }
-        if (stopBtn) {
-            stopBtn.style.display = "none";
-        }
+        if (stopBtn) stopBtn.style.display = "none";
 
-        // Uncheck previous session controls & reset scoping mode
+        // ── Reset UI: Controls checkboxes, search & scoping mode ─────────────────────
         try {
+            // Uncheck all controls
             if (typeof selectAllCheckboxes === "function") selectAllCheckboxes(false);
             if (typeof updateSelectedScopeCount === "function") updateSelectedScopeCount();
+
+            // Reset to AI Auto-Scoping (no Excel scope from old session)
             if (typeof setScopingMode === "function") setScopingMode('AI Auto-Scoping');
+
+            // Clear search filter — "5.15" or any other previous term persisted across sessions
+            const searchInput = document.getElementById("controls-search-input");
+            if (searchInput) {
+                searchInput.value = "";
+                if (typeof filterCheckboxList === "function") filterCheckboxList();
+            }
+
+            // Hide Excel scoping banner
+            const excelBanner = document.getElementById("excel-scope-banner");
+            if (excelBanner) excelBanner.style.display = "none";
+            const scopeLabel = document.getElementById("excel-scope-label");
+            if (scopeLabel) scopeLabel.innerText = "";
+
         } catch (e) {
             console.warn("[Session Reset] Control reset warning:", e);
         }
 
-        // Refresh UI components
+        // ── Reset UI: Status/severity filter buttons ──────────────────────────────────
+        document.querySelectorAll(".filter-btn").forEach(btn => btn.classList.remove("active"));
+        const allBtn = document.querySelector(".filter-btn[data-status='All']") ||
+                       document.querySelector(".filter-btn[data-filter='All']");
+        if (allBtn) allBtn.classList.add("active");
+
+        // ── Reset UI: Workflow filter ─────────────────────────────────────────────────
+        const wfFilter = document.getElementById("workflow-status-filter");
+        if (wfFilter) wfFilter.value = "";
+
+        // ── Reset UI: Progress bar ────────────────────────────────────────────────────
+        const progressBar = document.getElementById("pipeline-progress-fill");
+        const progressPct = document.getElementById("pipeline-progress-percent");
+        const progressStatus = document.getElementById("pipeline-status-text");
+        if (progressBar) progressBar.style.width = "0%";
+        if (progressPct) progressPct.innerText = "0%";
+        if (progressStatus) progressStatus.innerText = "Ready to scan";
+
+        // ── Reload dynamic data ───────────────────────────────────────────────────────
         loadEvidenceFileList();
         populateAuditeeSelector();
 
-        // ── Persist session title to DB immediately so Recent Sessions shows real name ──
+        // ── Persist session to DB ─────────────────────────────────────────────────────
         try {
             const sessionBody = new FormData();
             sessionBody.append("session_title", finalTitle);
@@ -728,9 +775,7 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
             });
             const saveData = await saveResp.json();
             if (saveData.success && saveData.session_id) {
-                // Use the confirmed server-side session_id
                 activeSessionId = saveData.session_id;
-                const badgeEl = document.getElementById("active-session-badge");
                 if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
             }
         } catch (saveErr) {
