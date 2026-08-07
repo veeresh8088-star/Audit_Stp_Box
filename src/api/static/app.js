@@ -3073,15 +3073,16 @@ function renderFindingsList() {
                             specificSnippet = rawSnippet;
                         }
                     }
-                    if (specificSnippet || idx === 0) {
-                        validDocCards.push({
-                            originalFinding: f,
-                            singleDocName: docName,
-                            singleSnippet: specificSnippet,
-                            cardId: `${f.id}_doc_${idx}`
-                        });
-                    }
-                });
+                }
+                if (specificSnippet || idx === 0) {
+                    validDocCards.push({
+                        originalFinding: f,
+                        singleDocName: docName,
+                        singleSnippet: specificSnippet,
+                        cardId: `${f.id}_doc_${idx}`
+                    });
+                }
+            });
 
             if (validDocCards.length > 0) {
                 expandedCards.push(...validDocCards);
@@ -3093,6 +3094,7 @@ function renderFindingsList() {
                     cardId: `${f.id}_doc_0`
                 });
             }
+        } else {
             expandedCards.push({
                 originalFinding: f,
                 singleDocName: (f.evidence_location && f.evidence_location.trim() && f.evidence_location !== "N/A")
