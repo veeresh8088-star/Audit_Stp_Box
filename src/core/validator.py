@@ -357,22 +357,22 @@ def potential_evidence_exists(control_id, document_text):
         if len(cleaned) > 3:
             keywords.append(cleaned)
             
-    # Fallback to USE_CASES if control_id was short (e.g., "6.5") and yielded no keywords
-    if not keywords:
+    # Dynamically extract keywords for ALL 93 ISO 27001 controls from USE_CASES
+    try:
         from src.core.controls_data import USE_CASES
-        full_label = ""
         for uc in USE_CASES:
-            uc_id = uc.get("use_case", "")
-            uc_lbl = uc.get("label", "")
-            if uc_id == control_id or uc_lbl == control_id or uc_id.startswith(control_id) or uc_lbl.startswith(control_id):
-                full_label = uc_id
+            uc_id = str(uc.get("use_case", ""))
+            uc_lbl = str(uc.get("label", ""))
+            sl_str = str(uc.get("sl", ""))
+            if control_id in (uc_id, uc_lbl, sl_str) or uc_id.startswith(control_id) or uc_lbl.startswith(control_id):
+                combined_desc = f"{uc_id} {uc_lbl} {uc.get('description', '')} {' '.join(uc.get('keywords', []))}"
+                for w in combined_desc.split():
+                    cleaned = "".join(c for c in w if c.isalnum()).lower()
+                    if len(cleaned) > 3 and cleaned not in keywords:
+                        keywords.append(cleaned)
                 break
-        if full_label:
-            parts = full_label.split(" ")
-            for p in parts[1:]:
-                cleaned = "".join(c for c in p if c.isalnum()).lower()
-                if len(cleaned) > 3:
-                    keywords.append(cleaned)
+    except Exception as e:
+        print(f"[VALIDATOR] Dynamic keywords error: {e}", flush=True)
 
     # Add domain-specific synonyms & operational evidence terms for ALL ISO 27001 controls
     c_lower = control_id.lower()
