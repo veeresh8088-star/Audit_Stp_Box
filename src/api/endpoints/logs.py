@@ -126,3 +126,201 @@ def api_purge_logs(days: int = Query(90, ge=1)):
         return {"success": True, "message": f"Successfully purged {deleted} events older than {days} days."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to purge logs: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LIVE METRICS ENDPOINT — Powered by Redis Stream
+# Powers the "Live Server Metrics (Redis Stream)" KPI panel + Active Sessions
+# table in the Admin Dashboard. Falls back to zeros if Redis is offline.
+# ─────────────────────────────────────────────────────────────────────────────
+@router.get("/live-metrics")
+def api_get_live_metrics():
+    """
+    Returns live token counts, latency, file sizes, error counts, and
+    per-session active auditor metrics from Redis.
+    Falls back gracefully to zero values if Redis is not available.
+    Used by the Admin Dashboard 'Live Server Metrics (Redis Stream)' KPI cards.
+    """
+    try:
+        from src.core.redis_metrics import get_live_metrics
+        data = get_live_metrics()
+        return {"success": True, **data}
+    except Exception as e:
+        return {
+            "success": True,
+            "redis_available": False,
+            "global_tokens": 0,
+            "global_latency_sec": 0.0,
+            "global_latency_str": "0m 0.0s",
+            "avg_latency_per_ctrl_str": "0m 0.0s",
+            "global_files": 0,
+            "global_errors": 0,
+            "active_sessions": [],
+            "_error": str(e)
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXPORT ENDPOINTS — System Event Logs & Telemetry Benchmark
+# All support optional ?auditor_user= filter for per-user or combined reports.
+# Works with PostgreSQL (ShaktiDB) and SQLite fallback — pure SQLAlchemy ORM.
+# ─────────────────────────────────────────────────────────────────────────────
+import tempfile, uuid as _uuid
+from datetime import datetime as _dt
+from fastapi.responses import FileResponse as _FileResponse
+
+
+def _fetch_system_events(auditor_user: Optional[str] = None) -> list:
+    """Fetch SystemEvent rows as dicts. Works for PostgreSQL and SQLite."""
+    db = SessionLocal()
+    try:
+        q = db.query(SystemEvent)
+        if auditor_user and auditor_user.strip() and auditor_user.lower() != "all":
+            q = q.filter(SystemEvent.actor.ilike(f"%{auditor_user.strip()}%"))
+        rows = q.order_by(SystemEvent.created_at.desc()).limit(5000).all()
+        return [
+            {
+                "created_at": str(r.created_at) if r.created_at else "",
+                "actor":      r.actor or "SYSTEM",
+                "severity":   r.severity or "INFO",
+                "event_type": r.event_type or "",
+                "session_id": r.session_id or "",
+                "framework":  r.framework or "",
+                "meta":       r.meta or "",
+            }
+            for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def _fetch_benchmark_records(auditor_user: Optional[str] = None) -> list:
+    """
+    Load telemetry records from the benchmark JSON file.
+    Supports optional auditor_user filter (matched against session_id or folder_name).
+    Falls back to empty list if file not found — safe for fresh installs.
+    """
+    import json as _json
+    json_path = "data/audit_token_benchmark.json"
+    if not os.path.exists(json_path):
+        return []
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            records = _json.load(f)
+        if not isinstance(records, list):
+            records = [records]
+        if auditor_user and auditor_user.strip() and auditor_user.lower() != "all":
+            au = auditor_user.strip().lower()
+            records = [
+                r for r in records
+                if au in str(r.get("session_id", "")).lower()
+                or au in str(r.get("folder_name", "")).lower()
+                or au in str(r.get("auditor_user", "")).lower()
+            ]
+        return records
+    except Exception:
+        return []
+
+
+@router.get("/system/export-excel")
+def api_export_system_logs_excel(
+    auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
+):
+    """
+    Download System Audit Event Logs as a styled Excel (.xlsx) file.
+    Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
+    """
+    from src.core.token_tracker import generate_excel_system_logs_report
+    logs = _fetch_system_events(auditor_user)
+    ts   = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
+    slug = (auditor_user or "all").replace("@", "_").replace(".", "_")
+    os.makedirs("data/tmp", exist_ok=True)
+    out  = f"data/tmp/System_Event_Logs_{slug}_{ts}.xlsx"
+    try:
+        generate_excel_system_logs_report(logs, out)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Excel export failed: {e}")
+    return _FileResponse(
+        path=out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=os.path.basename(out),
+        headers={"Content-Disposition": f'attachment; filename="{os.path.basename(out)}"'}
+    )
+
+
+@router.get("/system/export-pdf")
+def api_export_system_logs_pdf(
+    auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
+):
+    """
+    Download System Audit Event Logs as an executive PDF (.pdf) file.
+    Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
+    """
+    from src.core.token_tracker import generate_pdf_system_logs_report
+    logs = _fetch_system_events(auditor_user)
+    ts   = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
+    slug = (auditor_user or "all").replace("@", "_").replace(".", "_")
+    os.makedirs("data/tmp", exist_ok=True)
+    out  = f"data/tmp/System_Event_Logs_{slug}_{ts}.pdf"
+    try:
+        generate_pdf_system_logs_report(logs, out)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF export failed: {e}")
+    return _FileResponse(
+        path=out,
+        media_type="application/pdf",
+        filename=os.path.basename(out),
+        headers={"Content-Disposition": f'attachment; filename="{os.path.basename(out)}"'}
+    )
+
+
+@router.get("/benchmark/export-excel")
+def api_export_benchmark_excel(
+    auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
+):
+    """
+    Download Telemetry Benchmark Report as a styled Excel (.xlsx) file.
+    Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
+    """
+    from src.core.token_tracker import generate_excel_benchmark_report
+    records = _fetch_benchmark_records(auditor_user)
+    ts      = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
+    slug    = (auditor_user or "all").replace("@", "_").replace(".", "_")
+    os.makedirs("data/tmp", exist_ok=True)
+    out     = f"data/tmp/Executive_Telemetry_Report_{slug}_{ts}.xlsx"
+    try:
+        generate_excel_benchmark_report(records, out)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Excel export failed: {e}")
+    return _FileResponse(
+        path=out,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=os.path.basename(out),
+        headers={"Content-Disposition": f'attachment; filename="{os.path.basename(out)}"'}
+    )
+
+
+@router.get("/benchmark/export-pdf")
+def api_export_benchmark_pdf(
+    auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
+):
+    """
+    Download Telemetry Benchmark Report as an executive PDF (.pdf) file.
+    Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
+    """
+    from src.core.token_tracker import generate_pdf_benchmark_report
+    records = _fetch_benchmark_records(auditor_user)
+    ts      = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
+    slug    = (auditor_user or "all").replace("@", "_").replace(".", "_")
+    os.makedirs("data/tmp", exist_ok=True)
+    out     = f"data/tmp/Executive_Telemetry_Report_{slug}_{ts}.pdf"
+    try:
+        generate_pdf_benchmark_report(records, out, auditor_filter=auditor_user)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF export failed: {e}")
+    return _FileResponse(
+        path=out,
+        media_type="application/pdf",
+        filename=os.path.basename(out),
+        headers={"Content-Disposition": f'attachment; filename="{os.path.basename(out)}"'}
+    )

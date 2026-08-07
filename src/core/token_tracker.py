@@ -467,3 +467,349 @@ def generate_excel_benchmark_report(records: list, output_path: str = BENCHMARK_
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     wb.save(output_path)
     return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXPORT: System Audit Event Logs → Excel (.xlsx)
+# Works with both PostgreSQL (ShaktiDB) and SQLite fallback — pure ORM rows.
+# ─────────────────────────────────────────────────────────────────────────────
+def generate_excel_system_logs_report(logs: list, output_path: str) -> str:
+    """
+    Generates a styled Excel workbook of System Audit Event Logs.
+    Accepts a list of dicts with keys: timestamp, actor, severity, event_type,
+    session_id, framework, meta.
+    Works with both PostgreSQL (ShaktiDB) and SQLite fallback.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "System_Event_Logs"
+
+    # ── Colour palette ───────────────────────────────────────────────────────
+    navy       = PatternFill(start_color="08519C", end_color="08519C", fill_type="solid")
+    hdr_blue   = PatternFill(start_color="3182BD", end_color="3182BD", fill_type="solid")
+    red_fill   = PatternFill(start_color="FEE2E2", end_color="FEE2E2", fill_type="solid")
+    yellow_fill= PatternFill(start_color="FEF9C3", end_color="FEF9C3", fill_type="solid")
+    green_fill = PatternFill(start_color="DCFCE7", end_color="DCFCE7", fill_type="solid")
+    white_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+
+    thin_border = Border(
+        left=Side(style='thin', color='CBD5E1'),
+        right=Side(style='thin', color='CBD5E1'),
+        top=Side(style='thin', color='CBD5E1'),
+        bottom=Side(style='thin', color='CBD5E1')
+    )
+
+    # ── Title row ────────────────────────────────────────────────────────────
+    ws.merge_cells("A1:G1")
+    tc = ws["A1"]
+    tc.value = "SYSTEM AUDIT EVENT LOGS & TELEMETRY TRAIL"
+    tc.font = Font(name="Calibri", size=14, bold=True, color="FFFFFF")
+    tc.fill = navy
+    tc.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 32
+
+    # ── Sub-header: generated timestamp ─────────────────────────────────────
+    ws.merge_cells("A2:G2")
+    sub = ws["A2"]
+    sub.value = f"Generated: {__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}  |  Total Events: {len(logs)}"
+    sub.font = Font(name="Calibri", size=9, italic=True, color="64748B")
+    sub.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 18
+
+    # ── Column headers ───────────────────────────────────────────────────────
+    headers = ["Timestamp", "Auditor / Actor", "Severity", "Event Type", "Session ID", "Framework", "Details / Meta"]
+    for ci, h in enumerate(headers, 1):
+        cell = ws.cell(row=3, column=ci, value=h)
+        cell.font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+        cell.fill = hdr_blue
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[3].height = 22
+
+    # ── Data rows ────────────────────────────────────────────────────────────
+    severity_fill_map = {
+        "CRITICAL": red_fill, "ERROR": red_fill,
+        "WARNING":  yellow_fill,
+        "SUCCESS":  green_fill, "INFO": white_fill,
+    }
+
+    for ri, ev in enumerate(logs, 4):
+        sev  = str(ev.get("severity") or "INFO").upper()
+        row_fill = severity_fill_map.get(sev, white_fill)
+        row_data = [
+            str(ev.get("created_at") or ev.get("timestamp") or ""),
+            str(ev.get("actor") or "SYSTEM"),
+            sev,
+            str(ev.get("event_type") or ""),
+            str(ev.get("session_id") or ""),
+            str(ev.get("framework") or ""),
+            str(ev.get("meta") or ev.get("details") or ""),
+        ]
+        for ci, val in enumerate(row_data, 1):
+            cell = ws.cell(row=ri, column=ci, value=val)
+            cell.fill = row_fill
+            cell.border = thin_border
+            cell.font = Font(name="Calibri", size=9,
+                             bold=(ci == 3),   # severity column bold
+                             color="DC2626" if sev in ("CRITICAL","ERROR") else
+                                   "92400E" if sev == "WARNING" else "1E293B")
+            cell.alignment = Alignment(horizontal="center" if ci == 3 else "left",
+                                       vertical="center", wrap_text=(ci == 7))
+        ws.row_dimensions[ri].height = 18
+
+    # ── Column widths ────────────────────────────────────────────────────────
+    col_widths = [22, 22, 12, 22, 28, 14, 55]
+    for ci, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(ci)].width = w
+
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+    wb.save(output_path)
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXPORT: System Audit Event Logs → PDF (.pdf)
+# ─────────────────────────────────────────────────────────────────────────────
+def generate_pdf_system_logs_report(logs: list, output_path: str) -> str:
+    """
+    Generates an executive PDF of System Audit Event Logs using fpdf2.
+    Works with both PostgreSQL (ShaktiDB) and SQLite fallback.
+    """
+    try:
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
+    except ImportError:
+        raise RuntimeError("fpdf2 is not installed. Run: pip install fpdf2")
+
+    class LogsPDF(FPDF):
+        def header(self):
+            if self.page_no() == 1:
+                return
+            self.set_fill_color(15, 23, 42)
+            self.rect(0, 0, 210, 11, "F")
+            self.set_font("Helvetica", "B", 7.5)
+            self.set_text_color(148, 163, 184)
+            self.set_xy(10, 2.5)
+            self.cell(0, 6, "AICyberAuditBox — System Audit Event Logs & Telemetry Trail", align="L")
+            self.set_xy(0, 2.5)
+            self.cell(200, 6, f"Page {self.page_no()}", align="R")
+            self.ln(12)
+
+        def footer(self):
+            self.set_y(-11)
+            self.set_font("Helvetica", "", 7)
+            self.set_text_color(148, 163, 184)
+            self.cell(0, 6, "CONFIDENTIAL | System Event Log Export", align="C")
+
+    pdf = LogsPDF()
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.set_margins(10, 10, 10)
+    pdf.add_page()
+
+    # Title block
+    pdf.set_fill_color(8, 81, 156)   # Navy
+    pdf.rect(10, 10, 190, 14, "F")
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_xy(10, 12)
+    pdf.cell(190, 10, "SYSTEM AUDIT EVENT LOGS & TELEMETRY TRAIL", align="C",
+             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    from datetime import datetime as _dt
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.set_x(10)
+    pdf.cell(190, 6,
+             f"Generated: {_dt.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}  |  Total Events: {len(logs)}",
+             align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(4)
+
+    # Table headers
+    col_w = [38, 28, 20, 38, 34, 32]
+    col_hdrs = ["Timestamp", "Actor / User", "Severity", "Event Type", "Session ID", "Details"]
+    pdf.set_fill_color(49, 130, 189)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 7.5)
+    for i, (h, w) in enumerate(zip(col_hdrs, col_w)):
+        pdf.cell(w, 8, h, border=1, align="C", fill=True)
+    pdf.ln()
+
+    sev_rgb = {
+        "CRITICAL": (254, 226, 226), "ERROR": (254, 226, 226),
+        "WARNING":  (254, 249, 195),
+        "SUCCESS":  (220, 252, 231),
+        "INFO":     (248, 250, 252),
+    }
+    sev_txt = {
+        "CRITICAL": (220, 38, 38), "ERROR": (220, 38, 38),
+        "WARNING":  (146, 64, 14),
+        "SUCCESS":  (22, 101, 52),
+        "INFO":     (30, 41, 59),
+    }
+
+    pdf.set_font("Helvetica", "", 7)
+    for ev in logs:
+        sev = str(ev.get("severity") or "INFO").upper()
+        bg  = sev_rgb.get(sev, (248, 250, 252))
+        fg  = sev_txt.get(sev, (30, 41, 59))
+        pdf.set_fill_color(*bg)
+        pdf.set_text_color(*fg)
+
+        row = [
+            str(ev.get("created_at") or ev.get("timestamp") or "")[:19],
+            str(ev.get("actor") or "SYSTEM")[:20],
+            sev[:10],
+            str(ev.get("event_type") or "")[:28],
+            str(ev.get("session_id") or "")[:22],
+            str(ev.get("meta") or ev.get("details") or "")[:40],
+        ]
+        row_h = 7
+        for val, w in zip(row, col_w):
+            pdf.cell(w, row_h, val, border=1, align="L", fill=True)
+        pdf.ln()
+
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+    pdf.output(output_path)
+    return output_path
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXPORT: Telemetry Benchmark → PDF (.pdf)
+# ─────────────────────────────────────────────────────────────────────────────
+def generate_pdf_benchmark_report(records: list, output_path: str, auditor_filter: str = None) -> str:
+    """
+    Generates an executive multi-page PDF of Audit Telemetry Benchmark data using fpdf2.
+    Works with both PostgreSQL (ShaktiDB) and SQLite fallback JSON records.
+    """
+    try:
+        from fpdf import FPDF
+        from fpdf.enums import XPos, YPos
+    except ImportError:
+        raise RuntimeError("fpdf2 is not installed. Run: pip install fpdf2")
+
+    class TelemetryPDF(FPDF):
+        def header(self):
+            if self.page_no() == 1:
+                return
+            self.set_fill_color(15, 23, 42)
+            self.rect(0, 0, 210, 11, "F")
+            self.set_font("Helvetica", "B", 7.5)
+            self.set_text_color(148, 163, 184)
+            self.set_xy(10, 2.5)
+            self.cell(0, 6, "AICyberAuditBox — Executive Audit Telemetry & Benchmark Report", align="L")
+            self.set_xy(0, 2.5)
+            self.cell(200, 6, f"Page {self.page_no()}", align="R")
+            self.ln(12)
+
+        def footer(self):
+            self.set_y(-11)
+            self.set_font("Helvetica", "", 7)
+            self.set_text_color(148, 163, 184)
+            self.cell(0, 6, "CONFIDENTIAL | Executive AI Audit Telemetry Report", align="C")
+
+    pdf = TelemetryPDF()
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.set_margins(10, 10, 10)
+    pdf.add_page()
+
+    from datetime import datetime as _dt
+
+    # ── Title block ───────────────────────────────────────────────────────────
+    pdf.set_fill_color(8, 81, 156)
+    pdf.rect(10, 10, 190, 14, "F")
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_xy(10, 12)
+    pdf.cell(190, 10, "EXECUTIVE AUDIT TELEMETRY & BENCHMARK REPORT", align="C",
+             new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    scope_label = f"Auditor: {auditor_filter}" if auditor_filter else "All Auditors (Combined)"
+    pdf.set_font("Helvetica", "", 8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.set_x(10)
+    pdf.cell(190, 6,
+             f"Generated: {_dt.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}  |  Scope: {scope_label}  |  Sessions: {len(records)}",
+             align="C", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(5)
+
+    # ── KPI Summary Cards ─────────────────────────────────────────────────────
+    tot_tokens    = sum(int(r.get("total_tokens", 0)) for r in records)
+    tot_latency   = sum(float(r.get("total_latency_sec", 0)) for r in records)
+    tot_files     = sum(int(r.get("files_count", 0)) for r in records)
+    tot_mb        = sum(float(r.get("file_size_mb", 0)) for r in records)
+    tot_compliant = sum(int(r.get("compliant_count", 0)) for r in records)
+    tot_nc        = sum(int(r.get("non_compliant_count", 0)) for r in records)
+    compliance_pct = int((tot_compliant / max(1, tot_compliant + tot_nc)) * 100) if (tot_compliant + tot_nc) > 0 else 0
+
+    mins = int(tot_latency // 60); secs = round(tot_latency % 60, 1)
+    lat_str = f"{mins}m {secs}s" if mins > 0 else f"0m {secs}s"
+
+    kpis = [
+        ("Total Tokens",    f"{tot_tokens:,}"),
+        ("Combined Latency",lat_str),
+        ("Total Files",     str(tot_files)),
+        ("Total Size (MB)", f"{round(tot_mb, 2)} MB"),
+        ("Compliance",      f"{compliance_pct}%"),
+        ("Sessions",        str(len(records))),
+    ]
+    pdf.set_font("Helvetica", "B", 8.5)
+    card_w = 30; card_h = 18; gap = 2.67
+    for i, (label, val) in enumerate(kpis):
+        x = 10 + i * (card_w + gap)
+        pdf.set_fill_color(239, 246, 255)
+        pdf.set_draw_color(191, 219, 254)
+        pdf.rect(x, pdf.get_y(), card_w, card_h, "DF")
+        pdf.set_text_color(59, 130, 246)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_xy(x, pdf.get_y() + 2)
+        pdf.cell(card_w, 6, val, align="C", new_x=XPos.RIGHT, new_y=YPos.TMARGIN)
+        pdf.set_font("Helvetica", "", 7)
+        pdf.set_text_color(71, 85, 105)
+        pdf.set_xy(x, pdf.get_y() + 10)
+        pdf.cell(card_w, 5, label, align="C", new_x=XPos.RIGHT, new_y=YPos.TMARGIN)
+    pdf.ln(card_h + 6)
+
+    # ── Per-Session Table ─────────────────────────────────────────────────────
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 7, "Auditor Session Breakdown", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(1)
+
+    col_hdrs = ["Session ID", "Scoping Mode", "Files", "Size MB", "Tokens", "Latency", "Compliance"]
+    col_ws   = [52,           35,              14,      18,        22,       20,         29]
+    pdf.set_fill_color(49, 130, 189)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 7.5)
+    for h, w in zip(col_hdrs, col_ws):
+        pdf.cell(w, 8, h, border=1, align="C", fill=True)
+    pdf.ln()
+
+    pdf.set_font("Helvetica", "", 7)
+    for idx, r in enumerate(records):
+        bg = (239, 246, 255) if idx % 2 == 0 else (248, 250, 252)
+        pdf.set_fill_color(*bg)
+        pdf.set_text_color(30, 41, 59)
+
+        lat_s = float(r.get("total_latency_sec", 0))
+        m, s = int(lat_s // 60), round(lat_s % 60, 1)
+        lat_fmt = f"{m}m {s}s" if m > 0 else f"0m {s}s"
+        c_cnt = int(r.get("compliant_count", 0))
+        nc_cnt = int(r.get("non_compliant_count", 0))
+        cpct = int((c_cnt / max(1, c_cnt + nc_cnt)) * 100) if (c_cnt + nc_cnt) > 0 else 0
+
+        row_vals = [
+            str(r.get("session_id", ""))[:30],
+            str(r.get("scoping_mode", ""))[:22],
+            str(r.get("files_count", 0)),
+            str(round(float(r.get("file_size_mb", 0)), 2)),
+            str(r.get("total_tokens", 0)),
+            lat_fmt,
+            f"{cpct}%",
+        ]
+        for val, w in zip(row_vals, col_ws):
+            pdf.cell(w, 7, val, border=1, align="C", fill=True)
+        pdf.ln()
+
+    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+    pdf.output(output_path)
+    return output_path

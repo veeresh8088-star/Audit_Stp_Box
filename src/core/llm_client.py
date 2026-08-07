@@ -58,10 +58,23 @@ def _resolve_host(url=None, default_port=11434):
         url = f"http://{url}" if ":" in url else f"http://{url}:{default_port}"
     return url
 
-def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=1800, stop=None, session_id=None):
+def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=None, stop=None, session_id=None):
     """Sends a non-streaming prompt completion request through port_pool_manager per-port lock."""
     backend = get_llm_backend()
-    
+
+    if timeout is None or timeout in (1800, 600):
+        try:
+            from src.core.redis_metrics import get_live_metrics
+            m = get_live_metrics()
+            if m.get("redis_available"):
+                active_cnt = max(1, len(m.get("active_sessions", [])))
+            else:
+                from src.core.bg_state import _bg_running
+                active_cnt = max(1, len(_bg_running))
+            timeout = max(600, active_cnt * 180)
+        except Exception:
+            timeout = 600
+
     with port_pool_manager.acquire_control_slot(session_id=session_id, timeout=timeout) as host:
         if backend in ("llama.cpp", "llamacpp"):
             if "gemma" in model.lower():

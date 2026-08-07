@@ -48,6 +48,12 @@ class AuditState(TypedDict):
     audit_mode: Optional[str]
     file_registry: Optional[Dict[str, str]]
 
+    # ── Excel Scoping Two-Phase Pipeline ─────────────────────────────────────
+    # When set, retrieval is restricted to ONLY these filenames (Phase 1 lock).
+    # The LLM acts as a judge-only on the pre-extracted context (Phase 2).
+    locked_filenames: Optional[List[str]]     # locked file(s) from Excel checklist
+    checklist_question: Optional[str]         # original Excel audit check question
+
 
 # Synonyms dictionary used in retrieval
 KEYWORD_SYNONYMS = {
@@ -94,7 +100,16 @@ def _update_progress(state: AuditState, phase_text: str, phase_ratio: float):
         print(f"[PROGRESS UPDATE WARNING] Failed to update progress: {e}", flush=True)
 
 def retrieve_node(state: AuditState) -> Dict[str, Any]:
-    """Node: Pulls grounded document segments relevant to the target control."""
+    """Node: Pulls grounded document segments relevant to the target control.
+
+    Two-Phase Mode (Excel Scoping):
+        If `locked_filenames` is set, retrieval is scoped to ONLY those files.
+        This guarantees the correct evidence is always extracted from the correct
+        file — the LLM never sees content from other files.
+
+    Standard Mode (AI Scoping):
+        Retrieval searches across all uploaded files as before.
+    """
     _update_progress(state, "Retrieving document context", 0.1)
     controls_batch = [{
         "control": state["control_id"],
@@ -102,16 +117,71 @@ def retrieve_node(state: AuditState) -> Dict[str, Any]:
         "expected": state["expected_evidence"],
         "prompt_hint": state["prompt_hint"]
     }]
-    
-    condensed, _, _ = _retrieve_rag_context(
-        context=state["document_text"],
-        controls_batch=controls_batch,
-        file_names_list=state["file_names_list"],
-        ollama_model=state["ollama_model"],
-        KEYWORD_SYNONYMS=KEYWORD_SYNONYMS
-    )
-    
+
+    # ── Phase 1: Locked-file retrieval (Excel scoping mode) ───────────────────
+    locked_filenames = state.get("locked_filenames") or []
+    if locked_filenames:
+        # Restrict retrieval to ONLY the locked files from the Excel checklist
+        print(
+            f"[RETRIEVE NODE] Two-Phase mode: restricting retrieval to "
+            f"{locked_filenames} for control {state['control_id']}",
+            flush=True
+        )
+        condensed, _, _ = _retrieve_rag_context(
+            context=state["document_text"],
+            controls_batch=controls_batch,
+            file_names_list=locked_filenames,   # ← LOCKED: only these files
+            ollama_model=state["ollama_model"],
+            KEYWORD_SYNONYMS=KEYWORD_SYNONYMS
+        )
+        # Safety guarantee: if locked files returned no context, fall back
+        # to raw document_text (never send empty context to LLM)
+        if not condensed.strip():
+            print(
+                f"[RETRIEVE NODE] Locked retrieval returned empty context for "
+                f"{locked_filenames}. Falling back to raw document text.",
+                flush=True
+            )
+            condensed = state["document_text"][:6000]
+    else:
+        # ── Standard mode: search across all uploaded files ────────────────
+        condensed, _, _ = _retrieve_rag_context(
+            context=state["document_text"],
+            controls_batch=controls_batch,
+            file_names_list=state["file_names_list"],
+            ollama_model=state["ollama_model"],
+            KEYWORD_SYNONYMS=KEYWORD_SYNONYMS
+        )
+
     return {"retrieved_context": condensed}
+
+
+def _calculate_adaptive_timeout() -> int:
+    """
+    Dynamically calculates the LLM execution timeout based on system load:
+    - 1 Auditor running: max(600, 1 * 180) = 600s (10 minutes) — ample time even for huge prompts.
+    - 15 Auditors running: max(600, 15 * 180) = 2700s (45 minutes) — heavy concurrent batches are NEVER cut short.
+    - If Redis is down: falls back to checking Python in-memory _bg_running set.
+    - Instant exit: t.join() exits sub-second as soon as LLM generation finishes.
+    """
+    active_cnt = 1
+    try:
+        from src.core.redis_metrics import get_live_metrics
+        m = get_live_metrics()
+        if m.get("redis_available"):
+            active_cnt = max(1, len(m.get("active_sessions", [])))
+        else:
+            from src.core.bg_state import _bg_running
+            active_cnt = max(1, len(_bg_running))
+    except Exception:
+        try:
+            from src.core.bg_state import _bg_running
+            active_cnt = max(1, len(_bg_running))
+        except Exception:
+            active_cnt = 1
+
+    return max(600, active_cnt * 180)
+
 
 def generate_node(state: AuditState) -> Dict[str, Any]:
     """Node: Calls ChatOllama to generate the initial finding draft based on context."""
@@ -122,20 +192,46 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
     feedback_section = f"\nAUDITOR KNOWLEDGE LOOP GUIDELINES:\n{feedback_block}\n" if feedback_block else ""
     
     generator_chain = get_generator_chain(state["ollama_model"])
+
+    # ── Phase 2: Judge-only chain for Excel scoping mode ────────────────────
+    locked_filenames = state.get("locked_filenames") or []
+    checklist_question = state.get("checklist_question") or state["control_label"]
+    use_excel_judge_mode = bool(locked_filenames)
+    if use_excel_judge_mode:
+        from src.ai.audit_chains import get_excel_scoping_chain
+        generator_chain = get_excel_scoping_chain(state["ollama_model"])
+        print(
+            f"[GENERATE NODE] Two-Phase judge mode for control {state['control_id']} "
+            f"(locked: {locked_filenames})",
+            flush=True
+        )
     
     try:
         result_holder = {}
         def _run():
             try:
-                result_holder["draft"] = generator_chain.invoke({
-                    "summary_text": state["summary_text"],
-                    "condensed_context": state["retrieved_context"],
-                    "control_id": state["control_id"],
-                    "control_label": state["control_label"],
-                    "expected_evidence": state["expected_evidence"],
-                    "feedback_section": feedback_section,
-                    "standard": state.get("standard", "")
-                })
+                if use_excel_judge_mode:
+                    # Judge-only mode: pass locked_filenames + checklist_question
+                    result_holder["draft"] = generator_chain.invoke({
+                        "locked_filenames": ", ".join(locked_filenames),
+                        "checklist_question": checklist_question,
+                        "condensed_context": state["retrieved_context"],
+                        "control_id": state["control_id"],
+                        "control_label": state["control_label"],
+                        "expected_evidence": state["expected_evidence"],
+                        "feedback_section": feedback_section,
+                    })
+                else:
+                    # Standard mode: original prompt
+                    result_holder["draft"] = generator_chain.invoke({
+                        "summary_text": state["summary_text"],
+                        "condensed_context": state["retrieved_context"],
+                        "control_id": state["control_id"],
+                        "control_label": state["control_label"],
+                        "expected_evidence": state["expected_evidence"],
+                        "feedback_section": feedback_section,
+                        "standard": state.get("standard", "")
+                    })
             except Exception as ex:
                 result_holder["error"] = str(ex)
         t = threading.Thread(target=_run, daemon=True)

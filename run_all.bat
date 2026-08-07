@@ -39,18 +39,27 @@ if %LLM_THREADS% LSS 1 set LLM_THREADS=4
 set /a EMBED_THREADS=%NUMBER_OF_PROCESSORS%
 if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 
+:: Calculate parallel LLM slots for C++ continuous batching.
+:: Set to 2x CPU cores so 15+ users run simultaneously with NO queue.
+:: Tradeoff: each auditor runs at ~50% speed instead of 100%, but ZERO queueing.
+:: RAM cost: each extra slot = ~200MB KV cache. Adjust multiplier if RAM is low.
+set /a LLM_SLOTS=%NUMBER_OF_PROCESSORS% * 2
+if %LLM_SLOTS% LSS 16 set LLM_SLOTS=16
+
 echo.
-echo [2/5] Starting llama.cpp LLM Server (Port 11434 with %LLM_THREADS% threads, --mlock locked RAM, dynamic context -c 0)...
-start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 0 -t %LLM_THREADS% -b 2048 -ub 512 --mlock --flash-attn on
+echo [2/5] Starting llama.cpp LLM Server (Port 11434 with %LLM_THREADS% threads, %LLM_SLOTS% parallel slots, --cont-batching)...
+start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 0 -np %LLM_SLOTS% -t %LLM_THREADS% -b 2048 -ub 512 --mlock --flash-attn on --cont-batching
 
 echo.
 echo [3/5] Starting llama.cpp Embedding Server (Port 11435 with %EMBED_THREADS% threads, --mlock locked RAM)...
 start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t %EMBED_THREADS% --mlock --embedding
 
 echo.
-echo [4/5] Starting Docker Database Service (ShaktiDB)...
-docker rm -f shakthidb_service > nul 2>&1
-docker-compose up -d
+echo [4/5] Starting Database & Live Telemetry (SQLite / PostgreSQL & Redis Port 6380)...
+if exist "%~dp0tools\redis\redis-server.exe" (
+    start "Windows Redis Server" /d "%~dp0tools\redis" /min "%~dp0tools\redis\redis-server.exe" --port 6380
+)
+docker-compose up -d > nul 2>&1
 
 echo.
 echo Waiting 12 seconds for models to load in RAM...
@@ -63,6 +72,8 @@ set EMBEDDING_HOST=http://127.0.0.1:11435
 set OLLAMA_KEEP_ALIVE=24h
 set OLLAMA_NUM_PARALLEL=4
 set OLLAMA_MAX_LOADED_MODELS=3
+set MAX_CONCURRENT_AUDITS=%LLM_SLOTS%
+set REDIS_URL=redis://127.0.0.1:6380/0
 
 echo.
 echo ==================================================

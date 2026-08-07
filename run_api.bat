@@ -55,6 +55,12 @@ echo.
 :: 3. Launching FastAPI & browser
 echo [3/3] Launching AICyberAuditBox Dashboard...
 
+:: Set dynamic concurrency and Redis env vars
+:: 2x CPU cores = all 15+ users run simultaneously with NO queue (slight speed tradeoff per user)
+set /a MAX_CONCURRENT_AUDITS=%NUMBER_OF_PROCESSORS% * 2
+if %MAX_CONCURRENT_AUDITS% LSS 16 set MAX_CONCURRENT_AUDITS=16
+set REDIS_URL=redis://127.0.0.1:6379/0
+
 :: Check for Let's Encrypt (Certbot) trusted certificates first
 set CERTBOT_CERT=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com\fullchain.pem
 set CERTBOT_KEY=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com\privkey.pem

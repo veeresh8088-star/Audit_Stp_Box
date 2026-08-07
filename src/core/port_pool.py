@@ -46,12 +46,25 @@ class LLMPortPoolManager:
         print(f"[PORT POOL INITIALIZED] Configured {len(self.ports)} LLM worker ports: {self.ports}", flush=True)
 
     @contextmanager
-    def acquire_control_slot(self, session_id=None, timeout=600):
+    def acquire_control_slot(self, session_id=None, timeout=None):
         """Context manager leasing a port mutex lock for 1 control query.
         
         Yields:
             str: Leased port URL (e.g. 'http://127.0.0.1:11434')
         """
+        if timeout is None or timeout in (1800, 600):
+            try:
+                from src.core.redis_metrics import get_live_metrics
+                m = get_live_metrics()
+                if m.get("redis_available"):
+                    active_cnt = max(1, len(m.get("active_sessions", [])))
+                else:
+                    from src.core.bg_state import _bg_running
+                    active_cnt = max(1, len(_bg_running))
+                timeout = max(600, active_cnt * 180)
+            except Exception:
+                timeout = 600
+
         start_ts = time.time()
         leased_port = None
         

@@ -859,6 +859,16 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
                         break
             if not rec:
                 rec = f"Establish, document, and implement procedures to satisfy {control_id}."
+            
+            # Format explicit ambiguity note if evidence quote is present but status is NON_COMPLIANT
+            quote_text = str(finding.get("evidence_quote") or finding.get("evidence_snippet") or "").strip()
+            if quote_text and quote_text.upper() != "NOT_FOUND" and finding.get("status") == "NON_COMPLIANT":
+                short_q = quote_text[:120].replace('\n', ' ')
+                rec = (
+                    f"Documented quote ('{short_q}...') is ambiguous. "
+                    f"Update the policy/document to explicitly define precise technical implementation "
+                    f"and configuration rules to satisfy {control_id}."
+                )
             finding["recommendation"] = rec
 
     return finding
@@ -1082,3 +1092,91 @@ def validate_cross_control_duplicates(findings):
                     f["review_note"] = dup_note
                     
     return findings
+
+
+# ── Excel Scoping Two-Phase Safety Gate ───────────────────────────────────────
+def apply_excel_scoping_safety_gate(
+    finding: dict,
+    locked_filenames: list,
+    retrieved_context: str,
+    checklist_question: str = ""
+) -> dict:
+    """
+    Final post-processing safety gate for Excel Scoping (Two-Phase) mode.
+
+    Corrects two categories of LLM errors that can still occur even in judge mode:
+    1. N/A or empty evidence_snippet → override with first sentence from retrieved_context
+    2. Wrong source_file (not in locked_filenames) → override with correct locked filename
+
+    This makes evidence discrepancies structurally impossible in Excel scoping mode.
+    Called by audit.py after each finding is generated in Excel scoping mode.
+    """
+    import re
+
+    if not locked_filenames:
+        return finding  # Not in Excel scoping mode — do nothing
+
+    primary_locked = locked_filenames[0]
+
+    # ── Guard 1: Fix N/A or empty evidence_snippet ─────────────────────────────
+    snippet = (
+        finding.get("evidence_snippet") or
+        finding.get("evidence_quote") or
+        finding.get("excerpt") or ""
+    ).strip().strip('"').strip("'")
+
+    is_empty_snippet = (
+        not snippet or
+        snippet.lower() in ("n/a", "na", "none", "not found", "not_found", "") or
+        len(snippet) < 10
+    )
+
+    if is_empty_snippet and retrieved_context and retrieved_context.strip():
+        # Extract first meaningful sentence from retrieved_context
+        sentences = re.split(r'(?<=[.!?])\s+', retrieved_context.strip())
+        for s in sentences:
+            s_clean = s.strip()
+            if len(s_clean) > 20:
+                finding["evidence_snippet"] = s_clean[:500]
+                finding["evidence_quote"] = s_clean[:500]
+                print(
+                    f"[SAFETY GATE] Overrode empty evidence_snippet with retrieved context "
+                    f"for locked file '{primary_locked}'.",
+                    flush=True
+                )
+                break
+
+    # ── Guard 2: Fix wrong source_file ─────────────────────────────────────────
+    current_source = (
+        finding.get("evidence_location") or
+        finding.get("evidence_source_file") or
+        finding.get("source_file") or ""
+    ).strip()
+
+    locked_lower = {f.lower() for f in locked_filenames}
+    source_is_wrong = (
+        current_source and
+        current_source.lower() not in locked_lower and
+        current_source.lower() not in ("n/a", "na", "none", "", "policy document")
+    )
+
+    if source_is_wrong or not current_source:
+        finding["evidence_location"] = primary_locked
+        finding["evidence_source_file"] = primary_locked
+        if source_is_wrong:
+            print(
+                f"[SAFETY GATE] Overrode wrong source_file '{current_source}' "
+                f"with locked file '{primary_locked}'.",
+                flush=True
+            )
+
+    # ── Guard 3: Ensure evidence items list has correct source ──────────────────
+    evidence_list = finding.get("evidence_items") or finding.get("evidence") or []
+    if isinstance(evidence_list, list):
+        for ev_item in evidence_list:
+            if isinstance(ev_item, dict):
+                ev_src = (ev_item.get("source") or "").strip()
+                if not ev_src or ev_src.lower() not in locked_lower:
+                    ev_item["source"] = primary_locked
+
+    return finding

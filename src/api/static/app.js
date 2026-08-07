@@ -787,7 +787,7 @@ async function deliverReportToAuditee() {
         const data = await response.json();
         if (data.success) {
             showToast(`🚀 Audit findings delivered to auditee account: ${targetAuditee}!`, "success");
-            
+
             // Auto switch to Auditee Submissions tab so sent findings reflect immediately
             const auditeeTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => {
                 const txt = b.innerText.toLowerCase();
@@ -1957,7 +1957,7 @@ async function commitSessionToShaktiDB(force = false) {
             try {
                 const errJson = await response.json();
                 errorMsg = errJson.detail || errJson.message || errorMsg;
-            } catch(e) {}
+            } catch (e) { }
             alert(`Failed to commit findings: ${errorMsg}`);
             return;
         }
@@ -2133,7 +2133,7 @@ function ensureAdminModalDOM() {
     return modalEl;
 }
 
-window.switchAdminTab = function(tabName) {
+window.switchAdminTab = function (tabName) {
     const tabBench = document.getElementById("admin-tab-benchmark");
     const tabOver = document.getElementById("admin-tab-overrides");
     const btnBench = document.getElementById("tab-btn-benchmark");
@@ -2323,13 +2323,13 @@ async function loadAdminOverridesData() {
     }
 }
 
-window.toggleSelectAllBenchmarkSessions = function(checked) {
+window.toggleSelectAllBenchmarkSessions = function (checked) {
     const chks = document.querySelectorAll(".benchmark-session-chk");
     chks.forEach(c => c.checked = checked);
     updateSelectedBenchmarkSessionsCount();
 };
 
-window.updateSelectedBenchmarkSessionsCount = function() {
+window.updateSelectedBenchmarkSessionsCount = function () {
     const checkedChks = document.querySelectorAll(".benchmark-session-chk:checked");
     const badge = document.getElementById("selected-sessions-count-badge");
     if (badge) {
@@ -2337,7 +2337,7 @@ window.updateSelectedBenchmarkSessionsCount = function() {
     }
 };
 
-window.aggregateSelectedAuditSessions = async function() {
+window.aggregateSelectedAuditSessions = async function () {
     const checkedChks = document.querySelectorAll(".benchmark-session-chk:checked");
     const sids = Array.from(checkedChks).map(c => c.value);
 
@@ -2418,7 +2418,7 @@ window.aggregateSelectedAuditSessions = async function() {
     }
 };
 
-window.exportAdminBenchmarkExcel = function() {
+window.exportAdminBenchmarkExcel = function () {
     window.location.href = `${API_BASE}/audit/benchmark/export`;
 };
 
@@ -2486,7 +2486,7 @@ async function renderAuditReportPreview() {
 
         // Standards Rule: Exclude pure INFO items from Executive Audit Evaluation details table!
         const reportFindings = findings.filter(f => !isFindingInformational(f));
-        
+
         function getSevRank(f) {
             const sev = String(f.severity || "").toUpperCase();
             if (sev.includes("CRITICAL") || sev.includes("P1") || sev.startsWith("9.") || sev.startsWith("10.")) return 1;
@@ -2617,9 +2617,9 @@ function getCleanFindingDescription(f) {
         return String(candidate).trim();
     }
     const backup = (f.description && String(f.description).trim()) ||
-                   (f.gap_detected && String(f.gap_detected).trim()) ||
-                   (f.gap_description && String(f.gap_description).trim()) ||
-                   (f.justification && String(f.justification).trim());
+        (f.gap_detected && String(f.gap_detected).trim()) ||
+        (f.gap_description && String(f.gap_description).trim()) ||
+        (f.justification && String(f.justification).trim());
     return backup || 'Detailed compliance and vulnerability finding evaluation.';
 }
 
@@ -2896,15 +2896,19 @@ function _cleanOcrText(raw) {
 
 function _isOcrNoiseText(snip) {
     if (!snip || typeof snip !== "string") return false;
-    return snip.includes("[Embedded Image OCR]") || 
-           /timedatectl|ntp\s+enabled|ntp\s+synchronized|privilcged|wceneme|o4uth2|pamy#|fuserconsole|inccgnito|opentext|nalsecuie|avikyed|cojmijhi|sudarsnanzatna|irrox|wom/i.test(snip) ||
-           (/https?:\/\/[0-9\.]+/i.test(snip) && /pam|login|privilege|access/i.test(snip));
+    return snip.includes("[Embedded Image OCR]") ||
+        /timedatectl|ntp\s+enabled|ntp\s+synchronized|privilcged|wceneme|o4uth2|pamy#|fuserconsole|inccgnito|opentext|nalsecuie|avikyed|cojmijhi|sudarsnanzatna|irrox|wom/i.test(snip) ||
+        (/https?:\/\/[0-9\.]+/i.test(snip) && /pam|login|privilege|access/i.test(snip));
 }
 
 function formatEvidenceSnippet(snip) {
-    if (!snip) return "Document evidence evaluated.";
+    if (!snip) return "No specific evidence quote found in document.";
     if (typeof snip !== "string") snip = String(snip);
     snip = snip.trim();
+
+    if (snip.includes("Business Impact:") || snip.includes("Missing Requirements:")) {
+        return "No specific evidence quote found in document.";
+    }
 
     if (!snip || snip.toUpperCase() === "JPG" || snip.toUpperCase() === "PNG" || snip.length <= 3) {
         return "System Screenshot Evidence verified via Optical Character Recognition (OCR).";
@@ -2916,7 +2920,7 @@ function formatEvidenceSnippet(snip) {
         if (!cleanedOcr || cleanedOcr.length < 5 || cleanedOcr.toUpperCase() === "JPG" || cleanedOcr.toUpperCase() === "PNG") {
             cleanedOcr = "System Screenshot Evidence verified via Optical Character Recognition (OCR).";
         }
-        
+
         let detectedItems = [];
         if (/timedatectl|ntp/i.test(rawOcr)) detectedItems.push("• System Service: Linux Time Synchronization Daemon (timedatectl / NTP)");
         if (/ntp\s+enabled:\s*yes/i.test(rawOcr)) detectedItems.push("• Synchronization Setting: Network Time Protocol (NTP) Enabled");
@@ -2930,8 +2934,8 @@ function formatEvidenceSnippet(snip) {
         if (/tokens|active|sessions|session|privsessions/i.test(rawOcr)) detectedItems.push("• Operational Feature: Active User Privileged Session & Token Tracking");
         if (/policy|resource|access|accs/i.test(rawOcr)) detectedItems.push("• Policy Enforcement: Resource Access Policy Active");
 
-        let summaryHeader = /timedatectl|ntp/i.test(rawOcr) 
-            ? "🖼️ SCREENSHOT EVIDENCE EXCERPT (System Time & Clock Synchronization Console):" 
+        let summaryHeader = /timedatectl|ntp/i.test(rawOcr)
+            ? "🖼️ SCREENSHOT EVIDENCE EXCERPT (System Time & Clock Synchronization Console):"
             : "🖼️ SCREENSHOT EVIDENCE EXCERPT (Privileged Access Management System):";
         let bulletText = detectedItems.length > 0 ? detectedItems.join("\n") : "• Embedded System Screenshot verified via Optical Character Recognition (OCR).";
 
@@ -2944,7 +2948,7 @@ function getCleanFindingDescription(f) {
     if (!f) return "Control evaluation performed against compliance requirements.";
     let raw = f.description || f.finding || f.reasoning || f.gap_description || "";
     if (typeof raw !== "string") raw = String(raw);
-    
+
     if (raw.includes("Auditor engine encountered generation error") || raw.includes("LLM generation timeout") || raw.includes("parse error")) {
         const ctrlId = f.control_id || "target control";
         const ctrlName = f.control_name || f.title || ctrlId;
@@ -2980,9 +2984,9 @@ function isFindingCompliant(f, singleSnip) {
         return false;
     }
 
-    if (descText.includes("no explicit requirements") || 
-        descText.includes("no evidence related to") || 
-        descText.includes("not applicable to the documented scope") || 
+    if (descText.includes("no explicit requirements") ||
+        descText.includes("no evidence related to") ||
+        descText.includes("not applicable to the documented scope") ||
         descText.includes("no evidence found") ||
         descText.includes("gap identified") ||
         descText.includes("non-compliant")) {
@@ -3065,18 +3069,11 @@ function renderFindingsList() {
                         if (parts.length < 2 && lowerBase.length > 3) {
                             parts = rawSnippet.split(new RegExp(baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
                         }
-                        if (parts.length > 1) {
-                            specificSnippet = parts[1].split('\n\n')[0].replace(/^[\s:\-\"\']+|[\s:\-\"\']+$/g, '');
-                        } else {
-                            specificSnippet = rawSnippet;
-                        }
-                    } else if (idx === 0 && !rawSnippet.includes("No specific evidence quote cited") && rawSnippet.trim() !== "N/A" && rawSnippet.trim() !== '"N/A"') {
+                    if (lowerSnip.includes(lowerDoc) || lowerSnip.includes(baseName.toLowerCase())) {
                         specificSnippet = rawSnippet;
                     }
                 }
-
-                // Only create a card if this document physically contains matching evidence snippet!
-                if (specificSnippet && specificSnippet.trim() !== "N/A" && specificSnippet.trim() !== '"N/A"' && !specificSnippet.includes("No specific evidence quote cited")) {
+                if (specificSnippet || idx === 0) {
                     validDocCards.push({
                         originalFinding: f,
                         singleDocName: docName,
@@ -3096,10 +3093,13 @@ function renderFindingsList() {
                     cardId: `${f.id}_doc_0`
                 });
             }
-        } else {
             expandedCards.push({
                 originalFinding: f,
-                singleDocName: srcDocs[0] || f.evidence_location || f.evidence_source_file || "Uploaded Policy Document & Evidence Files",
+                singleDocName: (f.evidence_location && f.evidence_location.trim() && f.evidence_location !== "N/A")
+                    ? f.evidence_location
+                    : ((f.evidence_source_file && f.evidence_source_file.trim() && f.evidence_source_file !== "N/A")
+                        ? f.evidence_source_file
+                        : (srcDocs[0] || "Uploaded Policy Document & Evidence Files")),
                 singleSnippet: rawSnippet || "N/A",
                 cardId: `${f.id}`
             });
@@ -3119,9 +3119,10 @@ function renderFindingsList() {
         const findingJsonStr = escapeHtml(JSON.stringify(f));
         const safeCtrlId = escapeHtml(f.control_id || '');
         const rawTitle = f.control_name || f.title || f.control_id || 'ISO Control';
-        
-        // Clean up duplicate header title string (e.g., "5.15 Access Control")
+
         let cleanTitleStr = String(rawTitle).trim();
+        cleanTitleStr = cleanTitleStr.replace(/\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)$/g, '').trim(); 
+        cleanTitleStr = cleanTitleStr.replace(/^(\b[\w\s]+\b)\s+\1$/i, '$1').trim();
         if (safeCtrlId && cleanTitleStr.startsWith(safeCtrlId)) {
             cleanTitleStr = cleanTitleStr.substring(safeCtrlId.length).trim();
         }
@@ -3135,21 +3136,19 @@ function renderFindingsList() {
         const cleanSnipCheck = (singleSnip || "").toLowerCase().trim().replace(/^[\"\']+|[\"\']+$/g, '');
         const hasValidQuote = cleanSnipCheck !== "n/a" && cleanSnipCheck !== "none" && cleanSnipCheck.length > 12 && !cleanSnipCheck.includes("no specific evidence quote") && !cleanSnipCheck.includes("no evidence excerpt");
 
-        const policyBadgeHtml = isComp 
+        const policyBadgeHtml = isComp
             ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Policy: Compliant</span>`
             : `<span class="badge badge-danger" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✕ Policy: Non-Compliant</span>`;
-            
+
         const evidenceBadgeHtml = hasValidQuote
-            ? (isComp 
+            ? (isComp
                 ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Evidence: Compliant</span>`
                 : `<span class="badge badge-info" style="background:rgba(59,130,246,0.15); color:#3b82f6; border:1px solid rgba(59,130,246,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Evidence: Present</span>`)
             : `<span class="badge badge-warning" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">⚠ Evidence: Missing</span>`;
 
         const mainBadgeHtml = isComp
             ? `<span class="badge badge-success" style="background:#10b981; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">COMPLIANT</span>`
-            : (hasValidQuote 
-                ? `<span class="badge badge-warning" style="background:#f59e0b; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">PARTIAL</span>` 
-                : `<span class="badge badge-danger" style="background:#ef4444; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">NON_COMPLIANT</span>`);
+            : `<span class="badge badge-danger" style="background:#ef4444; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">NON_COMPLIANT</span>`;
 
         card.innerHTML = `
             <div class="finding-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:10px; margin-bottom:12px;">
@@ -5651,21 +5650,21 @@ function openForgotPasswordModal() {
         alert("Password recovery modal is loading. Please refresh your page.");
         return;
     }
-    
+
     const step1 = document.getElementById("fp-step-1");
     const step2 = document.getElementById("fp-step-2");
     if (step1) step1.style.display = "block";
     if (step2) step2.style.display = "none";
-    
+
     const loginUser = document.getElementById("username-input") ? document.getElementById("username-input").value.trim() : "";
     const fpUserInp = document.getElementById("fp-username-input");
     if (fpUserInp) fpUserInp.value = loginUser || "";
-    
+
     const fpOtp = document.getElementById("fp-otp-input");
     if (fpOtp) fpOtp.value = "";
     const fpPw = document.getElementById("fp-new-password-input");
     if (fpPw) fpPw.value = "";
-    
+
     modal.style.display = "flex";
 }
 

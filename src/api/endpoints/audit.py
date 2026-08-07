@@ -640,10 +640,11 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 raw_sev = (uc_info.get("severity") or "MEDIUM").upper()
                 sev = {"CRITICAL": "P1 Critical", "HIGH": "P2 High", "MEDIUM": "P3 Medium", "LOW": "P4 Low"}.get(raw_sev, "P3 Medium")
 
-            # Resolve exact evidence document source location
-            loc_src = f.source_files or getattr(f, "evidence_location", None) or getattr(f, "evidence_source_file", None)
+            # Resolve exact evidence document source location (Prioritize explicit evidence_location over all session source_files)
+            loc_src = getattr(f, "evidence_location", None) or getattr(f, "evidence_source_file", None) or f.source_files
             if not loc_src or loc_src in ("null", "undefined", "None", ""):
                 loc_src = fallback_source or "Uploaded Policy Document & Evidence Files"
+
 
             result.append({
                 "id": f.id,
@@ -792,10 +793,10 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
 
             # Record entry in AdminAuditLog for Privacy-Safe System Log Trail
             db.add(AdminAuditLog(
-                auditor_user=username or "Auditor",
+                auditor_user=auditor_user or "Auditor",
                 session_id=session_id,
-                action="FORCE_COMMIT" if force else "COMMIT_SHAKTHI_DB",
-                unreviewed_controls=str(len(unreviewed)) if force else "0",
+                action="FORCE_COMMIT" if is_force else "COMMIT_SHAKTHI_DB",
+                unreviewed_controls=str(len(unreviewed)) if is_force else "0",
                 details=f"Committed {total_ctrls} audit record(s) to Shakthi DB (Compliance Score: {score_pct}%)."
             ))
 
@@ -930,128 +931,55 @@ def api_export_benchmark_excel():
 
 @router.post("/upload-scope-excel")
 def api_upload_scope_excel(file: UploadFile = File(...)):
-    """Parses Excel scoping checklist and maps target ISO controls."""
+    """Parses Excel scoping checklist and maps target ISO controls dynamically."""
     try:
-        import pandas as pd
-        import re as _re
+        import tempfile
+        from src.core.excel_scoping_parser import parse_excel_scoping_checklist
         from src.core.controls_data import USE_CASES as _UC_LIST
 
         file_bytes = file.file.read()
-        df = pd.read_excel(io.BytesIO(file_bytes))
+        
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp_path = tmp.name
 
-        # Header row auto-detection
-        if any("unnamed" in str(c).lower() for c in df.columns):
-            for h_idx in range(min(5, len(df))):
-                row_vals = [str(v).strip().lower() for v in df.iloc[h_idx].values if pd.notna(v)]
-                if any(k in v for v in row_vals for k in ("audit", "check", "control", "file", "doc", "evidence", "expected")):
-                    df.columns = [str(c).strip() for c in df.iloc[h_idx]]
-                    df = df.iloc[h_idx+1:].reset_index(drop=True)
-                    break
+        try:
+            items = parse_excel_scoping_checklist(tmp_path)
+        finally:
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
 
-        col_control = None
-        col_document = None
-        col_evidence = None
-
-        for col in df.columns:
-            col_str = str(col).lower()
-            if any(k in col_str for k in ("evidence", "expected", "proof")):
-                col_evidence = col
-            elif any(k in col_str for k in ("use_case", "sl", "number", "audit", "check")) or "id" in col_str.split() or col_str == "control":
-                col_control = col
-            elif any(k in col_str for k in ("doc", "file", "policy", "source", "name")):
-                col_document = col
-
-        if col_control is None or col_evidence is None:
-            if len(df.columns) >= 3:
-                col_control = df.columns[1] if len(df.columns) > 1 else df.columns[0]
-                col_evidence = df.columns[2] if len(df.columns) > 2 else df.columns[1]
-                col_document = df.columns[2] if len(df.columns) > 2 else None
-            elif len(df.columns) >= 2:
-                col_control = df.columns[0]
-                col_evidence = df.columns[1]
-
-        if col_control is None or col_evidence is None:
-            raise HTTPException(status_code=400, detail="Columns for 'Control' and 'Evidence' could not be identified.")
 
         matched_sls_list = []
-        digit_re = _re.compile(r'(\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)')
-        vapt_re = _re.compile(r'(vapt-\d{1,2})', _re.IGNORECASE)
+        custom_evidence = {}
+        custom_documents = {}
 
-        for row_idx, row in df.iterrows():
-            ctrl_val = str(row[col_control]).strip()
-            ev_val = str(row[col_evidence]).strip()
-            if not ctrl_val or ctrl_val == "nan" or not ev_val or ev_val == "nan":
-                continue
+        for item in items:
+            ctrl_id = item.get("control_id")
+            ctrl_label = item.get("control_label")
+            files = item.get("files") or item.get("raw_file_refs") or []
+            files_str = ", ".join(files) if isinstance(files, list) else str(files)
 
-            matched_uc = None
-            match_id = digit_re.search(ctrl_val)
-            match_vapt = vapt_re.search(ctrl_val)
+            # Match sl from USE_CASES
+            matched_sl = None
+            for uc in _UC_LIST:
+                uc_id = uc["use_case"].split(" ")[0]
+                if uc_id == ctrl_id or uc["use_case"] == ctrl_label:
+                    matched_sl = uc["sl"]
+                    break
 
-            if match_vapt:
-                target_vapt = match_vapt.group(1).upper()
-                for uc in _UC_LIST:
-                    if uc["use_case"].upper().startswith(target_vapt):
-                        matched_uc = uc
-                        break
-            elif match_id:
-                target_id = match_id.group(1)
-                for uc in _UC_LIST:
-                    uc_id = uc["use_case"].split(" ")[0]
-                    if uc_id == target_id:
-                        matched_uc = uc
-                        break
-            else:
-                c_lower = ctrl_val.lower()
-                for uc in _UC_LIST:
-                    uc_id = uc["use_case"].split(" ")[0]
-                    uc_uc = str(uc.get("use_case", "")).lower()
-                    
-                    if 'ntp' in c_lower and uc_id in ("8.14", "8.17"):
-                        matched_uc = uc
-                        break
-                    elif ('multifactor' in c_lower or 'mfa' in c_lower) and uc_id in ("5.17", "8.5", "5.15"):
-                        matched_uc = uc
-                        break
-                    elif 'pam' in c_lower and uc_id in ("5.15", "8.2", "5.18"):
-                        matched_uc = uc
-                        break
-                    elif 'fraud' in c_lower and uc_id in ("5.4", "5.1", "5.15"):
-                        matched_uc = uc
-                        break
-                    elif ('archived' in c_lower or 'archival' in c_lower or 'logging' in c_lower) and uc_id in ("8.15", "5.33"):
-                        matched_uc = uc
-                        break
-                    elif any(k in c_lower for k in ('cpu', 'memory', 'disk', 'utilization')) and uc_id in ("8.6", "8.16"):
-                        matched_uc = uc
-                        break
-                    elif 'authentication' in c_lower and uc_id in ("8.5", "5.17", "5.15"):
-                        matched_uc = uc
-                        break
-                    elif c_lower in uc_uc:
-                        matched_uc = uc
-                        break
+            if matched_sl and matched_sl not in matched_sls_list:
+                matched_sls_list.append(matched_sl)
 
-            if matched_uc:
-                uc_key = matched_uc["use_case"]
-                uc_id = uc_key.split(" ")[0]
+            if ctrl_id:
+                custom_documents[ctrl_id] = files_str
+                if ctrl_label:
+                    custom_documents[ctrl_label] = files_str
 
-                for target_k in (uc_key, uc_id, ctrl_val):
-                    if target_k in custom_evidence:
-                        if ev_val not in custom_evidence[target_k]:
-                            custom_evidence[target_k] += f" | {ev_val}"
-                    else:
-                        custom_evidence[target_k] = ev_val
-
-                if col_document is not None:
-                    doc_val = str(row[col_document]).strip()
-                    if doc_val and doc_val != "nan":
-                        for target_k in (uc_key, uc_id, ctrl_val):
-                            if target_k in custom_documents:
-                                if doc_val not in custom_documents[target_k]:
-                                    custom_documents[target_k] += f", {doc_val}"
-                            else:
-                                custom_documents[target_k] = doc_val
-                matched_sls_list.append(matched_uc["sl"])
+        custom_evidence["excel_items"] = items
 
         return {
             "success": True,
@@ -1062,6 +990,7 @@ def api_upload_scope_excel(file: UploadFile = File(...)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/deliver")
 def api_deliver_report(
@@ -1150,9 +1079,7 @@ def api_export_feedback():
                     "corrected_status": getattr(fb, "corrected_status", ""),
                     "finding": getattr(fb, "finding", ""),
                     "recommendation": getattr(fb, "recommendation", ""),
-                    "auditor_comments": getattr(fb, "auditor_comments", ""),
-                    "confidence": getattr(fb, "confidence", 10),
-                    "hallucination_check": getattr(fb, "hallucination_check", False)
+                    "auditor_comments": getattr(fb, "auditor_comments", "")
                 })
             return {"success": True, "feedback": data}
         except Exception as e:
@@ -1194,13 +1121,12 @@ def api_import_feedback(file: UploadFile = File(...)):
                         corrected_status=corrected_status,
                         finding=finding,
                         recommendation=item.get("recommendation"),
-                        auditor_comments=item.get("auditor_comments"),
-                        confidence=item.get("confidence", 10),
-                        hallucination_check=item.get("hallucination_check", False)
+                        auditor_comments=item.get("auditor_comments")
                     ))
                     imported_count += 1
             db.commit()
             return {"success": True, "message": f"Successfully imported {imported_count} auditor feedback records into knowledge memory!"}
+
         except Exception as e:
             return {"success": False, "detail": f"Import failed: {str(e)}"}
         finally:

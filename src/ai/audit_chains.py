@@ -69,11 +69,9 @@ Evidence Quality reflects only the quality of retrieved evidence. It does NOT de
 * NONE: No evidence.
 
 COMPLIANCE STATUS:
-Compliance depends on BOTH: (1) Evidence Quality AND (2) Control Coverage.
-Example:
-Evidence Quality: STRONG
-Control Coverage: Partial
-Compliance: PARTIAL_COMPLIANT
+Compliance is strictly binary: either COMPLIANT or NON_COMPLIANT.
+* COMPLIANT: Documented evidence completely satisfies the control objective.
+* NON_COMPLIANT: Documented evidence is missing, incomplete, or fails the control objective.
 
 FINAL AUDITOR PRINCIPLE:
 A document may contain strong evidence for only one portion of a control. Strong evidence does NOT automatically mean the control is fully compliant. Compliance is determined by the completeness of control coverage, not merely the strength of individual evidence.
@@ -139,9 +137,8 @@ Low: Minor issue suitable for normal improvement cycles.
 
 CONTROL COVERAGE
 Estimate the percentage of control requirements covered by the available evidence:
-* 90-100% = Typically COMPLIANT
-* 30-89% = Typically PARTIAL_COMPLIANT
-* 0-29% = Typically NON_COMPLIANT
+* 90-100% = COMPLIANT
+* 0-89% = NON_COMPLIANT
 
 ════════════════════════════════════════
 DOCUMENT CONTEXT:
@@ -181,6 +178,88 @@ You MUST respond with findings wrapped in XML tags matching this format:
     <source>Document Name</source>
     <page>Page Number</page>
     <excerpt>Supporting evidence text / verbatim quote</excerpt>
+  </evidence_item>
+</evidence_items>
+
+Ensure the output contains only the XML tags and no surrounding text.
+"""
+
+EXCEL_SCOPING_JUDGE_PROMPT_TEMPLATE = """You are an ISO 27001 Lead Auditor and Cybersecurity Compliance Expert.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXCEL SCOPING MODE — JUDGE-ONLY INSTRUCTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+The following text has already been extracted from the locked evidence file(s):
+  {locked_filenames}
+
+You DO NOT need to search for evidence. The relevant paragraphs have already been
+retrieved for you and are provided below.
+
+YOUR ONLY JOBS ARE:
+1. Read the pre-extracted paragraphs carefully.
+2. Determine if the text satisfies the ISO 27001 control objective.
+3. Quote the EXACT sentence or phrase from the paragraphs below as your evidence excerpt.
+   Do NOT paraphrase. Do NOT invent quotes. Only use text that appears verbatim below.
+4. If the paragraphs below contain NO relevant text for the control, return
+   NON_COMPLIANT and state: "No relevant evidence found in {locked_filenames} for this control."
+   You MUST NOT return "N/A" as an evidence excerpt.
+
+ORIGINAL AUDIT CHECK QUESTION: {checklist_question}
+
+ISO 27001 AUDITOR REASONING RULES:
+
+COMPLIANCE DECISION LOGIC:
+1. APPLICABILITY CHECK
+   * If the control is NOT applicable to the document content, return FALSE_POSITIVE.
+2. EVIDENCE CHECK (only if applicable)
+   * COMPLIANT: The text clearly satisfies the control objective.
+   * NON_COMPLIANT: The text is missing, incomplete, or insufficient.
+
+AUDITOR REASONING RULES:
+* Never speculate. Never assume undocumented controls exist.
+* Evaluate only against the specific ISO 27001 control being audited.
+* Prioritize intent-based evaluation over keyword matching.
+* Do NOT use confidence scores or retrieval scores to determine compliance.
+* Every identified gap must be traceable to a specific requirement of the evaluated control.
+
+COMPLIANCE STATUS: Strictly binary — COMPLIANT or NON_COMPLIANT.
+
+════════════════════════════════════════
+PRE-EXTRACTED PARAGRAPHS FROM LOCKED FILE(S):
+════════════════════════════════════════
+\"\"\"
+{condensed_context}
+\"\"\"
+
+════════════════════════════════════════
+CONTROL TO AUDIT:
+════════════════════════════════════════
+Control ID: {control_id}
+Control Name: {control_label}
+Control Objective & Illustrative Evidence Examples (NOT a mandatory checklist): {expected_evidence}
+{feedback_section}
+
+You MUST respond with findings wrapped in XML tags matching this format:
+<status>COMPLIANT | NON_COMPLIANT | FALSE_POSITIVE</status>
+<policy_present>Compliant | Found | Not Found</policy_present>
+<evidence_present>Compliant | Found | Not Found</evidence_present>
+<severity_score>float_between_0.0_and_10.0</severity_score>
+<evidence_strength>Strong | Moderate | Weak | None</evidence_strength>
+<control_coverage>percentage_integer</control_coverage>
+<evidence_count>integer</evidence_count>
+<business_impact>business impact of identified gaps, or empty if COMPLIANT</business_impact>
+<remediation_priority>Low | Medium | High | Immediate</remediation_priority>
+<justification>Detailed auditor explanation supported by evidence.</justification>
+<missing_requirements>
+  <requirement>Requirement 1</requirement>
+  <requirement>Requirement 2</requirement>
+</missing_requirements>
+<recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
+<evidence_items>
+  <evidence_item>
+    <source>Exact filename from locked file(s)</source>
+    <page>Page Number or Section</page>
+    <excerpt>Verbatim quote from the pre-extracted paragraphs above</excerpt>
   </evidence_item>
 </evidence_items>
 
@@ -992,3 +1071,12 @@ def get_reflection_chain(model_name: str, url: str = None):
     Returns a native Ollama chain for critique and self-correction reflection.
     """
     return NativeOllamaChain(model_name, REFLECTION_PROMPT_TEMPLATE, url)
+
+def get_excel_scoping_chain(model_name: str, url: str = None):
+    """
+    Returns a native Ollama chain for the Two-Phase Excel Scoping mode.
+    Uses EXCEL_SCOPING_JUDGE_PROMPT_TEMPLATE — the LLM acts as a judge-only,
+    receiving pre-extracted paragraphs from locked files. It never searches.
+    This eliminates N/A evidence and wrong-file citations structurally.
+    """
+    return NativeOllamaChain(model_name, EXCEL_SCOPING_JUDGE_PROMPT_TEMPLATE, url)

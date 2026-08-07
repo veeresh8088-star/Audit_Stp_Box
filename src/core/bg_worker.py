@@ -43,6 +43,8 @@ from src.core.retrieval import save_document_chunks
 from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg_stop_flags
 from src.ai.audit_graph import audit_graph
 from src.core.token_tracker import record_token_metrics
+from src.core import redis_metrics as _rm
+
 
 _CUSTOM_USE_CASES_CACHE = []
 _CUSTOM_UC_CACHE_TS = 0
@@ -203,6 +205,31 @@ def _get_expected_evidence(uc, custom_evidence=None):
     return uc["expected"]
 
 def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
+    if custom_evidence is not None and isinstance(custom_evidence, dict) and "excel_items" in custom_evidence:
+        excel_items = custom_evidence["excel_items"]
+        if excel_items and isinstance(excel_items, list):
+            controls = []
+            for item in excel_items:
+                ctrl_id = item.get("control_id", "UNKNOWN")
+                q_text = item.get("question") or item.get("control_label") or ctrl_id
+                files = item.get("files") or item.get("raw_file_refs") or []
+                files_str = ", ".join(files) if isinstance(files, list) else str(files)
+                primary_file = files[0] if (files and isinstance(files, list) and len(files) > 0) else files_str
+
+                controls.append({
+                    "control": f"{ctrl_id} — {q_text}",
+                    "control_id": ctrl_id,
+                    "label": f"{ctrl_id} {q_text}",
+                    "expected": item.get("expected_evidence") or q_text,
+                    "prompt_hint": item.get("prompt_hint") or f"Evaluate evidence for: {q_text}",
+                    "severity": item.get("severity", "MEDIUM"),
+                    "standard": "ISO 27001",
+                    "recommendation": f"Establish, document, and implement procedures to satisfy {ctrl_id} ({q_text}).",
+                    "evidence_location": primary_file,
+                    "evidence_source_file": primary_file,
+                })
+            return controls
+
     all_ucs = list(USE_CASES) + _load_custom_use_cases()
     controls = []
     seen_controls = set()
@@ -222,6 +249,7 @@ def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
                 "recommendation": uc.get("recommendation", ""),
             })
     return controls
+
 
 def get_num_ctx(model_name: str) -> int:
     name = model_name.lower()
@@ -691,26 +719,32 @@ Return format: ["topic1", "topic2", ...]"""
             "severity": c["severity"],
             "standard": c.get("standard", "ISO 27001:2022"),
             "recommendation": c.get("recommendation", ""),
-            
+
             # Context & Config
             "document_text": control_context,
             "file_names_list": control_file_names,
             "ollama_model": ollama_model,
             "summary_text": summary_text,
-            
+
             # State tracking
             "retrieved_context": "",
             "draft_finding": None,
             "validation_error": None,
             "retry_count": 0,
             "final_finding": None,
-            
+
             # Progress tracking
             "bg_key": bg_key,
             "control_idx": idx,
             "total_controls": total,
             "audit_mode": audit_mode,
-            "file_registry": file_registry or {}
+            "file_registry": file_registry or {},
+
+            # ── Two-Phase Excel Scoping: pass locked_filenames if scoping is active ──
+            # locked_filenames restricts Phase 1 retrieval to ONLY the matched file(s).
+            # checklist_question is the original Excel audit check question text.
+            "locked_filenames": target_evidence_files if target_evidence_files else [],
+            "checklist_question": c.get("checklist_question") or c["label"],
         }
         
         try:
@@ -718,6 +752,21 @@ Return format: ["topic1", "topic2", ...]"""
             state_output = audit_graph.invoke(state_input)
             result = state_output.get("final_finding")
             if result:
+                # ── Excel Scoping Safety Gate (Phase 2 final correction) ─────────────
+                # Overrides N/A evidence and wrong-file citations structurally.
+                if target_evidence_files:
+                    try:
+                        from src.core.validator import apply_excel_scoping_safety_gate
+                        retrieved_ctx = state_output.get("retrieved_context", "")
+                        result = apply_excel_scoping_safety_gate(
+                            finding=result,
+                            locked_filenames=target_evidence_files,
+                            retrieved_context=retrieved_ctx,
+                            checklist_question=c.get("checklist_question") or c["label"]
+                        )
+                    except Exception as _sg_err:
+                        print(f"[SAFETY GATE ERROR] {_sg_err}", flush=True)
+
                 # ── Evidence provenance fix ───────────────────────────────────────
                 # Validator sets source_files only when grounding succeeds (quote found).
                 # If validator did not set it (e.g. NOT_GROUNDED), fall back to the
@@ -744,9 +793,24 @@ Return format: ["topic1", "topic2", ...]"""
 
             print(f"[{time.strftime('%H:%M:%S')}] [CONTROL EVALUATED] {c['control']} ({c['label']}) | Status: {res_status} | Latency: {c_lat_str} ({ctrl_duration:.1f}s) | Tokens Used: {ctrl_t_toks:,} (Prompt: {ctrl_p_toks:,}, Completion: {ctrl_c_toks:,})", flush=True)
             log_dev_latency(f"[{idx + 1}/{total}] [SUCCESS] Control {c['control']} {c['label']} completed in {ctrl_duration:.2f}s ({c_lat_str}) | Tokens: {ctrl_t_toks:,}")
+            # ── Redis: push per-control metrics live ─────────────────────────
+            try:
+                _rm.push_control_metrics(
+                    session_id=checkpoint_session_id or bg_key or _sid,
+                    prompt_tokens=ctrl_p_toks,
+                    comp_tokens=ctrl_c_toks,
+                    latency_sec=ctrl_duration
+                )
+            except Exception as _rpm_err:
+                pass  # Redis write failures never break an audit
         except Exception as e:
             print(f"[AUDIT ERROR] Error evaluating control {c['control']}: {e}", flush=True)
             log_dev_latency(f"ERROR: Control {c['control']} failed: {e}")
+            # ── Redis: push error signal ─────────────────────────────────────
+            try:
+                _rm.push_error(session_id=checkpoint_session_id or bg_key or _sid)
+            except Exception:
+                pass
 
         # Update progress and checkpoint periodically
         if bg_key:
@@ -885,28 +949,29 @@ Return format: ["topic1", "topic2", ...]"""
     except Exception as _bm_err:
         print(f"[BENCHMARK ERROR] Failed to record token metrics: {_bm_err}", flush=True)
 
+    # ── Redis: mark session as done ──────────────────────────────────────────
+    try:
+        _rm.session_done(session_id=checkpoint_session_id or bg_key or _sid, status="done")
+    except Exception:
+        pass
+
     return resolved_list, findings_list, all_results
 
-# FIX: Increased default from 2 to 4 concurrent audits.
-# With 8 CPU cores and 10 simultaneous users: 4 audits run in parallel,
-# remaining 6 queue cleanly and wait instead of being dropped or erroring.
-# Override at startup: set env var MAX_CONCURRENT_AUDITS=N
-_audit_semaphore = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_AUDITS", "4")))
+# 2x CPU cores = all 15+ auditors run simultaneously with NO queue.
+# Tradeoff: each auditor runs at ~50% token speed, but ZERO waiting.
+# Override via env var MAX_CONCURRENT_AUDITS=N if you prefer fewer slots.
+_default_concurrency = str(max(16, (os.cpu_count() or 8) * 2))
+_audit_semaphore = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_AUDITS", _default_concurrency)))
 
 def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None):
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)
     _sid = session_id or bg_key
     acquired_slot = False
     try:
-        if not _audit_semaphore.acquire(timeout=0.1):
-            print(f"[_run_ollama_bg] Task {bg_key} queued waiting for an available CPU slot...", flush=True)
-            with _bg_lock:
-                _bg_store["progress"][bg_key] = {
-                    "text": "⚡ Initializing Audit Engine...",
-                    "percent": 0
-                }
-            _audit_semaphore.acquire()
+        if not _audit_semaphore.acquire(timeout=5.0):
+            print(f"[_run_ollama_bg WARNING] Concurrency slot busy; auto-releasing semaphore slot for {bg_key}...", flush=True)
         acquired_slot = True
+
 
         # ── Pre-flight: verify LLM server is reachable (3s timeout) ──────────
         import os as _os
@@ -965,6 +1030,23 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             save_document_chunks(name, text)
             file_names_list.append(name)
         context_str = ctx.strip()
+
+        # ── Redis: register session as started ───────────────────────────────
+        try:
+            _total_file_bytes_pre = sum(
+                f_data.get("size_bytes", max(512, len(f_data.get("text", "")) * 2))
+                for f_data in files_data
+            )
+            _file_mb_pre = round(_total_file_bytes_pre / (1024 * 1024), 3)
+            _auditor_pre = os.environ.get("CURRENT_AUDITOR", "Auditor")
+            _rm.session_start(
+                session_id=_sid,
+                auditor=_auditor_pre,
+                files_count=len(file_names_list),
+                file_mb=_file_mb_pre
+            )
+        except Exception as _rs_err:
+            print(f"[Redis session_start ignored] {_rs_err}", flush=True)
 
         # Update scanned files to "Reviewing" in database
         try:
@@ -1036,6 +1118,10 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                         is_comp = (f_status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")
                         f_recom = f.get("recommendation") or f.get("remediation") or (f"Maintain current documented policies and verification procedures for {f.get('control_id')}." if is_comp else f"Establish formal policy documentation, access controls, and logging evidence for {f.get('control_id')}.")
 
+                        ev_loc = f.get("evidence_location") or f.get("evidence_source_file") or f.get("source_file") or ""
+                        if not ev_loc and f.get("source_files"):
+                            ev_loc = f.get("source_files").split(",")[0].strip()
+
                         db_write.add(Finding(
                             report_id=report.id,
                             control_id=f.get("control_id"),
@@ -1046,6 +1132,8 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                             relevance_score=f.get("relevance_score", 0),
                             evidence_found=f.get("evidence_found", ""),
                             evidence_snippet=f.get("evidence_snippet", ""),
+                            evidence_location=ev_loc,
+                            evidence_source_file=ev_loc,
                             recommendation=f_recom,
                             reasoning=f.get("reasoning") or f_desc or "",
                             status="COMPLIANT" if is_comp else f_status,
@@ -1053,6 +1141,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                             evidence_present=f.get("evidence_present") or ("Compliant" if is_comp else "No"),
                             source_files=f.get("source_files", "")
                         ))
+
                     
                     # 3. Calculate score and update ComplianceScore
                     db_write.query(ComplianceScore).filter(ComplianceScore.report_id == report.id).delete()

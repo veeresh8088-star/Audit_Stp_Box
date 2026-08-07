@@ -2691,15 +2691,39 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         
     # Evidence
     section_title("Evidence:")
-    uploaded_files = list({f.get('source_files', '') for f in findings if f.get('source_files')})
-    if uploaded_files:
-        for uf in uploaded_files:
-            for fname in str(uf).split(','):
-                fname = fname.strip()
-                if fname:
-                    pdf.cell(5, 5, chr(149), align="R")
-                    pdf.multi_cell(185, 5, clean_text(fname), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-                    pdf.ln(1)
+    all_ev_files = set()
+    for f in findings:
+        sf = f.get("source_files") or f.get("file_names") or f.get("evidence_location") or ""
+        if sf:
+            if isinstance(sf, list):
+                for fn in sf:
+                    if fn: all_ev_files.add(str(fn).strip())
+            else:
+                for fn in str(sf).split(","):
+                    fn = fn.strip()
+                    if fn: all_ev_files.add(fn)
+    # Query DB directly for evidence files
+    try:
+        from src.db.database import SessionLocal as _SL2, EvidenceFile as _EF2, AuditReport as _AR2
+        _db2 = _SL2()
+        try:
+            _report2 = _db2.query(_AR2).filter(_AR2.session_title == session_title).first()
+            if _report2:
+                _evs = _db2.query(_EF2).filter(_EF2.report_id == _report2.id).all()
+                for e in _evs:
+                    if e.filename: all_ev_files.add(e.filename.strip())
+        except Exception:
+            pass
+        finally:
+            _db2.close()
+    except Exception:
+        pass
+
+    if all_ev_files:
+        for fname in sorted(all_ev_files):
+            pdf.cell(5, 5, chr(149), align="R")
+            pdf.multi_cell(185, 5, clean_text(fname), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(1)
     else:
         pdf.set_font("Helvetica", "I", 9.5)
         pdf.cell(0, 5, "No evidence files recorded.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
