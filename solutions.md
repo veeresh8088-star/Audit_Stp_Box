@@ -98,27 +98,58 @@ Four dedicated REST endpoints in `src/api/endpoints/logs.py` support per-auditor
 
 ---
 
-## 7. VAPT Finding Card UI Architecture & Display Specifications
+---
 
-The **Audit Records & Compliance Gaps Workspace** formats VAPT vulnerability finding records with structured UI elements:
+## 7. VAPT Full System Architecture & Finding Card UI Specifications
 
-### Card Visual Structure
-1. **Header & Control Identifier**:
-   - Format: `VAPT-{ID} {Vulnerability Title}` (e.g., `VAPT-12 ASP.NET Core SEoL`).
-2. **Compliance Badges**:
-   - **Policy Badge**: `✕ Policy: Non-Compliant` / `✓ Policy: Compliant`
-   - **Evidence Badge**: `✓ Evidence: Present` / `⚠ Evidence: Missing`
-   - **Status Badge**: `NON_COMPLIANT` / `COMPLIANT`
-3. **Finding Description**:
-   - High-level technical impact and risk explanation (e.g. vendor EOL, unpatched vulnerability impact).
-4. **Technical Evidence Snippet Box**:
-   - Dark monospaced console block (`rgba(15,23,42,0.9)`) rendering exact scanner proof:
-     ```text
-     Target Host: <IP / Hostname>
-     Plugin ID: <ID>
-     Scanner: <Nessus / Burp / Qualys / OpenVAS>
-     Plugin Output: <Path, Installed Version, End-of-Life details>
-     ```
-5. **Lead Auditor Recommendations**:
-   - Actionable remediation advice (e.g., *"Upgrade to a version of ASP.NET Core that is currently supported."*).
+The **VAPT Module** provides end-to-end vulnerability assessment and penetration testing audit capabilities, completely decoupled from standard ISO 27001 governance pipelines.
+
+### Key Technical Subsystems
+
+1. **Multi-Scanner Ingestion Parsers**:
+   - **Nessus XML/CSV Parser (`nessus_parser.py`)**: Extracts Target Host IP, Port, Plugin ID, Severity, CVE List, CVSS v3.1 Vector, and raw Plugin Output.
+   - **Burp Suite XML/PDF Parser**: Extracts OWASP Web Application vulnerabilities, URLs, CWE IDs, and HTTP request/response payloads.
+   - **OpenVAS & Qualys Parsers**: Ingests infrastructure and cloud security findings.
+
+2. **Deterministic VAPT Control Mapper (`control_mapper.py`)**:
+   - Maps scanner vulnerabilities 100% deterministically to `VAPT-1` through `VAPT-15`:
+     - `VAPT-1`: External Perimeter Vulnerability Assessment
+     - `VAPT-2`: Web Application Pen Testing (OWASP Top 10)
+     - `VAPT-3`: Network Infrastructure Penetration Testing
+     - `VAPT-4`: API Security & OAuth Endpoint Assessment
+     - `VAPT-5`: Database Injection & SQLi Hardening
+     - `VAPT-6`: Cross-Site Scripting (XSS) & CSTI Testing
+     - `VAPT-7`: XML External Entity (XXE) & SSRF Auditing
+     - `VAPT-8`: Privilege Escalation & Access Control Verification
+     - `VAPT-9`: Broken Authentication & Session Management
+     - `VAPT-10`: SSL/TLS Cipher Suite & HSTS Hardening
+     - `VAPT-11`: Sensitive Data Exposure & Masking Audit
+     - `VAPT-12`: Security Misconfiguration & Service Banners
+     - `VAPT-13`: Source Code & Dependency Vulnerability Scan
+     - `VAPT-14`: Cloud Infrastructure & IAM Policy Audit
+     - `VAPT-15`: Final VAPT Executive Summary & Remediation
+
+3. **Vulnerability Deduplication Engine (`vapt_pipeline.py`)**:
+   - Groups multi-IP scan alerts for identical vulnerabilities into single consolidated findings with complete target host lists, preventing finding inflation.
+
+4. **UI Finding Card Visual Specifications (`src/api/static/app.js`)**:
+   - **🎯 Target Host & Scope Block**: Red accent container (`border-left: 3px solid #f87171`) displaying Target IP, Port, Plugin ID, and Scanner tool name.
+   - **🔴 Clickable CVE Badges with NVD Links**: Clickable red badges (`CVE-2024-XXXX ↗`) linking directly to NIST NVD (`https://nvd.nist.gov/vuln/detail/CVE-...`).
+   - **📊 CVSS Vector & Decoded Risk Hints**: CVSS v3.1 vector string + decoded risk hints (`🌐 Exploitable Remotely`, `🔓 No Auth Required`, `👤 No User Interaction`).
+   - **📋 Clean Technical PoC Box & `_cleanPoc` Parser**: `_cleanPoc` parser to auto-strip duplicate header lines from raw scanner plugin output inside a green themed code pre-box (`background: rgba(16, 185, 129, 0.07)`).
+   - **📄 Real Vulnerability Description Prioritization**: Prioritizes real technical Nessus/Burp descriptions over generic governance strings.
+   - **🏷️ Dynamic CVSS Severity Pills**: Renders real severity pills (`Critical`, `High`, `Medium`, `Low`).
+   - **🔧 Recommended Remediation**: Dedicated remediation block with blue text styling.
+
+---
+
+## 8. Dedicated VAPT Report Exporters (`report_exporter.py`)
+
+1. **VAPT Master Template PDF Exporter (`_export_vapt_pdf`)**:
+   - Automatically routes VAPT sessions to the official VAPT PDF layout.
+   - Generates Executive Summary, Scope Breakdown, Severity Matrix, Target Host Tables, PoC Code Boxes, and Remediation Details.
+2. **VAPT Master Template Word Exporter (`_export_vapt_docx`)**:
+   - Routes VAPT sessions to the official Word template (`VAPT/Sample report.docx`).
+   - Preserves professional document formatting, vulnerability grids, and PII redaction rules.
+
 
