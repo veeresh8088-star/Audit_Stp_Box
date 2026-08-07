@@ -74,6 +74,7 @@ set OLLAMA_NUM_PARALLEL=4
 set OLLAMA_MAX_LOADED_MODELS=3
 set MAX_CONCURRENT_AUDITS=%LLM_SLOTS%
 set REDIS_URL=redis://127.0.0.1:6380/0
+set JWT_SECRET=3f955ad04cac120284051dc8bdaed7320dfeaba546860e8a3507dc8583a06ec9
 
 echo.
 echo ==================================================
