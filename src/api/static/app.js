@@ -3257,21 +3257,13 @@ function renderFindingsList() {
                     const m = _poc.match(/Target Host:\s*(.+)/);
                     if (m) _target = m[1].trim();
                 }
-                if (!_cves.length) {
-                    const m = _poc.match(/CVE\(s\):\s*(.+)/);
-                    if (m) {
-                        _cves = m[1].split(",").map(s => s.trim()).filter(s => s.startsWith("CVE-"));
-                    }
-                }
-                if (!_pluginId) {
-                    const m = _poc.match(/Plugin ID:\s*(.+)/);
-                    if (m) _pluginId = m[1].trim();
-                }
-                if (!_tool) {
-                    const m = _poc.match(/Scanner:\s*(.+)/);
-                    if (m) _tool = m[1].trim();
+            if (!_cves.length) {
+                const extracted = (_poc + " " + _desc).match(/CVE-\d{4}-\d{4,7}/gi);
+                if (extracted) {
+                    _cves = Array.from(new Set(extracted.map(c => c.toUpperCase())));
                 }
             }
+
             if (!_tool) _tool = "Scanner";
 
             let _cleanPoc = _poc;
@@ -3289,7 +3281,7 @@ function renderFindingsList() {
                            background:rgba(239,68,68,0.12); color:#f87171;
                            border:1px solid rgba(239,68,68,0.3); font-weight:700;
                            text-decoration:none; margin-right:4px;" title="View on NVD">${cve} ↗</a>`).join("")
-                : `<span style="font-size:0.72rem; color:var(--text-muted);">No CVE assigned</span>`;
+                : `<span style="font-size:0.74rem; padding:2px 8px; border-radius:4px; background:rgba(148,163,184,0.12); color:var(--text-muted); border:1px solid rgba(148,163,184,0.25); font-weight:600;">N/A — Vendor Security Advisory / End-of-Life Notice</span>`;
 
             let vectorHint = "";
             if (_cvssVec) {
