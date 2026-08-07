@@ -2749,4 +2749,12 @@ body[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
     border-color: #38bdf8 !important;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.9) !important;
 }
+
+/* ── RESPONSIVE HIGH-DPI SCALING OVERRIDES (For Laptops with 125% / 150% Windows Scaling) ── */
+@media screen and (max-height: 900px), screen and (max-width: 1440px) {
+    html {
+        font-size: 14px;
+    }
+}
+
 

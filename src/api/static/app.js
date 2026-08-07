@@ -4962,9 +4962,9 @@ function updateThemeToggleUI(theme) {
     }
 }
 
-// Restore user theme preference instantly on page load
+// Restore user theme preference instantly on page load (default to light mode)
 (function initAppTheme() {
-    const savedTheme = localStorage.getItem("aicyber_theme") || "dark";
+    const savedTheme = localStorage.getItem("aicyber_theme") || "light";
     document.documentElement.setAttribute("data-theme", savedTheme);
     document.addEventListener("DOMContentLoaded", () => {
         if (savedTheme === "light") {

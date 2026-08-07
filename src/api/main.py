@@ -19,8 +19,10 @@ if sys.platform == "win32":
         pass
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+
 
 from src.api.endpoints.auth import router as auth_router
 from src.api.endpoints.controls import router as controls_router
@@ -56,8 +58,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
+
+# ── AUTO HTTP (80) -> HTTPS (443) REDIRECTOR ──
+# When users type 'aicyberauditbox.com' without typing 'https://', browsers try Port 80 first.
+# This background server listens on Port 80 and immediately redirects them to https://aicyberauditbox.com/
+def _start_http_redirector():
+    try:
+        import threading
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                target_url = f"https://aicyberauditbox.com{self.path}"
+                self.send_response(301)
+                self.send_header("Location", target_url)
+                self.end_headers()
+            def log_message(self, format, *args):
+                pass  # Silence stdout noise
+
+        def _run_server():
+            try:
+                server = HTTPServer(('0.0.0.0', 80), RedirectHandler)
+                print("[HTTP REDIRECTOR] Active on 0.0.0.0:80 -> Redirecting HTTP requests to HTTPS https://aicyberauditbox.com/", flush=True)
+                server.serve_forever()
+            except Exception as e:
+                print(f"[HTTP REDIRECTOR] Could not bind Port 80 (already in use or permission restricted): {e}", flush=True)
+
+        t = threading.Thread(target=_run_server, daemon=True)
+        t.start()
+    except Exception as ex:
+        print(f"[HTTP REDIRECTOR ERROR] {ex}", flush=True)
+
+_start_http_redirector()
+
+
 
 # Register endpoints routers
 app.include_router(auth_router, prefix="/api")
