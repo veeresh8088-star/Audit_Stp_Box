@@ -152,12 +152,41 @@ def map_new_schema_to_legacy(finding):
     evidence_list = finding.get("evidence", [])
     evidence_quote = "NOT_FOUND"
     if evidence_list and isinstance(evidence_list, list):
-        first_ev = evidence_list[0]
-        if isinstance(first_ev, dict):
-            evidence_quote = first_ev.get("excerpt") or "NOT_FOUND"
-            mapped["evidence_location"] = f"{first_ev.get('source', '')} | Page/Sec {first_ev.get('page', '')}"
+        # BUG FIX 1: Collect ALL evidence items, not just first_ev = evidence_list[0].
+        # Previously only index [0] was stored — all other quotes were discarded.
+        # Now: join all excerpts into one combined snippet (newline-separated).
+        all_excerpts = []
+        first_doc_ref = None   # Track first real filename for evidence_location
+        for ev_item in evidence_list:
+            if isinstance(ev_item, dict):
+                excerpt = ev_item.get("excerpt") or ev_item.get("text") or ""
+                if excerpt and excerpt != "NOT_FOUND":
+                    all_excerpts.append(excerpt.strip())
+                # BUG FIX 2: evidence_location should be the document FILENAME,
+                # not ev_item["source"] which contains the control name
+                # (e.g. "5.15 Access Control") causing "5.15 Access Control | Page/Sec 1"
+                # in the UI. Use ev_item["file"] or ev_item["filename"] first.
+                if first_doc_ref is None:
+                    doc_ref = (
+                        ev_item.get("file") or
+                        ev_item.get("filename") or
+                        ev_item.get("document") or
+                        ev_item.get("source") or ""
+                    )
+                    page_ref = ev_item.get("page") or ev_item.get("page_number") or ""
+                    if doc_ref:
+                        first_doc_ref = f"{doc_ref} | Page/Sec {page_ref}" if page_ref else doc_ref
+            elif isinstance(ev_item, str) and ev_item.strip():
+                all_excerpts.append(ev_item.strip())
+
+        if all_excerpts:
+            evidence_quote = "\n\n".join(all_excerpts)
+        if first_doc_ref:
+            mapped["evidence_location"] = first_doc_ref
+
     mapped["evidence_quote"] = evidence_quote
     mapped["evidence_snippet"] = evidence_quote if evidence_quote != "NOT_FOUND" else ""
+
     
     # 4. gap description mapping
     missing_reqs = finding.get("missing_requirements", [])
