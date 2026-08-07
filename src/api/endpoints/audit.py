@@ -142,11 +142,47 @@ def api_create_session(
 @router.get("/sessions")
 def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None):
     """Retrieves list of active compliance sessions strictly isolated to the logged-in user."""
+def _enforce_max_sessions_limit(db, username: str, max_sessions: int = 50):
+    """
+    Enforces a strict cap of `max_sessions` per user account.
+    If a user has more than `max_sessions` audit sessions, the oldest ones
+    (and their associated findings, evidence records, and checkpoints) are automatically purged.
+    """
+    if not username or not username.strip():
+        return
+    try:
+        user_reports = db.query(AuditReport).filter(
+            AuditReport.created_by == username
+        ).order_by(AuditReport.created_at.desc()).all()
+
+        if len(user_reports) > max_sessions:
+            reports_to_delete = user_reports[max_sessions:]
+            delete_ids = [r.id for r in reports_to_delete]
+            delete_sids = [r.session_id for r in reports_to_delete if r.session_id]
+
+            if delete_ids:
+                db.query(Finding).filter(Finding.report_id.in_(delete_ids)).delete(synchronize_session=False)
+                db.query(EvidenceFile).filter(EvidenceFile.report_id.in_(delete_ids)).delete(synchronize_session=False)
+                db.query(ComplianceScore).filter(ComplianceScore.report_id.in_(delete_ids)).delete(synchronize_session=False)
+            if delete_sids:
+                db.query(AuditCheckpoint).filter(AuditCheckpoint.session_id.in_(delete_sids)).delete(synchronize_session=False)
+
+            db.query(AuditReport).filter(AuditReport.id.in_(delete_ids)).delete(synchronize_session=False)
+            db.commit()
+    except Exception as e:
+        print(f"[Session Auto-Purge Warning]: {e}", flush=True)
+
+@router.get("/sessions")
+def api_get_sessions(username: Optional[str] = None):
+    """Returns sessions strictly scoped to the requesting user."""
     if not username or not username.strip():
         return {"success": True, "sessions": []}
 
     db = SessionLocal()
     try:
+        # Enforce max 50 sessions limit (auto-deletes sessions older than top 50)
+        _enforce_max_sessions_limit(db, username, max_sessions=50)
+
         user = db.query(User).filter(User.username == username).first()
         user_id = user.id if user else None
 
@@ -235,6 +271,8 @@ def api_get_auditee_sessions(username: Optional[str] = None):
 def get_or_create_audit_report(db, session_id: str, default_title: str = None, default_framework: str = "ISO 27001", username: str = None):
     report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
     if not report:
+        if username:
+            _enforce_max_sessions_limit(db, username, max_sessions=50)
         title = default_title or f"Audit Session ({session_id[:8]})"
         user_id = None
         if username:
