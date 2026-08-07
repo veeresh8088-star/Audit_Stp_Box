@@ -2943,6 +2943,8 @@ function calculateSeverityStats(currentExpandedCards) {
 
     const elP4 = document.getElementById("count-p4");
     if (elP4) elP4.innerText = p4Count;
+}
+
 function formatStructuredPoc(pocText) {
     if (!pocText || typeof pocText !== "string") return "";
     let clean = pocText.trim();
@@ -3284,6 +3286,7 @@ function renderFindingsList() {
                     const m = _poc.match(/Target Host:\s*(.+)/);
                     if (m) _target = m[1].trim();
                 }
+            }
             if (!_cves.length) {
                 const extracted = (_poc + " " + _desc).match(/CVE-\d{4}-\d{4,7}/gi);
                 if (extracted) {
