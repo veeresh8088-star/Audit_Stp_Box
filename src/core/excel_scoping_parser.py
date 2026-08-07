@@ -337,6 +337,11 @@ def parse_excel_scoping_checklist(
         question_col = _detect_question_column(header_row)
         file_cols = _detect_file_columns(header_row)
 
+        # A column cannot be BOTH the question column and a file column.
+        # This happens when the header is just "Policy Name" (matches both sets of keywords).
+        # In that case, treat it as question-only (no file columns).
+        file_cols = [c for c in file_cols if c != question_col]
+
         print(f"[EXCEL PARSER] Sheet: '{target_sheet.title}' | "
               f"Question col: {question_col} ('{header_row[question_col]}') | "
               f"File cols: {file_cols} ({[header_row[c] for c in file_cols]})",
