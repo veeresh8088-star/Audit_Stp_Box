@@ -684,14 +684,27 @@ async function resumeAuditFromCheckpoint() {
 
 // ── SESSION MANAGEMENT ──
 
-function openNewSessionModal() {
+function _autoFillSessionTitle() {
+    const frameworkEl = document.getElementById("new-session-framework");
+    const companyEl = document.getElementById("new-session-company");
+    const titleEl = document.getElementById("new-session-title-input");
+    if (!titleEl) return;
     const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-    const defaultTitle = `ISO 27001 Audit — ${todayStr}`;
+    const framework = frameworkEl ? frameworkEl.value : "ISO 27001";
+    const company = companyEl && companyEl.value.trim() ? ` — ${companyEl.value.trim()}` : "";
+    titleEl.value = `${framework}${company} — ${todayStr}`;
+}
+
+function openNewSessionModal() {
+    const frameworkEl = document.getElementById("new-session-framework");
+    const companyEl = document.getElementById("new-session-company");
     const modal = document.getElementById("new-session-modal");
     const input = document.getElementById("new-session-title-input");
-    if (input) input.value = defaultTitle;
+    if (frameworkEl) frameworkEl.value = "ISO 27001";
+    if (companyEl) companyEl.value = "";
+    _autoFillSessionTitle();
     if (modal) modal.style.display = "flex";
-    if (input) setTimeout(() => { input.focus(); input.select(); }, 50);
+    if (companyEl) setTimeout(() => { companyEl.focus(); }, 50);
 }
 
 function closeNewSessionModal() {
@@ -711,7 +724,12 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
     if (!currentUser) return;
     try {
         const todayStr = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-        const defaultTitle = `ISO 27001 Audit — ${todayStr}`;
+        // Build smart default title from modal fields if available
+        const frameworkEl = document.getElementById("new-session-framework");
+        const companyEl = document.getElementById("new-session-company");
+        const framework = (frameworkEl && frameworkEl.value) ? frameworkEl.value : "ISO 27001";
+        const company = (companyEl && companyEl.value.trim()) ? ` — ${companyEl.value.trim()}` : "";
+        const defaultTitle = `${framework}${company} — ${todayStr}`;
         let finalTitle = customTitle || defaultTitle;
 
         if (!skipPrompt && customTitle === null) {
