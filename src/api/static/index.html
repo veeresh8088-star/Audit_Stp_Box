@@ -1564,6 +1564,41 @@
         </div>
     </div>
 
+    <!-- Interrupted Audit Session Recovery Modal -->
+    <div id="interrupted-session-modal" class="modal-overlay" style="display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(10px); z-index: 10000; align-items: center; justify-content: center; padding: 16px;">
+        <div class="modal-card" style="background: #0f172a; border: 1px solid rgba(239, 68, 68, 0.4); border-radius: 16px; width: 100%; max-width: 520px; padding: 26px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); color: #f8fafc;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid rgba(239, 68, 68, 0.2); padding-bottom: 14px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 1.5rem;">⚠️</span>
+                    <div>
+                        <h3 style="margin: 0; font-size: 1.15rem; font-weight: 800; color: #f87171;">Audit Scan Interrupted</h3>
+                        <p style="margin: 3px 0 0 0; font-size: 0.78rem; color: #94a3b8;">Unfinished audit analysis detected from a previous session</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="background: rgba(30, 41, 59, 0.8); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 14px; margin-bottom: 20px;">
+                <div style="font-size: 0.75rem; color: #94a3b8; font-weight: 700; text-transform: uppercase; margin-bottom: 4px;">Session Title</div>
+                <div id="interrupted-session-title" style="font-size: 0.95rem; font-weight: 700; color: #ffffff; margin-bottom: 10px;">—</div>
+                
+                <div style="display: flex; justify-content: space-between; font-size: 0.80rem; color: #cbd5e1; border-top: 1px solid rgba(148, 163, 184, 0.15); padding-top: 8px;">
+                    <span>Completed Controls: <b id="interrupted-progress-text" style="color: #38bdf8;">0 / 0</b></span>
+                    <span>Interrupted At: <i id="interrupted-time-text" style="color: #94a3b8;">—</i></span>
+                </div>
+            </div>
+
+            <p style="font-size: 0.84rem; color: #cbd5e1; line-height: 1.5; margin-bottom: 22px;">
+                Would you like to <b>Resume Analysis</b> from where it left off, or <b>Discard & Start Fresh</b>?
+            </p>
+
+            <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                <button type="button" onclick="handleDiscardInterruptedSession()" style="padding: 10px 18px; border-radius: 8px; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.12); color: #f87171; font-weight: 700; font-size: 0.84rem; cursor: pointer;">🗑️ Discard & Reset</button>
+                <button type="button" onclick="handleResumeInterruptedSession()" style="padding: 10px 22px; border-radius: 8px; border: none; background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: #ffffff; font-weight: 800; font-size: 0.84rem; cursor: pointer; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);">▶️ Resume Analysis</button>
+            </div>
+        </div>
+    </div>
+
+
     <!-- Modular UI Script Loading -->
     <script src="/static/js/config.js?v=20260726_v410000"></script>
     <script src="/static/js/sidebar.js?v=20260726_v410000"></script>

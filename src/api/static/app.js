@@ -741,8 +741,92 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
 }
 
 async function loadOrCreateSession(user) {
-    // When newly opening the app, initialize a fresh session without prompt!
+    // When newly opening the app, check for interrupted sessions first!
     await startNewAuditSession(true);
+    await checkInterruptedAuditSessions();
+}
+
+let currentInterruptedSession = null;
+
+async function checkInterruptedAuditSessions() {
+    if (!currentUser) return;
+    try {
+        const username = currentUser.username || "admin";
+        const resp = await fetch(`${API_BASE}/audit/interrupted-checkpoints?username=${encodeURIComponent(username)}`);
+        const data = await resp.json();
+
+        if (data.success && data.interrupted_sessions && data.interrupted_sessions.length > 0) {
+            currentInterruptedSession = data.interrupted_sessions[0];
+            const modal = document.getElementById("interrupted-session-modal");
+            const titleEl = document.getElementById("interrupted-session-title");
+            const progEl = document.getElementById("interrupted-progress-text");
+            const timeEl = document.getElementById("interrupted-time-text");
+
+            if (modal && titleEl && progEl && timeEl) {
+                titleEl.innerText = currentInterruptedSession.session_title || currentInterruptedSession.session_id;
+                progEl.innerText = `${currentInterruptedSession.completed_batches} / ${currentInterruptedSession.total_controls} Controls`;
+                timeEl.innerText = currentInterruptedSession.updated_at || "Recently";
+                modal.style.display = "flex";
+            }
+        }
+    } catch (e) {
+        console.warn("[Interrupted Checkpoint] Check error:", e);
+    }
+}
+
+async function handleResumeInterruptedSession() {
+    if (!currentInterruptedSession) return;
+    const modal = document.getElementById("interrupted-session-modal");
+    if (modal) modal.style.display = "none";
+
+    try {
+        const sid = currentInterruptedSession.session_id;
+        activeSessionId = sid;
+        activeSessionTitle = currentInterruptedSession.session_title || sid;
+
+        const badgeEl = document.getElementById("active-session-badge");
+        const titleEl = document.getElementById("workspace-title");
+        if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
+        if (titleEl) titleEl.innerText = activeSessionTitle;
+
+        showToastBanner(`RESUMING AUDIT SCAN: "${activeSessionTitle}"`);
+
+        const resp = await fetch(`${API_BASE}/audit/resume-checkpoint`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sid })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            const bgKey = `bg_${sid}`;
+            if (typeof pollAuditProgress === "function") pollAuditProgress(bgKey);
+        } else {
+            showToastBanner(`Resume error: ${data.message || data.error}`, "error");
+        }
+    } catch (err) {
+        showToastBanner(`Resume failed: ${err.message}`, "error");
+    }
+}
+
+async function handleDiscardInterruptedSession() {
+    if (!currentInterruptedSession) return;
+    const modal = document.getElementById("interrupted-session-modal");
+    if (modal) modal.style.display = "none";
+
+    try {
+        const sid = currentInterruptedSession.session_id;
+        await fetch(`${API_BASE}/audit/discard-checkpoint`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: sid })
+        });
+        showToastBanner("Interrupted session discarded. Opening fresh workspace.", "info");
+        currentInterruptedSession = null;
+        await startNewAuditSession(true);
+    } catch (err) {
+        showToastBanner(`Discard failed: ${err.message}`, "error");
+    }
 }
 
 async function populateAuditeeSelector() {

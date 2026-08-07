@@ -1777,9 +1777,7 @@ def api_restore_doc_to_finding(finding_id: int, req: dict):
             current_docs = [s.strip() for s in (finding.source_files or '').split(',') if s.strip()]
             if doc_name not in current_docs:
                 current_docs.append(doc_name)
-                finding.source_files = ', '.join(current_docs)
-                finding.is_saved_to_shakthi = True
-                db.commit()
+            db.commit()
             return {'success': True, 'message': f'Document {doc_name} restored.', 'remaining_source_files': finding.source_files}
     except HTTPException:
         raise
@@ -1788,3 +1786,101 @@ def api_restore_doc_to_finding(finding_id: int, req: dict):
         raise HTTPException(status_code=500, detail=f'Restore document failed: {e}')
     finally:
         db.close()
+
+
+# ── INTERRUPTED AUDIT SCAN RECOVERY ENDPOINTS (ShaktiDB + SQLite Dual Support) ──
+
+@router.get('/interrupted-checkpoints')
+def api_get_interrupted_checkpoints(username: Optional[str] = Query(None)):
+    db = SessionLocal()
+    try:
+        with force_master():
+            # Query AuditCheckpoint for incomplete scans
+            query = db.query(AuditCheckpoint).filter(AuditCheckpoint.status.in_(["in_progress", "interrupted"]))
+            checkpoints = query.order_by(AuditCheckpoint.updated_at.desc()).all()
+
+            results = []
+            for ck in checkpoints:
+                # Retrieve session title from AuditReport if available
+                report = db.query(AuditReport).filter(AuditReport.session_id == ck.session_id).first()
+                title = report.session_title if report else f"Audit Session {ck.session_id[:12]}"
+                
+                results.append({
+                    "id": ck.id,
+                    "session_id": ck.session_id,
+                    "session_title": title,
+                    "completed_batches": ck.completed_batches or 0,
+                    "total_controls": ck.total_controls or 0,
+                    "status": ck.status,
+                    "updated_at": ck.updated_at.strftime("%Y-%m-%d %H:%M:%S") if ck.updated_at else ""
+                })
+
+            return {"success": True, "interrupted_sessions": results}
+    except Exception as e:
+        return {"success": False, "interrupted_sessions": [], "error": str(e)}
+    finally:
+        db.close()
+
+
+@router.post('/resume-checkpoint')
+def api_resume_checkpoint(req: dict, background_tasks: BackgroundTasks):
+    session_id = req.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing session_id")
+
+    db = SessionLocal()
+    try:
+        with force_master():
+            ck = db.query(AuditCheckpoint).filter(AuditCheckpoint.session_id == session_id).first()
+            if not ck:
+                raise HTTPException(status_code=404, detail="Checkpoint not found")
+
+            ck.status = "in_progress"
+            db.commit()
+
+            # Launch background worker from last checkpoint position
+            selected_sls = json.loads(ck.selected_sls_json) if ck.selected_sls_json else []
+            file_names = json.loads(ck.file_names_json) if ck.file_names_json else []
+
+            bg_key = f"bg_{session_id}"
+            background_tasks.add_task(
+                _run_ollama_bg,
+                bg_key,
+                ck.ai_model or "google_gemma-4-E4B-it-Q4_K_M.gguf",
+                selected_sls,
+                file_names,
+                ck.context_text or "",
+                session_id,
+                None
+            )
+
+            return {"success": True, "message": "Scan resumed successfully", "session_id": session_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Resume checkpoint failed: {e}")
+    finally:
+        db.close()
+
+
+@router.post('/discard-checkpoint')
+def api_discard_checkpoint(req: dict):
+    session_id = req.get("session_id")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing session_id")
+
+    db = SessionLocal()
+    try:
+        with force_master():
+            ck = db.query(AuditCheckpoint).filter(AuditCheckpoint.session_id == session_id).first()
+            if ck:
+                ck.status = "discarded"
+                db.commit()
+            return {"success": True, "message": f"Checkpoint {session_id} discarded"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Discard failed: {e}")
+    finally:
+        db.close()
+
