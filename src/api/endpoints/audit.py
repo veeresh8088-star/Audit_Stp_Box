@@ -938,81 +938,9 @@ def api_export_benchmark_excel():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/upload-scope-excel")
-def api_upload_scope_excel(file: UploadFile = File(...)):
-    """Parses Excel scoping checklist and maps target ISO controls dynamically."""
-    try:
-        import tempfile
-        from src.core.excel_scoping_parser import parse_excel_scoping_checklist
-        from src.core.controls_data import USE_CASES as _UC_LIST
 
-        file_bytes = file.file.read()
-        
-        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
-            tmp.write(file_bytes)
-            tmp_path = tmp.name
-
-        try:
-            items = parse_excel_scoping_checklist(tmp_path)
-        finally:
-            try:
-                if os.path.exists(tmp_path):
-                    os.remove(tmp_path)
-            except Exception:
-                pass
-
-
-        matched_sls_list = []
-        custom_evidence = {}
-        custom_documents = {}
-
-        for item in items:
-            ctrl_id = item.get("control_id")
-            ctrl_label = item.get("control_label")
-            files = item.get("files") or item.get("raw_file_refs") or []
-            files_str = ", ".join(files) if isinstance(files, list) else str(files)
-
-            # Match sl from USE_CASES
-            matched_sl = None
-            for uc in _UC_LIST:
-                uc_id = uc["use_case"].split(" ")[0]
-                if uc_id == ctrl_id or uc["use_case"] == ctrl_label:
-                    matched_sl = uc["sl"]
-                    break
-
-            # BUG FIX: Always add matched_sl (allow duplicates for same control_id
-            # with different questions — e.g. two 8.17 NTP questions use different files).
-            # matched_sls_list is used for the UI progress count AND to tell the audit
-            # engine which controls to include.  Both 8.17 rows must be represented.
-            if matched_sl is not None:
-                matched_sls_list.append(matched_sl)
-
-            # BUG FIX: custom_documents must NOT overwrite an existing ctrl_id entry.
-            # When two Excel rows map to the same ctrl_id (e.g. both "8.17"),
-            # we store the FIRST file for `ctrl_id` (primary mapping) but append
-            # both files to a list so the scoping engine can use both.
-            if ctrl_id:
-                if ctrl_id not in custom_documents:
-                    custom_documents[ctrl_id] = files_str
-                else:
-                    # Append additional file for same control_id
-                    existing = custom_documents[ctrl_id]
-                    combined = ", ".join(filter(None, [existing, files_str]))
-                    custom_documents[ctrl_id] = combined
-                if ctrl_label:
-                    custom_documents[ctrl_label] = files_str
-
-        custom_evidence["excel_items"] = items
-
-        return {
-            "success": True,
-            "matched_sls": matched_sls_list,
-            "custom_evidence": custom_evidence,
-            "custom_documents": custom_documents,
-            "message": f"Successfully loaded {len(items)} Excel audit checklist items ({len(set(matched_sls_list))} unique ISO controls)."
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+# NOTE: Excel scope parsing is handled by /controls/parse-scope-excel (controls.py).
+# That is the endpoint the frontend calls. Do NOT add a duplicate here.
 
 
 @router.post("/deliver")
