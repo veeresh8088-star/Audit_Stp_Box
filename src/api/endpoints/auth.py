@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field
 from typing import Optional
 import pyotp
 import qrcode
+import time
+from collections import defaultdict
 import base64
 from io import BytesIO
 from src.core.auth import (
@@ -37,6 +39,33 @@ class ResetPasswordTOTPRequest(BaseModel):
     otp_code: str
     new_password: str
 
+# --- Simple In-Memory Rate Limiter (5 failed attempts per minute per IP) ---
+_login_attempts: dict = defaultdict(list)  # {ip: [timestamp, ...]}
+MAX_ATTEMPTS = 5
+RATE_WINDOW_SECONDS = 60
+
+def _check_rate_limit(ip: str):
+    """Raises HTTP 429 if more than MAX_ATTEMPTS login attempts in RATE_WINDOW_SECONDS."""
+    now = time.time()
+    # Remove old attempts outside the window
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < RATE_WINDOW_SECONDS]
+    if len(_login_attempts[ip]) >= MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many login attempts. Please wait {RATE_WINDOW_SECONDS} seconds before trying again."
+        )
+    _login_attempts[ip].append(now)
+
+# --- Simple Token Validator (checks mock token format until real JWT is implemented) ---
+def _require_auth(request: Request):
+    """Validates that a valid Authorization Bearer token is present in the request header."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer mock-jwt-token-"):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized. A valid authentication token is required."
+        )
+
 # --- Endpoints ---
 
 @router.post("/register")
@@ -65,10 +94,14 @@ def api_register(req: RegisterRequest):
     }
 
 @router.post("/login")
-def api_login(req: LoginRequest):
+def api_login(req: LoginRequest, request: Request):
+    # Rate limiting — max 5 attempts per IP per minute
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     # Ensure default admin exists
     seed_default_admin()
-    
+
     user = authenticate_user(req.username, req.password)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid username or password.")
@@ -91,25 +124,28 @@ def api_login(req: LoginRequest):
         "username": user["username"],
         "role": user["role"],
         "requires_otp": True,
-        "totp_secret_preview": totp_secret,
         "qr_code_base64": qr_code_base64
+        # totp_secret intentionally NOT returned — prevents 2FA cloning via DevTools
     }
 
 @router.post("/verify-otp")
-def api_verify_otp(req: VerifyOTPRequest):
+def api_verify_otp(req: VerifyOTPRequest, request: Request):
+    # Rate limiting — OTP brute force prevention (3 attempts per minute)
+    client_ip = request.client.host if request.client else "unknown"
+    _check_rate_limit(client_ip)
+
     with force_master():
         db = SessionLocal()
         user = db.query(User).filter(User.username == req.username).first()
         db.close()
         
     if not user:
-        raise HTTPException(status_code=404, detail="User not found.")
+        raise HTTPException(status_code=401, detail="Invalid credentials.")
         
     totp = pyotp.totp.TOTP(user.totp_secret)
-    # Support live TOTP or demo bypass codes for local offline testing
-    DEMO_BYPASS_CODES = {"123456", "000000", "888888", "999999"}
-    is_valid = totp.verify(req.otp_code, valid_window=5) or req.otp_code in DEMO_BYPASS_CODES
-    
+    # Verify live TOTP code from Google Authenticator only (no bypass codes)
+    is_valid = totp.verify(req.otp_code, valid_window=5)
+
     if is_valid:
         return {
             "success": True,
@@ -118,11 +154,12 @@ def api_verify_otp(req: VerifyOTPRequest):
             "token": f"mock-jwt-token-{user.username}-{user.role}"
         }
     else:
-        raise HTTPException(status_code=400, detail="Invalid OTP. Use your authenticator app or enter '123456' for local demo access.")
+        raise HTTPException(status_code=400, detail="Invalid OTP code. Please enter the 6-digit code from your Google Authenticator app.")
 
 @router.get("/auditees")
-def api_get_auditees():
+def api_get_auditees(request: Request):
     """Returns list of all registered Auditee user accounts for report distribution targeting."""
+    _require_auth(request)
     with force_master():
         db = SessionLocal()
         try:
@@ -154,7 +191,7 @@ def api_forgot_password_request(req: ForgotPasswordRequest):
         try:
             u = db.query(User).filter(User.username == req.username).first()
             if not u:
-                raise HTTPException(status_code=404, detail=f"Username '{req.username}' not found.")
+                raise HTTPException(status_code=404, detail="Account not found. Please check your username and try again.")
             
             secret = u.totp_secret
             if not secret:
@@ -201,8 +238,8 @@ def api_forgot_password_reset(req: ResetPasswordTOTPRequest):
                 db.commit()
                 
             totp = pyotp.TOTP(secret)
-            DEMO_BYPASS_CODES = {"123456", "000000", "888888", "999999"}
-            is_valid = totp.verify(req.otp_code.strip(), valid_window=5) or req.otp_code.strip() in DEMO_BYPASS_CODES
+            # Verify live TOTP code only — no demo bypass codes
+            is_valid = totp.verify(req.otp_code.strip(), valid_window=5)
             
             if not is_valid:
                 raise HTTPException(status_code=401, detail="Invalid Google Authenticator TOTP code. Please try again.")

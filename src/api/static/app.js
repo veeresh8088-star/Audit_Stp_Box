@@ -2496,7 +2496,7 @@ async function resetCompanyLogo(event) {
     const resetBtn = document.getElementById("btn-reset-logo");
     const fileInput = document.getElementById("meta-company-logo");
 
-    if (preview) preview.src = "/static/shield_logo.png?v=4";
+    if (preview) preview.src = "/static/placeholder_logo.svg";
     if (statusTag) statusTag.style.display = "none";
     if (resetBtn) resetBtn.style.display = "none";
     if (fileInput) fileInput.value = "";

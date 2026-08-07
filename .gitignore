@@ -24,3 +24,4 @@ data/*.docx
 data/
 *.dll
 *.exe
+*.pem

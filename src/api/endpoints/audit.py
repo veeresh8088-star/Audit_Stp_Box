@@ -21,7 +21,7 @@ from src.db.database import (
     AuditorFeedback,
     force_master
 )
-from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg_stop_flags
+from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg_stop_flags, _auditor_sessions, MAX_AUDITS_PER_AUDITOR
 from src.core.bg_worker import (
     _run_ollama_bg,
     _run_fast_technical_vapt_bg,
@@ -281,6 +281,7 @@ async def api_upload_evidence(
     """
     import time
     import random
+    import re
     import traceback
     from sqlalchemy.exc import OperationalError
 
@@ -296,6 +297,15 @@ async def api_upload_evidence(
         for f in files:
             # ── FIX 1: async await → non-blocking stream read from all 10 tabs at once ──
             file_bytes = await f.read()
+
+            # ── FILE SIZE LIMIT: max 100MB per file (prevent DoS via large upload) ──
+            MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+            if len(file_bytes) > MAX_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"File '{f.filename}' exceeds the maximum allowed size of 100MB. Please upload a smaller file."
+                )
+
             f_like = io.BytesIO(file_bytes)
             f_like.name = f.filename
 
@@ -311,7 +321,18 @@ async def api_upload_evidence(
             ev_dir = os.path.normpath(os.path.join(os.getcwd(), "data", "evidence", str(report_id)))
             os.makedirs(ev_dir, exist_ok=True)
             prefix = "auditor_" if is_auditor_uploaded else "auditee_"
-            dest_path = os.path.join(ev_dir, prefix + f.filename)
+
+            # ── PATH TRAVERSAL FIX: sanitize filename to prevent ../../evil.py attacks ──
+            safe_filename = os.path.basename(f.filename)  # Strip any directory components
+            safe_filename = re.sub(r"[^\w\-\.]", "_", safe_filename)  # Allow only safe chars
+            safe_filename = safe_filename.lstrip(".")  # Strip leading dots (hidden files)
+            if not safe_filename:
+                safe_filename = "upload_file"
+            dest_path = os.path.join(ev_dir, prefix + safe_filename)
+
+            # Verify final path is still inside ev_dir (double-check)
+            if not os.path.abspath(dest_path).startswith(os.path.abspath(ev_dir)):
+                raise HTTPException(status_code=400, detail="Invalid filename detected.")
 
             f_like.seek(0)
             with open(dest_path, "wb") as dest_f:
@@ -374,7 +395,7 @@ async def api_upload_evidence(
         raise
     except Exception as e:
         print(f"[UPLOAD ERROR] session={session_id} | {e}\n{traceback.format_exc()}", flush=True)
-        raise HTTPException(status_code=500, detail=f"Upload processing failed: {e}")
+        raise HTTPException(status_code=500, detail="Upload processing failed. Please try again.")
     finally:
         db.close()
 
@@ -415,10 +436,31 @@ def api_get_session_evidence(session_id: str):
 def api_start_audit(req: StartAuditRequest):
     bg_key = req.session_id
     print(f"🚀 [API] /audit/start received for session {req.session_id} with {len(req.selected_sls)} controls (mode: {req.audit_mode})", flush=True)
-    
+
+    # Extract auditor identity from session_id (format: auditor-<username>-<timestamp>)
+    # Fall back to first 16 chars if format differs
+    auditor_id = req.session_id.split("-")[0] if "-" in req.session_id else req.session_id[:16]
+
     with _bg_lock:
         if bg_key in _bg_running:
             return {"success": True, "status": "already_running", "message": "Audit is already running."}
+
+        # ── Per-Auditor Concurrent Limit ──────────────────────────────────────────
+        # Clean up finished sessions from this auditor's active set
+        _auditor_sessions[auditor_id] = {
+            s for s in _auditor_sessions[auditor_id] if s in _bg_running
+        }
+        active_count = len(_auditor_sessions[auditor_id])
+        if active_count >= MAX_AUDITS_PER_AUDITOR:
+            raise HTTPException(
+                status_code=429,
+                detail=f"You already have {active_count} audits running simultaneously. "
+                       f"Maximum allowed is {MAX_AUDITS_PER_AUDITOR} concurrent audits per auditor. "
+                       f"Please wait for an existing audit to complete before starting a new one."
+            )
+        _auditor_sessions[auditor_id].add(bg_key)
+        # ─────────────────────────────────────────────────────────────────────────
+
         _bg_stop_flags.pop(bg_key, None)
     
     db = SessionLocal()
@@ -991,8 +1033,14 @@ def api_deliver_report(
         db.close()
 
 @router.delete("/clear-records")
-def api_clear_all_records():
-    """Clears all audit reports, findings, chats, checkpoints, chunks, and logs from database."""
+def api_clear_all_records(request: Request):
+    """Clears all audit reports, findings, chats, checkpoints, chunks, and logs from database. Admin only."""
+    # ── Admin-only protection ──────────────────────────────────────────────────
+    from src.api.endpoints.auth import _require_auth
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Only admin can wipe all records.")
+    # ──────────────────────────────────────────────────────────────────────────
     db = SessionLocal()
     try:
         from src.db.database import AuditorFeedback
@@ -1010,7 +1058,7 @@ def api_clear_all_records():
         return {"success": True, "message": "All database audit records cleared successfully."}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Wipe failed. Please try again.")
     finally:
         db.close()
 

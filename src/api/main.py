@@ -33,7 +33,10 @@ from src.api.endpoints.license import router as license_router
 app = FastAPI(
     title="AICyberAuditBox - Local API Server",
     description="Offline REST API Server for RAG ISO 27001 Compliance Audit Intelligence",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url=None,      # Disable /docs in production (security: hides API schema from attackers)
+    redoc_url=None,     # Disable /redoc in production
+    openapi_url=None,   # Disable /openapi.json in production
 )
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -45,17 +48,36 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
+        # --- Security Headers (prevent pentest findings) ---
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self';"
+        )
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
         return response
 
 app.add_middleware(NoCacheMiddleware)
 
-# Enable CORS for local cross-origin React frontend requests
+# CORS: restrict to production domain only (no wildcard)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all local development origins (Vite/Tauri)
+    allow_origins=[
+        "https://aicyberauditbox.com",
+        "https://www.aicyberauditbox.com",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 from fastapi.responses import FileResponse, RedirectResponse

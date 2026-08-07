@@ -7,8 +7,13 @@ Decoupled from Streamlit UI.
 
 import hashlib
 import re
+import os
 import pyotp
 from src.db.database import SessionLocal, User, force_master
+
+# Admin credentials from environment variables (fallback for first boot only)
+_ADMIN_DEFAULT_PASSWORD = os.environ.get("ADMIN_DEFAULT_PASSWORD", "AuditBox@2026!")
+_ADMIN_TOTP_SECRET = os.environ.get("ADMIN_TOTP_SECRET", pyotp.random_base32())
 
 def _hash_pw(pw: str) -> str:
     """Returns SHA256 hash of a plain text password."""
@@ -59,13 +64,13 @@ def seed_default_admin():
         if not admin:
             db.add(User(
                 username="admin",
-                password_hash=_hash_pw("admin123"),
+                password_hash=_hash_pw(_ADMIN_DEFAULT_PASSWORD),
                 role="admin",
-                totp_secret="ADMI2FASHRDSECRT"
+                totp_secret=_ADMIN_TOTP_SECRET
             ))
             db.commit()
         elif not admin.totp_secret:
-            admin.totp_secret = "ADMI2FASHRDSECRT"
+            admin.totp_secret = _ADMIN_TOTP_SECRET
             db.commit()
         db.close()
 

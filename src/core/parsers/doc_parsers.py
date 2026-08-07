@@ -14,6 +14,9 @@ def get_ocr_reader():
     if _OCR_READER is not None:
         return _OCR_READER
     try:
+        import warnings
+        warnings.filterwarnings("ignore", message=".*pin_memory.*")
+        warnings.filterwarnings("ignore", category=UserWarning, module="torch")
         import easyocr
         _OCR_READER = easyocr.Reader(['en'], gpu=False, verbose=False)
         return _OCR_READER
