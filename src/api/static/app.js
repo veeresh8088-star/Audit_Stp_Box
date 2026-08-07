@@ -684,9 +684,24 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
             const el = document.getElementById(id); if (el) el.innerText = "0";
         });
 
-        // Hide commit banner
-        const banner = document.getElementById("shakti-commit-banner");
-        if (banner) banner.style.display = "none";
+        // Reset analysis scan progress UI & stop any polling from previous session
+        if (typeof stopAnalysisPolling === "function") stopAnalysisPolling();
+        if (typeof analysisInterval !== "undefined" && analysisInterval) {
+            clearInterval(analysisInterval);
+            analysisInterval = null;
+        }
+
+        const runBtn = document.getElementById("run-analysis-btn");
+        const stopBtn = document.getElementById("stop-analysis-btn");
+        if (runBtn) {
+            runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
+            runBtn.disabled = false;
+            runBtn.style.opacity = "1";
+            runBtn.style.cursor = "pointer";
+        }
+        if (stopBtn) {
+            stopBtn.style.display = "none";
+        }
 
         // Uncheck previous session controls & reset scoping mode
         try {
