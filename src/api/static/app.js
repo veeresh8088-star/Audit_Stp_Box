@@ -16,6 +16,17 @@ var logsTotalPages = typeof logsTotalPages !== "undefined" ? logsTotalPages : 1;
 var customEvidenceMappings = typeof customEvidenceMappings !== "undefined" ? customEvidenceMappings : null;
 var customControlDocuments = typeof customControlDocuments !== "undefined" ? customControlDocuments : null;
 
+// ── AUTH FETCH HELPER — always attaches JWT token to every API request ──
+function getAuthHeaders(extra) {
+    const token = currentUser && currentUser.token ? currentUser.token : "";
+    return Object.assign({ "Authorization": `Bearer ${token}` }, extra || {});
+}
+function authFetch(url, options) {
+    options = options || {};
+    options.headers = getAuthHeaders(options.headers || {});
+    return fetch(url, options);
+}
+
 // --- EMOJIS & ICONS FOR FRAMEWORK CONTROLS ---
 const DEFAULT_FRAMEWORK_CONTROLS = [
     { sl: 5, use_case: "5.1 Policies for information security", label: "5.1 Security Policies", category: "Organizational" },
@@ -1225,7 +1236,7 @@ async function loadFrameworkControls() {
     container.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;'>Loading controls checklist...</div>";
 
     try {
-        const response = await fetch(`${API_BASE}/controls/framework`);
+        const response = await authFetch(`${API_BASE}/controls/framework`);
         const data = await response.json();
 
         let controlsToRender = DEFAULT_FRAMEWORK_CONTROLS;
@@ -3741,7 +3752,7 @@ async function loadCustomControlsTable() {
     tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Loading custom controls from ShaktiDB...</td></tr>`;
 
     try {
-        const response = await fetch(`${API_BASE}/controls?active_only=false`);
+        const response = await authFetch(`${API_BASE}/controls?active_only=false`);
         const data = await response.json();
 
         if (data.success && data.controls.length > 0) {
@@ -3780,7 +3791,7 @@ async function handleCreateControlSubmit(e) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/controls`, {
+        const response = await authFetch(`${API_BASE}/controls`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
@@ -3812,7 +3823,7 @@ async function autogenerateKeywords() {
     kwField.placeholder = "🧠 AI is generating regex keywords...";
 
     try {
-        const response = await fetch(`${API_BASE}/controls/autogen-keywords`, {
+        const response = await authFetch(`${API_BASE}/controls/autogen-keywords`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name, description: desc })
@@ -3830,7 +3841,7 @@ async function autogenerateKeywords() {
 async function deleteCustomControl(id) {
     if (!confirm("Are you sure you want to deactivate and remove this custom control?")) return;
     try {
-        const response = await fetch(`${API_BASE}/controls/${id}?soft=false`, {
+        const response = await authFetch(`${API_BASE}/controls/${id}?soft=false`, {
             method: "DELETE"
         });
         const data = await response.json();
@@ -3867,7 +3878,7 @@ async function handleModalCustomControlSubmit(e) {
     const kws = kwsStr ? kwsStr.split(",").map(k => k.trim()) : [];
 
     try {
-        const response = await fetch(`${API_BASE}/controls`, {
+        const response = await authFetch(`${API_BASE}/controls`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
