@@ -3343,6 +3343,9 @@ function renderFindingsList() {
                 sevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.2); color:#3b82f6; border:1px solid rgba(59,130,246,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Low (CVSS 2.5)</span>`;
             }
 
+            const safeRemedForClick = escapeHtml(_remed).replace(/'/g, "\\\\'");
+            const safeDocForClick = escapeHtml(singleDoc).replace(/'/g, "\\\\'");
+
             card.innerHTML = `
                 <div class="finding-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:10px; margin-bottom:12px;">
                     <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-primary);">${escapeHtml(displayHeaderTitle)}</h3>
@@ -3393,7 +3396,7 @@ function renderFindingsList() {
                     <div class="finding-detail-row" style="margin-bottom: 12px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                             <label style="font-weight:700; font-size:0.78rem; color:#3b82f6; text-transform:uppercase; letter-spacing:0.5px;">🔧 Recommended Remediation & Action</label>
-                            <button type="button" onclick="navigator.clipboard.writeText('${escapeHtml(_remed).replace(/'/g, "\\'")}'); showToastBanner('Remediation script copied to clipboard!');" style="padding:2px 8px; font-size:0.72rem; border-radius:4px; border:1px solid rgba(59,130,246,0.4); background:rgba(59,130,246,0.1); color:#3b82f6; font-weight:700; cursor:pointer;">📋 Copy Fix Command</button>
+                            <button type="button" onclick="navigator.clipboard.writeText('${safeRemedForClick}'); showToastBanner('Remediation script copied to clipboard!');" style="padding:2px 8px; font-size:0.72rem; border-radius:4px; border:1px solid rgba(59,130,246,0.4); background:rgba(59,130,246,0.1); color:#3b82f6; font-weight:700; cursor:pointer;">📋 Copy Fix Command</button>
                         </div>
                         <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${escapeHtml(_remed)}</p>
                     </div>
@@ -3405,7 +3408,7 @@ function renderFindingsList() {
                         <div class="btn-card-group" style="display:flex; gap:8px;">
                             <button class="btn-secondary" style="color:#10b981; font-weight:700; border-color:rgba(16,185,129,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="updateFindingWorkflowStatus(${f.id}, 'Accepted')">✓ Accept</button>
                             <button class="btn-secondary" style="color:#3b82f6; font-weight:700; border-color:rgba(59,130,246,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick='openEditFindingModal(${findingJsonStr})'>✏️ Modify</button>
-                            <button class="btn-danger" style="font-weight:700; padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="rejectSingleDocCard(${f.id}, '${singleDoc.replace(/'/g, "\'").replace(/"/g, '&quot;')}', '${safeCtrlId}')">✕ Reject</button>
+                            <button class="btn-danger" style="font-weight:700; padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="rejectSingleDocCard(${f.id}, '${safeDocForClick}', '${safeCtrlId}')">✕ Reject</button>
                         </div>
                     </div>
                 </div>
@@ -3444,7 +3447,7 @@ function renderFindingsList() {
                         <div class="btn-card-group" style="display:flex; gap:8px;">
                             <button class="btn-secondary" style="color:#10b981; font-weight:700; border-color:rgba(16,185,129,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="updateFindingWorkflowStatus(${f.id}, 'Accepted')">✓ Accept</button>
                             <button class="btn-secondary" style="color:#3b82f6; font-weight:700; border-color:rgba(59,130,246,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick='openEditFindingModal(${findingJsonStr})'>✏️ Modify</button>
-                            <button class="btn-danger" style="font-weight:700; padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="rejectSingleDocCard(${f.id}, '${singleDoc.replace(/'/g, "\'").replace(/"/g, '&quot;')}', '${safeCtrlId}')">✕ Reject</button>
+                            <button class="btn-danger" style="font-weight:700; padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="rejectSingleDocCard(${f.id}, '${safeDocForClick}', '${safeCtrlId}')">✕ Reject</button>
                         </div>
                     </div>
                 </div>
