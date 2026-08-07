@@ -696,6 +696,15 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         const banner = document.getElementById("shakti-commit-banner");
         if (banner) banner.style.display = "none";
 
+        // Uncheck previous session controls & reset scoping mode
+        try {
+            if (typeof selectAllCheckboxes === "function") selectAllCheckboxes(false);
+            if (typeof updateSelectedScopeCount === "function") updateSelectedScopeCount();
+            if (typeof setScopingMode === "function") setScopingMode('AI Auto-Scoping');
+        } catch (e) {
+            console.warn("[Session Reset] Control reset warning:", e);
+        }
+
         // Refresh UI components
         loadEvidenceFileList();
         populateAuditeeSelector();
