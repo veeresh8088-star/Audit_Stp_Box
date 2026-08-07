@@ -2319,7 +2319,7 @@ async function handleCompanyLogoUpload(event) {
 
     // Instant local thumbnail preview using FileReader
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = function (e) {
         const preview = document.getElementById("meta-logo-preview");
         const statusTag = document.getElementById("logo-status-tag");
         const resetBtn = document.getElementById("btn-reset-logo");
@@ -2353,7 +2353,7 @@ async function resetCompanyLogo(event) {
     if (event) event.stopPropagation();
     try {
         await fetch(`${API_BASE}/audit/upload-logo`, { method: "DELETE" });
-    } catch (e) {}
+    } catch (e) { }
 
     const preview = document.getElementById("meta-logo-preview");
     const statusTag = document.getElementById("logo-status-tag");
@@ -3062,13 +3062,13 @@ function renderFindingsList() {
 
             let vectorHint = "";
             if (_cvssVec) {
-                const isNetwork  = _cvssVec.includes("AV:N");
-                const noAuth     = _cvssVec.includes("PR:N");
-                const noUI       = _cvssVec.includes("UI:N");
+                const isNetwork = _cvssVec.includes("AV:N");
+                const noAuth = _cvssVec.includes("PR:N");
+                const noUI = _cvssVec.includes("UI:N");
                 const hints = [];
-                if (isNetwork)  hints.push("🌐 Exploitable Remotely");
-                if (noAuth)     hints.push("🔓 No Auth Required");
-                if (noUI)       hints.push("👤 No User Interaction");
+                if (isNetwork) hints.push("🌐 Exploitable Remotely");
+                if (noAuth) hints.push("🔓 No Auth Required");
+                if (noUI) hints.push("👤 No User Interaction");
                 vectorHint = hints.length
                     ? `<span style="font-size:0.72rem; color:#fbbf24; margin-left:8px;">${hints.join(" · ")}</span>`
                     : "";
@@ -4217,7 +4217,9 @@ async function handleScopingUpload(event) {
         });
 
         updateSelectedScopeCount();
-        alert(`✅ Loaded checklist items across ${data.matched_sls.length} unique standard controls!`);
+        const totalItems = (customEvidenceMappings && customEvidenceMappings.excel_items) ? customEvidenceMappings.excel_items.length : data.matched_sls.length;
+        const uniqueCtrlCount = new Set(data.matched_sls).size;
+        alert(`✅ Loaded ${totalItems} checklist items (${uniqueCtrlCount} unique ISO controls) — all items will be evaluated!`);
     } catch (err) {
         fileBadge.innerText = "Error parsing file";
         alert(`Scoping Error: ${err.message}`);
@@ -5365,7 +5367,8 @@ async function handleScopingExcelUpload(event) {
 
             updateSelectedScopeCount();
             setScopingMode('Excel Scoping');
-            showToastBanner(`EXCEL SCOPING APPLIED: ${data.matched_sls.length} Controls Scoped from Excel ("${file.name}")`);
+            const totalExcelItems = (data.custom_evidence && data.custom_evidence.excel_items) ? data.custom_evidence.excel_items.length : data.matched_sls.length;
+            showToastBanner(`EXCEL SCOPING APPLIED: ${totalExcelItems} Checklist Items Scoped from Excel ("${file.name}")`);
         } else {
             parseClientSideCsvScope(file);
         }

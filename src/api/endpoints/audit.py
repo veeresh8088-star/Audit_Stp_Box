@@ -971,11 +971,25 @@ def api_upload_scope_excel(file: UploadFile = File(...)):
                     matched_sl = uc["sl"]
                     break
 
-            if matched_sl and matched_sl not in matched_sls_list:
+            # BUG FIX: Always add matched_sl (allow duplicates for same control_id
+            # with different questions — e.g. two 8.17 NTP questions use different files).
+            # matched_sls_list is used for the UI progress count AND to tell the audit
+            # engine which controls to include.  Both 8.17 rows must be represented.
+            if matched_sl is not None:
                 matched_sls_list.append(matched_sl)
 
+            # BUG FIX: custom_documents must NOT overwrite an existing ctrl_id entry.
+            # When two Excel rows map to the same ctrl_id (e.g. both "8.17"),
+            # we store the FIRST file for `ctrl_id` (primary mapping) but append
+            # both files to a list so the scoping engine can use both.
             if ctrl_id:
-                custom_documents[ctrl_id] = files_str
+                if ctrl_id not in custom_documents:
+                    custom_documents[ctrl_id] = files_str
+                else:
+                    # Append additional file for same control_id
+                    existing = custom_documents[ctrl_id]
+                    combined = ", ".join(filter(None, [existing, files_str]))
+                    custom_documents[ctrl_id] = combined
                 if ctrl_label:
                     custom_documents[ctrl_label] = files_str
 
@@ -986,7 +1000,7 @@ def api_upload_scope_excel(file: UploadFile = File(...)):
             "matched_sls": matched_sls_list,
             "custom_evidence": custom_evidence,
             "custom_documents": custom_documents,
-            "message": f"Successfully matched {len(matched_sls_list)} Excel audit checklist items."
+            "message": f"Successfully loaded {len(items)} Excel audit checklist items ({len(set(matched_sls_list))} unique ISO controls)."
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
