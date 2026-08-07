@@ -565,9 +565,10 @@ async function switchRecentSession(sessionId, sessionTitle) {
     activeSessionId = sessionId;
     if (sessionTitle) activeSessionTitle = sessionTitle;
 
-    // ── Stop any running audit from the previous session ────────────────────────
+    // ── Stop any running audit & polling from the previous session ──────────────
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-    if (typeof stopAnalysisPolling === "function") stopAnalysisPolling();
+    if (window._resultsInterval) { clearInterval(window._resultsInterval); window._resultsInterval = null; }
+    window._currentPollSessionId = activeSessionId;
 
     // ── Reset data state ─────────────────────────────────────────────────────────
     findingsList = [];
@@ -738,10 +739,8 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
 
         // Stop any in-progress polling from the old session
         if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
-        if (typeof stopAnalysisPolling === "function") stopAnalysisPolling();
-        if (typeof analysisInterval !== "undefined" && analysisInterval) {
-            clearInterval(analysisInterval); analysisInterval = null;
-        }
+        if (window._resultsInterval) { clearInterval(window._resultsInterval); window._resultsInterval = null; }
+        window._currentPollSessionId = activeSessionId;
 
         // ── Reset UI: Session header ─────────────────────────────────────────────────
         const badgeEl = document.getElementById("active-session-badge");
@@ -1143,19 +1142,31 @@ function setAnalysisMode(mode) {
 }
 
 async function pollAuditResults() {
+    const targetSessionId = activeSessionId;
     const runBtn = document.getElementById("run-analysis-btn");
     const stopBtn = document.getElementById("stop-analysis-btn");
 
+    if (window._resultsInterval) clearInterval(window._resultsInterval);
+
     let attempts = 0;
-    const interval = setInterval(async () => {
+    window._resultsInterval = setInterval(async () => {
         attempts++;
+        if (activeSessionId !== targetSessionId) {
+            if (window._resultsInterval) { clearInterval(window._resultsInterval); window._resultsInterval = null; }
+            return;
+        }
         try {
-            const res = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}`);
+            const res = await authFetch(`${API_BASE}/audit/findings?session_id=${targetSessionId}`);
             if (!res.ok) return;
             const data = await res.json();
 
+            if (activeSessionId !== targetSessionId) {
+                if (window._resultsInterval) { clearInterval(window._resultsInterval); window._resultsInterval = null; }
+                return;
+            }
+
             if (data.success && data.findings && data.findings.length > 0) {
-                clearInterval(interval);
+                if (window._resultsInterval) { clearInterval(window._resultsInterval); window._resultsInterval = null; }
                 findingsList = data.findings;
                 renderFindingsList();
                 updateKPICounters();
@@ -1172,7 +1183,7 @@ async function pollAuditResults() {
         }
 
         if (attempts > 30) {
-            clearInterval(interval);
+            if (window._resultsInterval) { clearInterval(window._resultsInterval); window._resultsInterval = null; }
             if (runBtn) {
                 runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
                 runBtn.disabled = false;
@@ -1741,6 +1752,8 @@ async function triggerAuditAnalysis() {
 
         // Start high-frequency progress polling (every 1 second)
         if (progressInterval) clearInterval(progressInterval);
+        if (window._resultsInterval) clearInterval(window._resultsInterval);
+        window._currentPollSessionId = activeSessionId;
         progressInterval = setInterval(pollAuditProgress, 1000);
     } catch (err) {
         btn.disabled = false;
@@ -1751,6 +1764,12 @@ async function triggerAuditAnalysis() {
 }
 
 async function pollAuditProgress() {
+    const targetSessionId = window._currentPollSessionId || activeSessionId;
+    if (!activeSessionId || activeSessionId !== targetSessionId) {
+        if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+        return;
+    }
+
     const btn = document.getElementById("run-analysis-btn");
     const stopBtn = document.getElementById("stop-analysis-btn");
     const progressBar = document.getElementById("pipeline-progress-fill");
@@ -1758,8 +1777,14 @@ async function pollAuditProgress() {
     const progressStatus = document.getElementById("pipeline-status-text");
 
     try {
-        const response = await fetch(`${API_BASE}/audit/status/${activeSessionId}`);
+        const response = await authFetch(`${API_BASE}/audit/status/${targetSessionId}`);
         const data = await response.json();
+
+        // Session guard: if active session changed while waiting for status API
+        if (activeSessionId !== targetSessionId) {
+            if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+            return;
+        }
 
         if (data.status === "running") {
             const p = data.progress || {};
@@ -1777,6 +1802,10 @@ async function pollAuditProgress() {
             if (progressStatus) progressStatus.innerText = `${txt} (${pct}%)`;
         } else if (data.status === "completed") {
             clearInterval(progressInterval);
+            progressInterval = null;
+
+            if (activeSessionId !== targetSessionId) return;
+
             btn.disabled = false;
             btn.innerText = "▶ Step 3: Run RAG Scan";
             if (stopBtn) stopBtn.style.display = "none";
@@ -1786,6 +1815,8 @@ async function pollAuditProgress() {
 
             // Auto-load audit records findings and switch to records view
             await loadFindings();
+
+            if (activeSessionId !== targetSessionId) return;
 
             // Switch to Audit Records tab if not already open
             if (typeof activeTab !== "undefined" && activeTab !== "tab-audit-records") {
@@ -1894,6 +1925,7 @@ async function stopAuditAnalysis() {
 
 async function loadFindings() {
     if (!activeSessionId) return;
+    const requestSessionId = activeSessionId;
     const container = document.getElementById("findings-container");
     if (!container) return;
     container.innerHTML = `<div class="empty-state">Loading findings from Shakthi DB...</div>`;
@@ -1901,8 +1933,11 @@ async function loadFindings() {
     const userRole = currentUser ? currentUser.role : (selectedRole || "auditor");
 
     try {
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${userRole}`);
+        const response = await authFetch(`${API_BASE}/audit/findings?session_id=${requestSessionId}&role=${userRole}`);
         const data = await response.json();
+
+        // Session guard: if active session changed while request was in-flight, ignore response
+        if (activeSessionId !== requestSessionId) return;
 
         const banner = document.getElementById("shakti-commit-banner");
         const bannerText = document.getElementById("shakti-banner-text");
