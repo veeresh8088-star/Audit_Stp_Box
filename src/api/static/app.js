@@ -1430,13 +1430,48 @@ async function handleExcelScopeUpload(e) {
 }
 
 function filterCheckboxList() {
-    const q = document.getElementById("controls-search-input").value.toLowerCase();
-    const rows = document.querySelectorAll("#controls-checkbox-container .checkbox-item");
-    rows.forEach(row => {
-        const text = row.innerText.toLowerCase();
-        row.style.display = text.includes(q) ? "flex" : "none";
+    const searchInput = document.getElementById("controls-search-input");
+    if (!searchInput) return;
+    const q = searchInput.value.trim().toLowerCase();
+    const accordions = document.querySelectorAll(".clause-accordion-card");
+
+    if (!q) {
+        // When query is empty, show all items inside accordions
+        document.querySelectorAll("#controls-checkbox-container .checkbox-item").forEach(row => {
+            row.style.display = "flex";
+        });
+        // Leave accordions in their current state or default
+        return;
+    }
+
+    accordions.forEach(acc => {
+        const body = acc.querySelector(".clause-body");
+        const toggleIcon = acc.querySelector(".clause-toggle-icon");
+        const items = acc.querySelectorAll(".checkbox-item");
+        let hasMatch = false;
+
+        items.forEach(row => {
+            const text = row.innerText.toLowerCase();
+            if (text.includes(q)) {
+                row.style.display = "flex";
+                hasMatch = true;
+            } else {
+                row.style.display = "none";
+            }
+        });
+
+        if (body) {
+            if (hasMatch) {
+                body.style.display = "block";
+                acc.style.display = "block";
+                if (toggleIcon) toggleIcon.innerText = "v";
+            } else {
+                acc.style.display = "none";
+            }
+        }
     });
 }
+
 
 function selectAllCheckboxes(checked) {
     const rows = document.querySelectorAll("#controls-checkbox-container .checkbox-item");
