@@ -110,7 +110,7 @@ def severity_sort_key(item):
         rank = 5
     return (rank, cid)
 
-def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""):
+def _export_vapt_pdf(session_title, findings, resolved_list, status, comments="", custom_logo=None):
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
     from fpdf.fonts import FontFace
@@ -169,14 +169,10 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
 
     assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "assets"))
-    custom_logo = None
-    try:
-        # streamlit removed - core module fallback
-        custom_logo = st.session_state.get("auditor_logo_path")
-    except Exception:
-        pass
+    custom_logo_file = os.path.join(assets_dir, "custom_company_logo.png")
+    effective_custom_logo = custom_logo if (custom_logo and os.path.exists(custom_logo)) else (custom_logo_file if os.path.exists(custom_logo_file) else None)
     shield_logo_path = os.path.join(assets_dir, "shield_logo.png")
-    logo_path = custom_logo if (custom_logo and os.path.exists(custom_logo)) else (shield_logo_path if os.path.exists(shield_logo_path) else os.path.join(assets_dir, "tuv_sud_logo.png"))
+    logo_path = effective_custom_logo if (effective_custom_logo and os.path.exists(effective_custom_logo)) else (shield_logo_path if os.path.exists(shield_logo_path) else os.path.join(assets_dir, "tuv_sud_logo.png"))
     bg_path   = os.path.join(assets_dir, "cover_matrix_bg.png")
     chart_path= os.path.join(assets_dir, "chart_risk_severity.png")
     poc_cbc   = os.path.join(assets_dir, "poc_nmap_cbc.png")
@@ -1170,7 +1166,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     return bytes(pdf_bytes)
 
 
-def _export_vapt_docx(session_title, findings, resolved_list, status, comments=""):
+def _export_vapt_docx(session_title, findings, resolved_list, status, comments="", custom_logo=None):
     from docx import Document
     from docx.shared import Pt, RGBColor, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1987,7 +1983,7 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
     return buf.read()
 
 
-def export_docx_report(session_title, findings, resolved_list, status, comments=""):
+def export_docx_report(session_title, findings, resolved_list, status, comments="", custom_logo=None):
     try:
         # streamlit removed - core module fallback
         st_std = st.session_state.get("selected_standard", "")

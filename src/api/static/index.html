@@ -240,6 +240,20 @@
                     <span class="arrow">›</span>
                 </button>
                 <div id="branding-fields" class="collapse-content" style="display: none; padding-top: 10px;">
+                    <!-- Custom Company Logo Upload -->
+                    <div class="form-group" style="margin-bottom: 14px;">
+                        <label style="display: flex; justify-content: space-between; align-items: center; font-weight:700; font-size:0.75rem;">
+                            <span>Company Logo (PDF/Word Report)</span>
+                            <span id="logo-status-tag" style="font-size: 0.68rem; color: #10b981; display: none;">✓ Custom Logo Loaded</span>
+                        </label>
+                        <div id="company-logo-dropzone" style="border: 1px dashed rgba(148, 163, 184, 0.35); border-radius: 8px; padding: 10px; text-align: center; background: rgba(15, 23, 42, 0.4); cursor: pointer;" onclick="document.getElementById('meta-company-logo').click()">
+                            <img id="meta-logo-preview" src="/static/shield_logo.png?v=4" alt="Company Logo Preview" style="max-height: 42px; max-width: 140px; margin-bottom: 6px; object-fit: contain; display: block; margin-left: auto; margin-right: auto;" />
+                            <span style="font-size: 0.72rem; color: #818cf8; font-weight: 600;">+ Upload Company Logo</span>
+                            <input type="file" id="meta-company-logo" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display: none;" onchange="handleCompanyLogoUpload(event)">
+                        </div>
+                        <button type="button" id="btn-reset-logo" onclick="resetCompanyLogo(event)" style="display: none; margin-top: 6px; width: 100%; padding: 4px; font-size: 0.7rem; background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); border-radius: 6px; cursor: pointer; font-weight: 600;">↺ Reset to Default Template Logo</button>
+                    </div>
+
                     <div class="form-group">
                         <label>Auditor Firm</label>
                         <input type="text" id="brand-firm" value="XYZ Security Services Pvt. Ltd."
@@ -1597,10 +1611,10 @@
 
 
     <!-- Modular UI Script Loading -->
-    <script src="/static/js/config.js?v=20260807_v410020"></script>
-    <script src="/static/js/sidebar.js?v=20260807_v410020"></script>
-    <script src="/static/js/admin.js?v=20260807_v410020"></script>
-    <script src="/static/app.js?v=20260807_v410020"></script>
+    <script src="/static/js/config.js?v=20260807_v410030"></script>
+    <script src="/static/js/sidebar.js?v=20260807_v410030"></script>
+    <script src="/static/js/admin.js?v=20260807_v410030"></script>
+    <script src="/static/app.js?v=20260807_v410030"></script>
 </body>
 
 </html>

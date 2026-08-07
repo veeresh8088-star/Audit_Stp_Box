@@ -867,112 +867,7 @@ async function populateAuditeeSelector() {
     }
 }
 
-async function deliverReportToAuditee() {
-    const select = document.getElementById("report-target-auditee");
-    const targetAuditee = select ? select.value : "auditee@organization.com";
-    if (!activeSessionId) {
-        showToast("⚠️ Please select an active audit session first.", "error");
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_BASE}/audit/deliver-report`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                session_id: activeSessionId,
-                target_auditee: targetAuditee
-            })
-        });
-        const data = await response.json();
-        if (data.success) {
-            showToast(`🚀 Audit findings delivered to auditee account: ${targetAuditee}!`, "success");
-
-            // Auto switch to Auditee Submissions tab so sent findings reflect immediately
-            const auditeeTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => {
-                const txt = b.innerText.toLowerCase();
-                return txt.includes("auditee") || txt.includes("submission");
-            });
-            if (auditeeTabBtn) {
-                switchTab("tab-upload-evidence", auditeeTabBtn);
-            }
-            loadAuditeeEvidenceDocs();
-        } else {
-            showToast(`❌ Failed to deliver report: ${data.message || data.detail}`, "error");
-        }
-    } catch (err) {
-        console.error("Delivery error:", err);
-        showToast(`🚀 Audit findings delivered to auditee account: ${targetAuditee}!`, "success");
-    }
-}
-
-async function loadAuditeeEvidenceDocs() {
-    const container = document.getElementById("auditee-files-registry");
-    if (!container) return;
-
-    if (!activeSessionId) {
-        container.innerHTML = `<div class="empty-state">No active session selected.</div>`;
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=auditee`);
-        const data = await response.json();
-        const findings = (data.success && data.findings) ? data.findings : [];
-
-        if (findings.length === 0) {
-            container.innerHTML = `<div class="empty-state" style="padding: 20px; text-align: center; color: var(--text-muted);">No findings or report files delivered yet. Once the Auditor sends the audit report, delivered findings will appear here.</div>`;
-            return;
-        }
-
-        let html = "";
-        findings.forEach((f, idx) => {
-            const isComp = isFindingCompliant(f);
-            const badgeColor = isComp ? "#10b981" : "#ef4444";
-            const statusText = f.status || (isComp ? "COMPLIANT" : "NON-COMPLIANT");
-            const cvssText = f.cvss_score ? ` &bull; ⚡ CVSS: ${f.cvss_score}` : "";
-
-            html += `
-                <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 12px; margin-bottom: 10px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                        <span style="font-weight: 700; font-size: 0.85rem; color: #fff;">${idx + 1}. ${f.control_id} - ${f.control_name || 'Control Finding'}</span>
-                        <span style="font-size: 0.72rem; font-weight: 700; padding: 2px 8px; border-radius: 4px; color: ${badgeColor}; background: ${badgeColor}20; border: 1px solid ${badgeColor}40;">${statusText}</span>
-                    </div>
-                    <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 6px;">${getCleanFindingDescription(f)}</div>
-                    <div style="font-size: 0.74rem; color: #60a5fa; font-weight: 600;">
-                        <span>💡 Recommendation: ${f.recommendation || 'Remediate identified security gaps.'}${cvssText}</span>
-                    </div>
-                </div>
-            `;
-        });
-        container.innerHTML = html;
-    } catch (err) {
-        console.error("Failed to load auditee evidence docs:", err);
-        container.innerHTML = `<div class="empty-state">Failed to load auditee submissions.</div>`;
-    }
-}
-
 // ── FILE UPLOAD & EVIDENCE COLLECTOR ENGINE ──
-
-function setupFileDropZone() {
-    const dropZone = document.getElementById("drop-zone");
-    if (!dropZone) return;
-
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, preventDefaults, false);
-        document.body.addEventListener(eventName, preventDefaults, false);
-    });
-
-    ['dragenter', 'dragover'].forEach(eventName => {
-        dropZone.addEventListener(eventName, () => dropZone.style.borderColor = "#60a5fa", false);
-    });
-
-    ['dragleave', 'drop'].forEach(eventName => {
-        dropZone.addEventListener(eventName, () => dropZone.style.borderColor = "rgba(59, 130, 246, 0.35)", false);
-    });
-
-    dropZone.addEventListener('drop', handleFileDrop, false);
-}
 
 function preventDefaults(e) {
     e.preventDefault();
@@ -982,11 +877,6 @@ function preventDefaults(e) {
 function handleFileDrop(e) {
     const dt = e.dataTransfer;
     const files = dt.files;
-    processEvidenceFiles(files);
-}
-
-function handleEvidenceUpload(e) {
-    const files = e.target.files;
     processEvidenceFiles(files);
 }
 
@@ -1090,10 +980,6 @@ function clearAllUploadedFiles() {
     renderUploadedFilesList();
 }
 
-function loadEvidenceFileList() {
-    renderUploadedFilesList();
-}
-
 function setAnalysisMode(mode) {
     selectedAnalysisMode = mode;
     const btnQuick = document.getElementById("btn-mode-quick");
@@ -1140,82 +1026,6 @@ function setAnalysisMode(mode) {
     }
 }
 
-// ── AUDIT SCAN EXECUTION CONTROLLER ──
-async function triggerAuditAnalysis() {
-    const runBtn = document.getElementById("run-analysis-btn");
-    const stopBtn = document.getElementById("stop-analysis-btn");
-
-    if (!activeSessionId) {
-        alert("⚠️ Please create or select an Audit Session first.");
-        return;
-    }
-
-    if (!uploadedFilesList || uploadedFilesList.length === 0) {
-        alert("⚠️ Please upload at least one evidence document (PDF, XML, DOCX, CSV) before running the audit scan.");
-        return;
-    }
-
-    // Determine target framework
-    const fwSelect = document.getElementById("framework-select");
-    const targetFramework = fwSelect ? fwSelect.value : "All Standards";
-
-    // Check if VAPT framework is selected -> Bypass LLM and use fast technical parser!
-    let effectiveAuditMode = selectedAnalysisMode;
-    if (targetFramework === "VAPT" || targetFramework.includes("VAPT")) {
-        effectiveAuditMode = "Technical findings only";
-    }
-
-    if (runBtn) {
-        const modeLabel = effectiveAuditMode === "Technical findings only" ? "Fast VAPT Parser (No LLM)" : `${selectedAnalysisMode} Audit`;
-        runBtn.innerHTML = `<span>⚡</span> <span>Running ${modeLabel}...</span>`;
-        runBtn.disabled = true;
-    }
-    if (stopBtn) stopBtn.style.display = "block";
-
-    try {
-        // Collect exact selected controls (if user checked 2 controls, sends ONLY those 2 controls!)
-        const selectedControlSls = Array.from(document.querySelectorAll("#controls-checkbox-container input[type='checkbox']:checked"))
-            .map(chk => parseInt(chk.value))
-            .filter(val => !isNaN(val));
-
-        // If checkboxes empty, check modal selected scope or fallback to default controls
-        let slsToRun = selectedControlSls;
-        if (slsToRun.length === 0 && modalSelectedControls && modalSelectedControls.size > 0) {
-            slsToRun = Array.from(modalSelectedControls).map(sl => parseInt(sl)).filter(v => !isNaN(v));
-        }
-        if (slsToRun.length === 0) {
-            slsToRun = [5, 6, 8, 12, 15, 22]; // Default fallback if nothing checked
-        }
-
-        const response = await fetch(`${API_BASE}/audit/start`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                session_id: activeSessionId,
-                selected_sls: slsToRun,
-                model_choice: document.getElementById("llm-model-select") ? document.getElementById("llm-model-select").value : "Gemma 4 (e4b)",
-                audit_mode: effectiveAuditMode
-            })
-        });
-
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Failed to start audit scan.");
-
-        pollAuditResults();
-
-        const recordsTabBtn = document.querySelectorAll(".tab-link")[1];
-        if (recordsTabBtn) switchTab("tab-audit-records", recordsTabBtn);
-
-    } catch (err) {
-        alert(`❌ Audit Scan Error: ${err.message}`);
-        if (runBtn) {
-            runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
-            runBtn.disabled = false;
-        }
-        if (stopBtn) stopBtn.style.display = "none";
-    }
-}
-
 async function pollAuditResults() {
     const runBtn = document.getElementById("run-analysis-btn");
     const stopBtn = document.getElementById("stop-analysis-btn");
@@ -1256,17 +1066,6 @@ async function pollAuditResults() {
     }, 2000);
 }
 
-function stopAuditAnalysis() {
-    const runBtn = document.getElementById("run-analysis-btn");
-    const stopBtn = document.getElementById("stop-analysis-btn");
-    if (runBtn) {
-        runBtn.innerHTML = `<span>▶</span> <span>RUN AUDIT SCAN</span>`;
-        runBtn.disabled = false;
-    }
-    if (stopBtn) stopBtn.style.display = "none";
-    alert("⛔ Audit scan halted by user.");
-}
-
 // ── SIDEBAR FRAMEWORK CHECKLIST ──
 
 // ── SIDEBAR FRAMEWORK CHECKLIST & SEGMENTED CONTROLS ──
@@ -1298,16 +1097,6 @@ function setScopingMode(mode) {
         if (excelDropzone) excelDropzone.style.display = "none";
         if (checklistBox) checklistBox.style.display = "block";
         if (statusNote) statusNote.innerHTML = `<span style="color:#10b981;font-weight:700;">🟢 Active:</span> <b>Manual Checklist Scope</b> — Select or unselect specific controls from accordions below.`;
-    }
-}
-
-function toggleScopeChecklistModal() {
-    const checklistBox = document.getElementById("sidebar-checklist-setup");
-    if (!checklistBox) return;
-    if (checklistBox.style.display === "none" || !checklistBox.style.display) {
-        setScopingMode("Audit Scope Checklist");
-    } else {
-        checklistBox.style.display = "none";
     }
 }
 
@@ -1490,41 +1279,6 @@ function updateSelectedScopeCount() {
                 badge.style.background = "rgba(234, 179, 8, 0.2)";
                 badge.style.color = "#facc15";
             }
-        }
-    });
-}
-
-function selectAllCheckboxes(checked) {
-    const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
-    checkboxes.forEach(cb => cb.checked = checked);
-    updateSelectedScopeCount();
-}
-
-function filterCheckboxList() {
-    const input = document.getElementById("controls-search-input");
-    if (!input) return;
-    const query = input.value.toLowerCase().trim();
-
-    const accordions = document.querySelectorAll(".clause-accordion-card");
-    accordions.forEach(acc => {
-        let hasMatch = false;
-        const items = acc.querySelectorAll(".ctrl-checkbox-item");
-        items.forEach(item => {
-            const text = item.innerText.toLowerCase();
-            if (!query || text.includes(query)) {
-                item.style.display = "flex";
-                hasMatch = true;
-            } else {
-                item.style.display = "none";
-            }
-        });
-
-        if (query) {
-            acc.style.display = hasMatch ? "block" : "none";
-            const body = acc.querySelector(".clause-body");
-            if (body && hasMatch) body.style.display = "block";
-        } else {
-            acc.style.display = "block";
         }
     });
 }
@@ -2555,6 +2309,61 @@ function updateBrandingSummary() {
     if (summaryDocId) summaryDocId.innerText = docid;
 }
 
+async function handleCompanyLogoUpload(event) {
+    const file = event.target.files ? event.target.files[0] : null;
+    if (!file) return;
+
+    // Instant local thumbnail preview using FileReader
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const preview = document.getElementById("meta-logo-preview");
+        const statusTag = document.getElementById("logo-status-tag");
+        const resetBtn = document.getElementById("btn-reset-logo");
+        if (preview) preview.src = e.target.result;
+        if (statusTag) statusTag.style.display = "inline-block";
+        if (resetBtn) resetBtn.style.display = "block";
+    };
+    reader.readAsDataURL(file);
+
+    // Upload logo to backend
+    try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const resp = await fetch(`${API_BASE}/audit/upload-logo`, {
+            method: "POST",
+            body: formData
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast("Company logo uploaded! PDF & Word reports will use custom logo.", "success");
+        } else {
+            showToast(`Logo upload notice: ${data.message || "Saved locally"}`, "info");
+        }
+    } catch (err) {
+        console.warn("[Company Logo] Upload API warning:", err.message);
+        showToast("Company logo preview updated for PDF & Word exports.", "info");
+    }
+}
+
+async function resetCompanyLogo(event) {
+    if (event) event.stopPropagation();
+    try {
+        await fetch(`${API_BASE}/audit/upload-logo`, { method: "DELETE" });
+    } catch (e) {}
+
+    const preview = document.getElementById("meta-logo-preview");
+    const statusTag = document.getElementById("logo-status-tag");
+    const resetBtn = document.getElementById("btn-reset-logo");
+    const fileInput = document.getElementById("meta-company-logo");
+
+    if (preview) preview.src = "/static/shield_logo.png?v=4";
+    if (statusTag) statusTag.style.display = "none";
+    if (resetBtn) resetBtn.style.display = "none";
+    if (fileInput) fileInput.value = "";
+
+    showToast("Reset to default template logo.", "info");
+}
+
 async function renderAuditReportPreview() {
     const container = document.getElementById("report-preview-container");
     if (!container) return;
@@ -2710,107 +2519,10 @@ function isVaptFinding(f) {
     return cid.startsWith("VAPT") || cat.includes("VAPT") || fw.includes("VAPT");
 }
 
-function getCleanFindingDescription(f) {
-    if (!f) return "Vulnerability or compliance finding evaluation.";
-    const candidate = f.description || f.gap_detected || f.gap_description || f.justification || f.reasoning;
-    if (candidate && String(candidate).trim() !== "Semantic RAG compliance evaluation.") {
-        return String(candidate).trim();
-    }
-    const backup = (f.description && String(f.description).trim()) ||
-        (f.gap_detected && String(f.gap_detected).trim()) ||
-        (f.gap_description && String(f.gap_description).trim()) ||
-        (f.justification && String(f.justification).trim());
-    return backup || 'Detailed compliance and vulnerability finding evaluation.';
-}
-
-function isFindingCompliant(f) {
-    const st = (f.status || "").toUpperCase().trim();
-    const wf = (f.workflow_status || f.display_status || "").toUpperCase().trim();
-
-    // Check policy and evidence presence/compliance
-    const polRaw = String(f.policy_present || "No").trim().toLowerCase();
-    const evRaw = String(f.evidence_present || "No").trim().toLowerCase();
-
-    const isPolCompliant = (polRaw === "yes" || polRaw === "compliant" || polRaw === "true");
-    const isEvCompliant = (evRaw === "yes" || evRaw === "compliant" || evRaw === "true");
-
-    // If both Policy AND Evidence are Compliant, the finding is COMPLIANT!
-    if (isPolCompliant && isEvCompliant) {
-        return true;
-    }
-
-    if (st === "COMPLIANT" || st === "PASS" || st === "SATISFIED" || st === "ACCEPTED" || wf === "ACCEPTED") {
-        return true;
-    }
-
-    if (st.includes("NON") || st.includes("NOT") || st.includes("GAP") || st.includes("FAIL") || st.includes("PARTIAL") || st.includes("UNSATISFIED")) {
-        return false;
-    }
-
-    return false;
-}
-
 function isFindingInformational(f) {
     const sev = (f.severity || "").toUpperCase();
     const st = (f.status || "").toUpperCase();
     return sev.includes("INFO") || st.includes("INFO");
-}
-
-function calculateSeverityStats() {
-    let p1 = 0, p2 = 0, p3 = 0, p4 = 0, infoCount = 0;
-    let compliant = 0, nonCompliant = 0;
-    findingsList.forEach(f => {
-        const sev = (f.severity || "").toLowerCase();
-        const isInfo = isFindingInformational(f);
-
-        if (sev.includes("p1") || sev.includes("critical")) p1++;
-        else if (sev.includes("p2") || sev.includes("high")) p2++;
-        else if (sev.includes("p3") || sev.includes("medium")) p3++;
-        else if (sev.includes("p4") || sev.includes("low")) p4++;
-        else if (isInfo) infoCount++;
-
-        if (isFindingCompliant(f)) {
-            compliant++;
-        } else if (!isInfo) {
-            // Standards Rule: ONLY count actionable P1-P4 vulnerabilities as Non-Compliant gaps!
-            nonCompliant++;
-        }
-    });
-
-    const hasVapt = findingsList.some(f => isVaptFinding(f));
-    const lbl1 = document.getElementById("label-p1");
-    const lbl2 = document.getElementById("label-p2");
-    const lbl3 = document.getElementById("label-p3");
-    const lbl4 = document.getElementById("label-p4");
-    if (lbl1) lbl1.innerText = hasVapt ? "Critical" : "P1 (Critical)";
-    if (lbl2) lbl2.innerText = hasVapt ? "High" : "P2 (High)";
-    if (lbl3) lbl3.innerText = hasVapt ? "Medium" : "P3 (Medium)";
-    if (lbl4) lbl4.innerText = hasVapt ? "Low" : "P4 (Low)";
-
-    if (document.getElementById("count-p1")) document.getElementById("count-p1").innerText = p1;
-    if (document.getElementById("count-p2")) document.getElementById("count-p2").innerText = p2;
-    if (document.getElementById("count-p3")) document.getElementById("count-p3").innerText = p3;
-    if (document.getElementById("count-p4")) document.getElementById("count-p4").innerText = p4;
-    if (document.getElementById("count-compliant")) document.getElementById("count-compliant").innerText = compliant;
-    if (document.getElementById("count-noncompliant")) document.getElementById("count-noncompliant").innerText = nonCompliant;
-}
-
-function toggleComplianceFilter(statusType) {
-    document.querySelectorAll(".kpi-box").forEach(b => b.style.outline = "none");
-    activeSeverityFilter = ""; // Reset severity filter when switching status KPI cards
-
-    const select = document.getElementById("status-filter");
-    if (select) {
-        if (select.value === statusType) {
-            select.value = "All";
-        } else {
-            select.value = statusType;
-            let selector = statusType === "Compliant" ? ".compliant-box" : ".noncompliant-box";
-            const box = document.querySelector(selector);
-            if (box) box.style.outline = "2px solid #3b82f6";
-        }
-        renderFindingsList();
-    }
 }
 
 function matchesSeverityFilter(fSeverity, activeFilter) {
@@ -4132,114 +3844,6 @@ async function clearDeveloperLogs() {
 }
 
 // ── AUDIT REPORT & DELIVERY ──
-
-async function exportFindingsCSV() {
-    // Queries findings and generates CSV download on client side
-    try {
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser.role}`);
-        const data = await response.json();
-        if (data.success && data.findings.length > 0) {
-            let csv = "Control ID,Name,Severity,Status,Description,Recommendation,Reasoning,Files\n";
-            data.findings.forEach(f => {
-                // escape commas and quotes in CSV
-                const desc = `"${(f.description || '').replace(/"/g, '""')}"`;
-                const rec = `"${(f.recommendation || '').replace(/"/g, '""')}"`;
-                const reason = `"${(f.reasoning || '').replace(/"/g, '""')}"`;
-                csv += `${f.control_id},"${f.control_name}",${f.severity},${f.status},${desc},${rec},${reason},"${f.source_files}"\n`;
-            });
-
-            const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.setAttribute("download", `audit_report_${activeSessionId.slice(0, 6)}.csv`);
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-        } else {
-            alert("No findings records to export. Try running a scan first.");
-        }
-    } catch (err) {
-        alert(err.message);
-    }
-}
-
-async function exportFindingsDOCX() {
-    try {
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${currentUser ? currentUser.role : 'auditor'}`);
-        const data = await response.json();
-        const findings = (data.success && data.findings) ? data.findings : findingsList;
-
-        if (!findings || findings.length === 0) {
-            alert("⚠️ No findings records to export. Please run an audit scan first.");
-            return;
-        }
-
-        const brandFirm = document.getElementById("brand-firm")?.value || "TÜV SÜD South Asia Pvt. Ltd.";
-        const brandAuditor = document.getElementById("brand-auditor")?.value || "Lead Audit Team";
-        const brandDocId = document.getElementById("brand-docid")?.value || activeSessionId.slice(0, 8).toUpperCase();
-        const brandClient = document.getElementById("brand-client")?.value || "Motorola Solutions";
-
-        let html = `
-            <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-            <head><meta charset='utf-8'><title>Audit Evaluation Report</title></head>
-            <body style='font-family: Arial, sans-serif; padding: 20px;'>
-                <h1 style='color: #1e293b; border-bottom: 2px solid #2563eb; padding-bottom: 8px;'>ISO 27001 / VAPT AUDIT EVALUATION REPORT</h1>
-                <p><b>Auditor Firm:</b> ${brandFirm}</p>
-                <p><b>Client Organization:</b> ${brandClient}</p>
-                <p><b>Lead Auditor(s):</b> ${brandAuditor}</p>
-                <p><b>Document Reference ID:</b> ${brandDocId}</p>
-                <p><b>Generated Date:</b> ${new Date().toLocaleDateString()}</p>
-                <hr style='border: 0; border-top: 1px solid #cbd5e1; margin: 16px 0;'>
-                <h2 style='color: #2563eb;'>Evaluated Control Findings (${findings.length})</h2>
-                <table border='1' cellspacing='0' cellpadding='8' style='width: 100%; border-collapse: collapse; border-color: #cbd5e1;'>
-                    <tr style='background: #f1f5f9; color: #1e293b;'>
-                        <th>Control ID</th>
-                        <th>Control Name</th>
-                        <th>Status</th>
-                        <th>Severity</th>
-                        <th>Description / Evidence</th>
-                        <th>Recommendation</th>
-                    </tr>
-        `;
-
-        findings.forEach(f => {
-            const isComp = isFindingCompliant(f);
-            const statusColor = isComp ? '#10b981' : '#ef4444';
-            const docxEv = f.evidence_snippet ? `<p style='margin:0 0 4px 0;'><b>Exact Sentence Evidence:</b> "${f.evidence_snippet}"</p>` : '';
-            const docxDesc = f.description ? `<p style='margin:0 0 4px 0; color:#475569;'>${f.description}</p>` : '';
-            const docxSrc = f.source_files ? `<p style='margin:0; font-size:11px; color:#2563eb;'>Source Doc: ${f.source_files}</p>` : '';
-
-            html += `
-                <tr>
-                    <td><b>${f.control_id}</b></td>
-                    <td>${f.control_name || f.control}</td>
-                    <td><b style='color:${statusColor};'>${f.status}</b></td>
-                    <td>${f.severity || 'P3 Medium'}</td>
-                    <td>${docxEv}${docxDesc}${docxSrc}</td>
-                    <td>${f.recommendation || ''}</td>
-                </tr>
-            `;
-        });
-
-        html += `
-                </table>
-            </body>
-            </html>
-        `;
-
-        const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `Audit_Report_${brandDocId}.docx`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        showToast("📥 Word (.docx) report downloaded successfully!", "info");
-    } catch (err) {
-        alert(`Failed to export Word document: ${err.message}`);
-    }
-}
 
 async function printAuditReportPreview() {
     try {
@@ -5799,90 +5403,9 @@ function parseClientSideCsvScope(file) {
 }
 
 // ── FORGOT PASSWORD TOTP RECOVERY ENGINE ──
-function openForgotPasswordModal() {
-    const modal = document.getElementById("forgot-password-modal");
-    if (!modal) return;
-    document.getElementById("fp-step-1").style.display = "block";
-    document.getElementById("fp-step-2").style.display = "none";
-    document.getElementById("fp-username-input").value = "";
-    document.getElementById("fp-otp-input").value = "";
-    document.getElementById("fp-new-password-input").value = "";
-    modal.style.display = "flex";
-}
 
-function closeForgotPasswordModal() {
-    const modal = document.getElementById("forgot-password-modal");
-    if (modal) modal.style.display = "none";
-}
 
-async function requestForgotPasswordTOTP() {
-    const username = (document.getElementById("fp-username-input").value || "").trim();
-    if (!username) {
-        alert("Please enter your registered username.");
-        return;
-    }
 
-    try {
-        const res = await fetch(`${API_BASE}/auth/forgot-password/request`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ username: username })
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-            alert(data.detail || data.message || "Failed to find account username.");
-            return;
-        }
-
-        document.getElementById("fp-qr-img").src = data.qr_code_base64;
-        document.getElementById("fp-qr-secret").innerText = data.totp_secret;
-        document.getElementById("fp-step-1").style.display = "none";
-        document.getElementById("fp-step-2").style.display = "block";
-        showToast("Authenticator QR loaded! Enter 6-digit code to reset password.", "info");
-    } catch (err) {
-        console.error("Forgot password error:", err);
-        alert("Error connecting to server.");
-    }
-}
-
-async function submitResetPasswordTOTP() {
-    const username = (document.getElementById("fp-username-input").value || "").trim();
-    const otpCode = (document.getElementById("fp-otp-input").value || "").trim();
-    const newPassword = (document.getElementById("fp-new-password-input").value || "").trim();
-
-    if (!otpCode || otpCode.length < 6) {
-        alert("Please enter a valid 6-digit TOTP code from Google Authenticator.");
-        return;
-    }
-    if (!newPassword || newPassword.length < 4) {
-        alert("New password must be at least 4 characters long.");
-        return;
-    }
-
-    try {
-        const res = await fetch(`${API_BASE}/auth/forgot-password/reset`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                username: username,
-                otp_code: otpCode,
-                new_password: newPassword
-            })
-        });
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-            alert(data.detail || data.message || "Failed to reset password. Check your TOTP code.");
-            return;
-        }
-
-        closeForgotPasswordModal();
-        alert(`✅ Password successfully reset for '${username}'! You can now sign in with your new password.`);
-        showToast("Password reset successful!", "success");
-    } catch (err) {
-        console.error("Password reset error:", err);
-        alert("Error resetting password.");
-    }
-}
 
 // ── SESSION-WISE BENCHMARK EXPORTER ──
 function downloadSelectedSessionBenchmark() {

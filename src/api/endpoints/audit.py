@@ -1265,11 +1265,44 @@ def api_clear_chat_session(session_id: str = Form(...), username: Optional[str] 
         return {"success": True, "message": "Chat history cleared successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
+# ── COMPANY LOGO MANAGEMENT ENDPOINTS ──────────────────────────────────────
+
+@router.post("/upload-logo")
+def api_upload_company_logo(file: UploadFile = File(...)):
+    """Saves custom company logo for PDF/Word report exports."""
+    try:
+        ext = os.path.splitext(file.filename)[1].lower() or ".png"
+        if ext not in (".png", ".jpg", ".jpeg", ".webp", ".svg"):
+            raise HTTPException(status_code=400, detail="Invalid image format. Allowed: PNG, JPG, WEBP, SVG")
+        
+        assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "assets"))
+        os.makedirs(assets_dir, exist_ok=True)
+        logo_path = os.path.join(assets_dir, "custom_company_logo.png")
+        
+        with open(logo_path, "wb") as f:
+            f.write(file.file.read())
+            
+        return {"success": True, "message": "Company logo uploaded successfully", "logo_path": logo_path}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Logo upload failed: {e}")
+
+@router.delete("/upload-logo")
+def api_reset_company_logo():
+    """Resets company logo to default template logo."""
+    try:
+        assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "assets"))
+        logo_path = os.path.join(assets_dir, "custom_company_logo.png")
+        if os.path.exists(logo_path):
+            os.remove(logo_path)
+        return {"success": True, "message": "Reset to default template logo"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reset logo failed: {e}")
+
 
 @router.get("/export/docx")
-def api_export_docx(session_id: str, saved_only: bool = False):
+def api_export_docx(session_id: str, saved_only: bool = False, auditor_logo_path: Optional[str] = None):
     """Exports findings report as DOCX using custom layout templates."""
     db = SessionLocal()
     try:
@@ -1479,7 +1512,7 @@ Provide a clear, helpful, professional, and directly relevant answer as an exper
         db.close()
 
 @router.get("/export/pdf")
-def api_export_pdf(session_id: str, saved_only: bool = False):
+def api_export_pdf(session_id: str, saved_only: bool = False, auditor_logo_path: Optional[str] = None):
     """Exports findings report as PDF using custom layout templates."""
     db = SessionLocal()
     try:
