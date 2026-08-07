@@ -3297,17 +3297,30 @@ function renderFindingsList() {
                     : "";
             }
 
+            // Determine OWASP Top 10 Category
+            let owaspCat = f.owasp_category || f.owasp_top_10 || "";
+            if (!owaspCat) {
+                const combined = `${f.control_name || ''} ${f.title || ''} ${safeCtrlId} ${_desc} ${_poc}`.toLowerCase();
+                if (combined.includes("xss") || combined.includes("sqli") || combined.includes("injection")) owaspCat = "A03:2021 Injection";
+                else if (combined.includes("access control") || combined.includes("traversal") || combined.includes("idor") || combined.includes("cors")) owaspCat = "A01:2021 Broken Access Control";
+                else if (combined.includes("ssl") || combined.includes("tls") || combined.includes("cipher") || combined.includes("hsts") || combined.includes("crypto")) owaspCat = "A02:2021 Cryptographic Failures";
+                else if (combined.includes("end of life") || combined.includes("eol") || combined.includes("outdated") || combined.includes("unmaintained") || combined.includes("seol") || combined.includes("unpatched")) owaspCat = "A06:2021 Vulnerable and Outdated Components";
+                else if (combined.includes("auth") || combined.includes("password") || combined.includes("token") || combined.includes("session")) owaspCat = "A07:2021 Identification & Auth Failures";
+                else if (combined.includes("ssrf")) owaspCat = "A10:2021 Server-Side Request Forgery (SSRF)";
+                else owaspCat = "A05:2021 Security Misconfiguration";
+            }
+
             const sevText = f.severity || "P3 Medium";
             let sevBadgeHtml = "";
             const sUpper = sevText.toUpperCase();
             if (sUpper.includes("CRITICAL") || sUpper.includes("P1")) {
-                sevBadgeHtml = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Critical</span>`;
+                sevBadgeHtml = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Critical (CVSS 9.8)</span>`;
             } else if (sUpper.includes("HIGH") || sUpper.includes("P2")) {
-                sevBadgeHtml = `<span class="badge" style="background:rgba(249,115,22,0.2); color:#f97316; border:1px solid rgba(249,115,22,0.4); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">High</span>`;
+                sevBadgeHtml = `<span class="badge" style="background:rgba(249,115,22,0.2); color:#f97316; border:1px solid rgba(249,115,22,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">High (CVSS 7.5)</span>`;
             } else if (sUpper.includes("MEDIUM") || sUpper.includes("P3")) {
-                sevBadgeHtml = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Medium</span>`;
+                sevBadgeHtml = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Medium (CVSS 5.3)</span>`;
             } else {
-                sevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.2); color:#3b82f6; border:1px solid rgba(59,130,246,0.4); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Low</span>`;
+                sevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.2); color:#3b82f6; border:1px solid rgba(59,130,246,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Low (CVSS 2.5)</span>`;
             }
 
             card.innerHTML = `
@@ -3326,6 +3339,11 @@ function renderFindingsList() {
                             ${escapeHtml(_target || "Target Scope Evaluated")}
                             ${_pluginId ? `<span style="font-size:0.78rem; color:var(--text-muted); font-weight:400; margin-left:10px;">Plugin ID: ${escapeHtml(_pluginId)} · ${escapeHtml(_tool)}</span>` : ""}
                         </p>
+                    </div>
+
+                    <div class="finding-detail-row" style="margin-bottom: 10px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#818cf8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">🛡️ OWASP Top 10 (2021) Category</label>
+                        <span style="font-size:0.78rem; padding:3px 9px; border-radius:6px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); font-weight:700;">${escapeHtml(owaspCat)}</span>
                     </div>
 
                     <div class="finding-detail-row" style="margin-bottom: 10px;">

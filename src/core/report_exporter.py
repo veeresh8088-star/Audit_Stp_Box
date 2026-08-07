@@ -973,10 +973,20 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             if isinstance(raw_cve_list, str):
                 import re as _re_cve
                 raw_cve_list = _re_cve.findall(r'CVE-\d{4}-\d{4,7}', raw_cve_list, re.IGNORECASE)
-            cve_str = ", ".join(raw_cve_list) if raw_cve_list else "No CVE assigned"
+            if not raw_cve_list:
+                ext = re.findall(r'CVE-\d{4}-\d{4,7}', desc + " " + poc_text, re.IGNORECASE)
+                if ext: raw_cve_list = list(set([e.upper() for e in ext]))
+            cve_str = ", ".join(raw_cve_list) if raw_cve_list else "N/A - Vendor Security Advisory / End-of-Life Notice"
             r = table.row()
             r.cell("CVE References", style=lbl_style)
             r.cell(clean_text(cve_str[:400]), style=body_style)
+
+            # ── OWASP Top 10 Classification ──────────────────────────────────
+            from src.core.parsers.control_mapper import map_finding_to_owasp
+            owasp_cat = f.get("owasp_category") or map_finding_to_owasp(f.get("cwe"), vuln_title, desc)
+            r = table.row()
+            r.cell("OWASP Top 10 (2021)", style=lbl_style)
+            r.cell(clean_text(owasp_cat[:400]), style=body_style)
 
             # ── Plugin ID row (when available) ─────────────────────────────────
             plugin_id_val = str(f.get("plugin_id") or "").strip()
