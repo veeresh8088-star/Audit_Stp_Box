@@ -554,33 +554,89 @@ async function switchRecentSession(sessionId, sessionTitle) {
     activeSessionId = sessionId;
     if (sessionTitle) activeSessionTitle = sessionTitle;
 
+    // ── Stop any running audit from the previous session ────────────────────────
+    if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+    if (typeof stopAnalysisPolling === "function") stopAnalysisPolling();
+
+    // ── Reset data state ─────────────────────────────────────────────────────────
+    findingsList = [];
+    uploadedFilesList = [];
+    customEvidenceMappings = null;
+    customControlDocuments = null;
+    activeSeverityFilter = "";
+    activeStatusFilter = "All";
+    activeComplianceFilter = "";
+
+    // ── Reset UI: Session header ─────────────────────────────────────────────────
     const badge = document.getElementById("active-session-badge");
     const wsTitle = document.getElementById("workspace-title");
     if (badge) badge.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
     if (wsTitle) wsTitle.innerText = activeSessionTitle || "ISO 27001 Local Compliance Audit";
 
-    // FULLY reset ALL filters to "All Records" on session switch
-    const select = document.getElementById("status-filter");
-    if (select) select.value = "All";
+    // ── Reset UI: KPI counters ───────────────────────────────────────────────────
+    ["count-compliant","count-noncompliant","count-p1","count-p2","count-p3","count-p4"].forEach(id => {
+        const el = document.getElementById(id); if (el) el.innerText = "0";
+    });
 
-    // Also reset KPI box visual highlights if any
+    // ── Reset UI: Progress bar ────────────────────────────────────────────────────
+    const progressBar = document.getElementById("pipeline-progress-fill");
+    const progressPct = document.getElementById("pipeline-progress-percent");
+    const progressStatus = document.getElementById("pipeline-status-text");
+    if (progressBar) progressBar.style.width = "0%";
+    if (progressPct) progressPct.innerText = "0%";
+    if (progressStatus) progressStatus.innerText = "Ready to scan";
+
+    // ── Reset UI: Scan run button ─────────────────────────────────────────────────
+    const runBtn = document.getElementById("run-analysis-btn");
+    const stopBtn = document.getElementById("stop-analysis-btn");
+    if (runBtn) { runBtn.disabled = false; runBtn.style.opacity = "1"; }
+    if (stopBtn) stopBtn.style.display = "none";
+
+    // ── Reset UI: Controls checkboxes, search & scoping ──────────────────────────
+    try {
+        if (typeof selectAllCheckboxes === "function") selectAllCheckboxes(false);
+        if (typeof updateSelectedScopeCount === "function") updateSelectedScopeCount();
+        if (typeof setScopingMode === "function") setScopingMode('AI Auto-Scoping');
+
+        // Clear search box so "5.15" from previous session doesn't persist
+        const searchInput = document.getElementById("controls-search-input");
+        if (searchInput) {
+            searchInput.value = "";
+            if (typeof filterCheckboxList === "function") filterCheckboxList();
+        }
+
+        // Hide Excel scoping banner from previous session
+        const excelBanner = document.getElementById("excel-scope-banner");
+        if (excelBanner) excelBanner.style.display = "none";
+        const scopeLabel = document.getElementById("excel-scope-label");
+        if (scopeLabel) scopeLabel.innerText = "";
+    } catch (e) {
+        console.warn("[switchRecentSession] Control reset warning:", e);
+    }
+
+    // ── Reset UI: Status filter ───────────────────────────────────────────────────
+    document.querySelectorAll(".filter-btn").forEach(btn => btn.classList.remove("active"));
+    const allBtn = document.querySelector(".filter-btn[data-status='All']") ||
+                   document.querySelector(".filter-btn[data-filter='All']");
+    if (allBtn) allBtn.classList.add("active");
+
+    const statusSelect = document.getElementById("status-filter");
+    if (statusSelect) statusSelect.value = "All";
+
+    // Also reset KPI box visual highlights
     document.querySelectorAll(".kpi-box").forEach(b => b.style.outline = "none");
 
-    // Refresh evidence files list for this session
+    // ── Load this session's data ──────────────────────────────────────────────────
     loadEvidenceFileList();
     loadAuditeeEvidenceDocs();
-
-    // Load detailed findings from Shakthi DB for this session
     await loadFindings();
-
-    // Highlight selected session item in recent sessions list
     renderFilteredRecentSessionsList();
-
-    // Check for crash resilience checkpoints
     checkCrashResilienceCheckpoint();
 
     showToast(`📂 Switched to audit session: "${activeSessionTitle}"`, "info");
 }
+
+
 
 async function checkCrashResilienceCheckpoint() {
     const banner = document.getElementById("crash-resilience-banner");
