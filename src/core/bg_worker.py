@@ -343,6 +343,7 @@ def _checkpoint_create(session_id, bg_key, ai_model, selected_sls, file_names, c
             db.close()
 
 def _checkpoint_update(session_id, completed_batches, all_results_so_far):
+    """Legacy batch-level checkpoint update — kept for compatibility."""
     with force_master():
         db = SessionLocal()
         try:
@@ -359,6 +360,47 @@ def _checkpoint_update(session_id, completed_batches, all_results_so_far):
             print(f"[checkpoint] Failed to update checkpoint: {e}", flush=True)
         finally:
             db.close()
+
+def _checkpoint_update_per_control(session_id, control_id, all_results_so_far):
+    """
+    Per-control granular checkpoint.
+    Called after EVERY single control is evaluated (~3ms overhead).
+    Saves:
+      - completed_controls: integer count
+      - completed_control_ids_json: JSON list of control IDs already done
+      - partial_results_json: full results so far (for resume)
+    On resume, any control whose ID is in completed_control_ids_json is SKIPPED.
+    """
+    with force_master():
+        db = SessionLocal()
+        try:
+            chk = db.query(AuditCheckpoint).filter(
+                AuditCheckpoint.session_id == session_id,
+                AuditCheckpoint.status == "in_progress"
+            ).first()
+            if chk:
+                # Parse existing completed IDs and add new one
+                try:
+                    done_ids = json.loads(chk.completed_control_ids_json or "[]")
+                except Exception:
+                    done_ids = []
+                if control_id and control_id not in done_ids:
+                    done_ids.append(control_id)
+                chk.completed_controls = len(done_ids)
+                chk.completed_control_ids_json = json.dumps(done_ids)
+                chk.partial_results_json = json.dumps(all_results_so_far)
+                chk.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                db.commit()
+                print(
+                    f"[CHECKPOINT] Control '{control_id}' saved "
+                    f"({len(done_ids)}/{chk.total_controls} done)",
+                    flush=True
+                )
+        except Exception as e:
+            print(f"[checkpoint] Per-control update failed for '{control_id}': {e}", flush=True)
+        finally:
+            db.close()
+
 
 def _checkpoint_finish(session_id, status="completed"):
     with force_master():
@@ -402,11 +444,19 @@ def get_global_resumable_checkpoint():
     finally:
         db.close()
 
-def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None):
+def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None):
     os.environ["RAG_RERANK_MODE"] = "quick" if "quick" in str(audit_mode).lower() else "deep"
     ollama_model = _resolve_ollama_model(model_choice)
     controls = _build_controls_for_audit(selected_sls, custom_evidence)
     scanned_files_str = ", ".join(file_names_list) if file_names_list else "None"
+
+    # ── On RESUME: restore already-completed results from checkpoint and skip those controls ──
+    _already_done_set = set(already_done_ids or [])
+    if _already_done_set:
+        print(
+            f"[RESUME] Skipping {len(_already_done_set)} already-completed controls: {sorted(_already_done_set)}",
+            flush=True
+        )
 
     # ── SCOPING MODE DETERMINATION & ISOLATION ─────────────────────────────
     # Mode 1: EXCEL UPLOAD SCOPE (custom_evidence provided from uploaded Excel checklist)
@@ -608,10 +658,30 @@ Return format: ["topic1", "topic2", ...]"""
             print(f"[AUDIT STOPPED] User requested stop at control {idx + 1}/{total}. Exiting early.", flush=True)
             break
         # ────────────────────────────────────────────────────────────────
+
+        # ── PER-CONTROL RESUME: skip controls already saved in checkpoint ─
+        _ctrl_id_str = c.get("control", "")
+        if _ctrl_id_str in _already_done_set:
+            print(
+                f"[RESUME SKIP] Control {idx + 1}/{total}: '{_ctrl_id_str}' already completed — skipping.",
+                flush=True
+            )
+            # Update progress bar so UI shows correct % even for skipped controls
+            if bg_key:
+                pct = int(((idx + 1) / total) * 100)
+                with _bg_lock:
+                    _bg_store["progress"][bg_key] = {
+                        "text": f"Resuming: {idx + 1}/{total} controls (skipping already done)...",
+                        "percent": pct
+                    }
+            continue
+        # ─────────────────────────────────────────────────────────────────
+
         control_start_time = time.time()
         start_msg = f"-> Running Control {idx + 1}/{total}: {c['control']} ({c['label']})"
         print(f"[{time.strftime('%H:%M:%S')}]   {start_msg}", flush=True)
         log_dev_latency(f"[{idx + 1}/{total}] {start_msg}")
+
 
         # ── Strict Scoping: 1 control → 1 specific evidence file ─────────────
         # When an Excel scope sheet maps a control to a specific evidence file,
@@ -812,7 +882,16 @@ Return format: ["topic1", "topic2", ...]"""
             except Exception:
                 pass
 
-        # Update progress and checkpoint periodically
+        # ── PER-CONTROL CHECKPOINT ─────────────────────────────────────────────
+        # Save after EVERY control (~3ms). On crash, at most 1 control is re-run.
+        if checkpoint_session_id:
+            _checkpoint_update_per_control(
+                checkpoint_session_id,
+                c.get("control", ""),
+                all_results
+            )
+
+        # Update progress bar
         if bg_key:
             pct = int(((idx + 1) / total) * 100)
             with _bg_lock:
@@ -820,9 +899,12 @@ Return format: ["topic1", "topic2", ...]"""
                     "text": f"Scanning: {idx + 1}/{total} controls...",
                     "percent": pct
                 }
+
+        # Legacy batch checkpoint for backward compat (kept but superseded by per-control)
         if checkpoint_session_id and batch_size and (idx + 1) % batch_size == 0:
             completed_batches = (idx + 1) // batch_size
             _checkpoint_update(checkpoint_session_id, completed_batches, all_results)
+
 
     resolved_list = [r["control_id"] for r in all_results if (r.get("status") or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")]
     findings_list = [r for r in all_results if (r.get("status") or "").upper() not in ("COMPLIANT", "ACCEPTED", "PASS")]
@@ -963,7 +1045,7 @@ Return format: ["topic1", "topic2", ...]"""
 _default_concurrency = str(max(16, (os.cpu_count() or 8) * 2))
 _audit_semaphore = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_AUDITS", _default_concurrency)))
 
-def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None):
+def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None):
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)
     _sid = session_id or bg_key
     acquired_slot = False
@@ -1062,11 +1144,22 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
 
         _total_ctrl_count = len(selected_sls_copy)
         _batch_sz = 1 if ("7B" in ai_model or "8B" in ai_model or "9B" in ai_model or "Escalation" in ai_model) else 4
-        _checkpoint_create(
-            _sid, bg_key, ai_model,
-            selected_sls_copy, file_names_list, context_str,
-            _total_ctrl_count, _batch_sz
-        )
+
+        # On fresh start: create a new checkpoint.
+        # On RESUME (already_done_ids provided): the checkpoint already exists — skip re-creation.
+        _is_resume = bool(already_done_ids)
+        if not _is_resume:
+            _checkpoint_create(
+                _sid, bg_key, ai_model,
+                selected_sls_copy, file_names_list, context_str,
+                _total_ctrl_count, _batch_sz
+            )
+        else:
+            print(
+                f"[RESUME] Checkpoint exists — skipping _checkpoint_create, "
+                f"resuming from {len(already_done_ids)} already-done controls.",
+                flush=True
+            )
 
         with _bg_lock:
             _bg_store["progress"][bg_key] = {
@@ -1077,7 +1170,8 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         resolved_combined, findings_combined, all_results_combined = generate_ollama_findings(
             context_str, file_names_list, selected_sls_copy, ai_model, bg_key=bg_key,
             checkpoint_session_id=_sid, audit_mode=audit_mode,
-            custom_docs=custom_docs, custom_evidence=custom_evidence, file_registry=file_registry
+            custom_docs=custom_docs, custom_evidence=custom_evidence, file_registry=file_registry,
+            already_done_ids=already_done_ids or []
         )
 
         resolved_mapping = {}

@@ -1810,6 +1810,7 @@ def api_get_interrupted_checkpoints(username: Optional[str] = Query(None)):
                     "session_id": ck.session_id,
                     "session_title": title,
                     "completed_batches": ck.completed_batches or 0,
+                    "completed_controls": ck.completed_controls or 0,   # per-control granularity
                     "total_controls": ck.total_controls or 0,
                     "status": ck.status,
                     "updated_at": ck.updated_at.strftime("%Y-%m-%d %H:%M:%S") if ck.updated_at else ""
@@ -1838,23 +1839,81 @@ def api_resume_checkpoint(req: dict, background_tasks: BackgroundTasks):
             ck.status = "in_progress"
             db.commit()
 
-            # Launch background worker from last checkpoint position
+            # ── Per-control resume: collect control IDs already evaluated ──
+            already_done_ids = []
+            try:
+                already_done_ids = json.loads(ck.completed_control_ids_json or "[]")
+            except Exception:
+                already_done_ids = []
+
+            # Restore partial results into bg_results so UI can display them immediately
+            try:
+                partial = json.loads(ck.partial_results_json or "[]")
+            except Exception:
+                partial = []
+
+            # Build files_data from stored context (no re-upload needed)
             selected_sls = json.loads(ck.selected_sls_json) if ck.selected_sls_json else []
             file_names = json.loads(ck.file_names_json) if ck.file_names_json else []
 
+            # Reconstruct files_data list from stored context text
+            context_text = ck.context_text or ""
+            files_data = []
+            import re as _re
+            file_blocks = _re.split(r'--- FILE: (.+?) ---\n', context_text)
+            if len(file_blocks) > 1:
+                for fi in range(1, len(file_blocks), 2):
+                    fname = file_blocks[fi].strip()
+                    fcontent = file_blocks[fi + 1] if fi + 1 < len(file_blocks) else ""
+                    files_data.append({"name": fname, "bytes": fcontent.encode("utf-8"), "text": fcontent})
+            else:
+                # Fallback: single virtual file
+                files_data = [{"name": file_names[0] if file_names else "evidence.txt",
+                               "bytes": context_text.encode("utf-8"), "text": context_text}]
+
             bg_key = f"bg_{session_id}"
+
+            # Pre-seed bg_results with already-completed partial results so UI is not blank
+            from src.core.bg_state import _bg_results, _bg_lock
+            if partial:
+                findings_so_far = [r for r in partial if (r.get("status") or "").upper() not in ("COMPLIANT", "ACCEPTED", "PASS")]
+                resolved_so_far = [r["control_id"] for r in partial if (r.get("status") or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")]
+                with _bg_lock:
+                    _bg_results[bg_key] = {
+                        "findings": findings_so_far,
+                        "resolved_list": resolved_so_far,
+                        "resolved_count": len(resolved_so_far),
+                        "resolved_controls": set(resolved_so_far),
+                        "context": context_text
+                    }
+
+            print(
+                f"[RESUME] Session {session_id}: resuming from control #{len(already_done_ids) + 1} "
+                f"(skipping {len(already_done_ids)} already-done controls: {already_done_ids})",
+                flush=True
+            )
+
             background_tasks.add_task(
                 _run_ollama_bg,
                 bg_key,
-                ck.ai_model or "google_gemma-4-E4B-it-Q4_K_M.gguf",
+                files_data,
                 selected_sls,
-                file_names,
-                ck.context_text or "",
+                ck.ai_model or "google_gemma-4-E4B-it-Q4_K_M.gguf",
                 session_id,
-                None
+                "Deep",
+                None,
+                None,
+                None,
+                already_done_ids   # ← per-control skip list
             )
 
-            return {"success": True, "message": "Scan resumed successfully", "session_id": session_id}
+            return {
+                "success": True,
+                "message": f"Scan resumed from control #{len(already_done_ids) + 1}",
+                "session_id": session_id,
+                "skipped_controls": len(already_done_ids),
+                "already_done_ids": already_done_ids
+            }
     except HTTPException:
         raise
     except Exception as e:

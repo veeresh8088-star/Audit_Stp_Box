@@ -149,20 +149,24 @@ class ComplianceScore(Base):
 class AuditCheckpoint(Base):
     """Mid-audit progress checkpoints for crash-resilience."""
     __tablename__ = "audit_checkpoints"
-    id                   = Column(Integer, primary_key=True, autoincrement=True)
-    session_id           = Column(String(100), index=True)
-    bg_key               = Column(String(100))
-    ai_model             = Column(String(200))
-    selected_sls_json    = Column(Text)
-    file_names_json      = Column(Text)
-    context_text         = Column(Text)
-    total_controls       = Column(Integer, default=0)
-    completed_batches    = Column(Integer, default=0)
-    batch_size           = Column(Integer, default=10)
-    partial_results_json = Column(Text, default="[]")
-    status               = Column(String(50), default="in_progress")
-    created_at           = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
-    updated_at           = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    id                        = Column(Integer, primary_key=True, autoincrement=True)
+    session_id                = Column(String(100), index=True)
+    bg_key                    = Column(String(100))
+    ai_model                  = Column(String(200))
+    selected_sls_json         = Column(Text)
+    file_names_json           = Column(Text)
+    context_text              = Column(Text)
+    total_controls            = Column(Integer, default=0)
+    completed_batches         = Column(Integer, default=0)
+    batch_size                = Column(Integer, default=10)
+    # ── Per-control granular checkpoint (NEW) ────────────────────────────────
+    completed_controls        = Column(Integer, default=0)          # count of controls saved so far
+    completed_control_ids_json= Column(Text, default="[]")          # JSON list of control_id strings already evaluated
+    # ────────────────────────────────────────────────────────────────────────
+    partial_results_json      = Column(Text, default="[]")
+    status                    = Column(String(50), default="in_progress")
+    created_at                = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_at                = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None), onupdate=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
 
 class ChatMessage(Base):
     """General chat history for the AI Assistant view."""
@@ -485,10 +489,12 @@ def reconcile_schemas(engine):
     from sqlalchemy import inspect
     inspector = inspect(engine)
     tables_to_check = [
-        "users", "audit_reports", "findings", "evidence_files", 
-        "audit_records", "compliance_scores", "document_chunks", 
-        "auditor_feedback", "audit_trail", "system_events", 
-        "chat_messages", "custom_controls", "license_wallets", "token_usage_logs", "admin_audit_logs"
+        "users", "audit_reports", "findings", "evidence_files",
+        "audit_records", "compliance_scores", "document_chunks",
+        "auditor_feedback", "audit_trail", "system_events",
+        "chat_messages", "custom_controls", "license_wallets",
+        "token_usage_logs", "admin_audit_logs",
+        "audit_checkpoints",   # ← per-control checkpoint columns
     ]
     
     # We want to check columns for each table
