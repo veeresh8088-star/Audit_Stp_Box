@@ -1827,6 +1827,10 @@ def api_restore_doc_to_finding(finding_id: int, req: dict):
 def api_get_interrupted_checkpoints(username: Optional[str] = Query(None)):
     db = SessionLocal()
     try:
+        # Admin role/user does not conduct audit scans — return empty list immediately
+        if username and username.lower() in ("admin", "administrator", "root"):
+            return {"success": True, "interrupted_sessions": []}
+
         with force_master():
             # Query AuditCheckpoint for incomplete scans
             query = db.query(AuditCheckpoint).filter(AuditCheckpoint.status.in_(["in_progress", "interrupted"]))
@@ -1834,8 +1838,11 @@ def api_get_interrupted_checkpoints(username: Optional[str] = Query(None)):
 
             results = []
             for ck in checkpoints:
-                # Retrieve session title from AuditReport if available
+                # Retrieve session title & owner from AuditReport
                 report = db.query(AuditReport).filter(AuditReport.session_id == ck.session_id).first()
+                if username and report and report.username and report.username.lower() != username.lower():
+                    continue  # Belongs to a different user — do not leak across users
+
                 title = report.session_title if report else f"Audit Session {ck.session_id[:12]}"
                 
                 results.append({

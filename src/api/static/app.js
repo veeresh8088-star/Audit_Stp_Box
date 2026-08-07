@@ -757,8 +757,11 @@ let currentInterruptedSession = null;
 
 async function checkInterruptedAuditSessions() {
     if (!currentUser) return;
+    // Admin user does not run audit scans — do NOT show audit scan recovery modal for admin!
+    if (currentUser.role === "admin" || currentUser.username === "admin") return;
+
     try {
-        const username = currentUser.username || "admin";
+        const username = currentUser.username || "auditor";
         const resp = await fetch(`${API_BASE}/audit/interrupted-checkpoints?username=${encodeURIComponent(username)}`);
         const data = await resp.json();
 
@@ -771,7 +774,8 @@ async function checkInterruptedAuditSessions() {
 
             if (modal && titleEl && progEl && timeEl) {
                 titleEl.innerText = currentInterruptedSession.session_title || currentInterruptedSession.session_id;
-                progEl.innerText = `${currentInterruptedSession.completed_batches} / ${currentInterruptedSession.total_controls} Controls`;
+                const comp = currentInterruptedSession.completed_controls || currentInterruptedSession.completed_batches || 0;
+                progEl.innerText = `${comp} / ${currentInterruptedSession.total_controls} Controls`;
                 timeEl.innerText = currentInterruptedSession.updated_at || "Recently";
                 modal.style.display = "flex";
             }
