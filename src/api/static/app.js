@@ -441,19 +441,12 @@ async function loadRecentSessions() {
 
         if (data.success && data.sessions.length > 0) {
             const seen = new Set();
-            // Filter out empty draft sessions unless active
+            // Include ALL sessions belonging to the user
             window._recentSessionsCache = data.sessions.filter(s => {
                 if (!s.session_id || seen.has(s.session_id)) return false;
                 seen.add(s.session_id);
                 const title = (s.session_title || "").toLowerCase();
                 if (title.includes("chat") || title.includes("error")) return false;
-                const isCurrent = s.session_id === activeSessionId;
-                const fCount = s.findings_count || 0;
-                const eCount = s.files_count || 0;
-                const status = (s.status || "").toLowerCase();
-                if (!isCurrent && fCount === 0 && eCount === 0 && (status === "draft" || status === "")) {
-                    return false;
-                }
                 return true;
             });
 
@@ -563,7 +556,7 @@ async function switchRecentSession(sessionId, sessionTitle) {
 
     const badge = document.getElementById("active-session-badge");
     const wsTitle = document.getElementById("workspace-title");
-    if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
+    if (badge) badge.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
     if (wsTitle) wsTitle.innerText = activeSessionTitle || "ISO 27001 Local Compliance Audit";
 
     // FULLY reset ALL filters to "All Records" on session switch
@@ -580,14 +573,13 @@ async function switchRecentSession(sessionId, sessionTitle) {
     // Load detailed findings from Shakthi DB for this session
     await loadFindings();
 
-    // Auto switch tab view to Audit Records
-    const recordsTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Records"));
-    if (recordsTabBtn) switchTab("tab-audit-records", recordsTabBtn);
+    // Highlight selected session item in recent sessions list
+    renderFilteredRecentSessionsList();
 
     // Check for crash resilience checkpoints
     checkCrashResilienceCheckpoint();
 
-    showToast(`📂 Loaded audit session: ${sessionId.slice(0, 8)}`, "info");
+    showToast(`📂 Switched to audit session: "${activeSessionTitle}"`, "info");
 }
 
 async function checkCrashResilienceCheckpoint() {
