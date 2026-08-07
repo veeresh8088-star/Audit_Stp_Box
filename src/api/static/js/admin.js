@@ -163,44 +163,62 @@ async function _fetchAndRenderLiveMetrics() {
                 ${_kpiCard("Error Log", errors + " Errors", errors > 0 ? "#ef4444" : "#22c55e", errors > 0 ? "⚠" : "✓")}
             </div>
 
-            <!-- Active Auditor Sessions -->
+            <!-- Auditor Sessions (Running + Completed) -->
             <div style="background:rgba(15,23,42,0.5); border:1px solid rgba(148,163,184,0.15); border-radius:10px; overflow:hidden;">
-                <div style="padding:10px 14px; font-size:0.8rem; font-weight:700; color:#f8fafc; background:rgba(15,23,42,0.4); border-bottom:1px solid rgba(148,163,184,0.1);">
-                    Active Auditor Sessions Live Stream
-                    <span style="float:right; font-size:0.7rem; color:#94a3b8;">${sessions.filter(s=>s.status==='running').length} Running</span>
+                <div style="padding:10px 14px; font-size:0.8rem; font-weight:700; color:#f8fafc; background:rgba(15,23,42,0.4); border-bottom:1px solid rgba(148,163,184,0.1); display:flex; align-items:center; gap:10px;">
+                    <span>Auditor Sessions</span>
+                    <span style="font-size:0.7rem; color:#38bdf8; background:rgba(56,189,248,0.1); padding:2px 8px; border-radius:12px;">
+                        ${sessions.filter(s=>s.status==='running').length} Running
+                    </span>
+                    <span style="font-size:0.7rem; color:#22c55e; background:rgba(34,197,94,0.1); padding:2px 8px; border-radius:12px;">
+                        ${sessions.filter(s=>s.status==='done').length} Completed
+                    </span>
+                    <span style="margin-left:auto; font-size:0.7rem; color:#475569;">${sessions.length} Total</span>
                 </div>
                 ${sessions.length > 0 ? `
                     <table style="width:100%; border-collapse:collapse; font-size:0.78rem; color:#e2e8f0;">
                         <thead>
                             <tr style="background:rgba(15,23,42,0.3); border-bottom:1px solid rgba(148,163,184,0.1);">
                                 <th style="padding:8px 12px; text-align:left; font-weight:700; color:#94a3b8;">Auditor</th>
+                                <th style="padding:8px 12px; text-align:left; font-weight:700; color:#94a3b8;">Started</th>
                                 <th style="padding:8px 12px; text-align:left; font-weight:700; color:#94a3b8;">Files / Size</th>
-                                <th style="padding:8px 12px; text-align:left; font-weight:700; color:#94a3b8;">Tokens Used</th>
+                                <th style="padding:8px 12px; text-align:left; font-weight:700; color:#94a3b8;">Tokens</th>
                                 <th style="padding:8px 12px; text-align:left; font-weight:700; color:#94a3b8;">Latency</th>
                                 <th style="padding:8px 12px; text-align:left; font-weight:700; color:#94a3b8;">Controls</th>
                                 <th style="padding:8px 12px; text-align:center; font-weight:700; color:#94a3b8;">Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            ${sessions.map(s => `
-                                <tr style="border-bottom:1px solid rgba(148,163,184,0.08);">
+                            ${sessions.map(s => {
+                                const rowBg = s.status === 'running'
+                                    ? 'rgba(56,189,248,0.04)'
+                                    : s.status === 'done'
+                                        ? 'rgba(34,197,94,0.03)'
+                                        : 'rgba(239,68,68,0.04)';
+                                const startedFmt = s.started_at
+                                    ? new Date(s.started_at).toLocaleString('en-IN', {hour:'2-digit', minute:'2-digit', day:'2-digit', month:'short'})
+                                    : '—';
+                                const statusBadge = s.status === 'running'
+                                    ? '<span style="display:inline-flex;align-items:center;gap:4px;color:#38bdf8;background:rgba(56,189,248,0.12);padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:700;">🔄 Running</span>'
+                                    : s.status === 'done'
+                                        ? '<span style="display:inline-flex;align-items:center;gap:4px;color:#22c55e;background:rgba(34,197,94,0.12);padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:700;">✅ Done</span>'
+                                        : '<span style="display:inline-flex;align-items:center;gap:4px;color:#ef4444;background:rgba(239,68,68,0.12);padding:2px 8px;border-radius:10px;font-size:0.7rem;font-weight:700;">❌ Error</span>';
+                                return `
+                                <tr style="border-bottom:1px solid rgba(148,163,184,0.08); background:${rowBg};">
                                     <td style="padding:9px 12px; font-weight:600; color:#60a5fa;">${s.auditor || 'SYSTEM'}</td>
+                                    <td style="padding:9px 12px; color:#64748b; font-size:0.72rem;">${startedFmt}</td>
                                     <td style="padding:9px 12px; color:#94a3b8;">${s.files} Files / ${s.file_mb} MB</td>
-                                    <td style="padding:9px 12px; color:#a5b4fc; font-weight:700;">${(s.tokens||0).toLocaleString()} Tokens</td>
+                                    <td style="padding:9px 12px; color:#a5b4fc; font-weight:700;">${(s.tokens||0).toLocaleString()}</td>
                                     <td style="padding:9px 12px; color:#fbbf24;">${s.latency_str || '0m 0s'}</td>
                                     <td style="padding:9px 12px; color:#94a3b8;">${s.controls}</td>
-                                    <td style="padding:9px 12px; text-align:center;">
-                                        ${s.status === 'running'
-                                            ? '<span style="color:#38bdf8; font-size:1rem;">🔄</span>'
-                                            : s.status === 'done'
-                                                ? '<span style="color:#22c55e; font-size:1rem;">✅</span>'
-                                                : '<span style="color:#ef4444; font-size:1rem;">❌</span>'}
-                                    </td>
-                                </tr>`).join('')}
+                                    <td style="padding:9px 12px; text-align:center;">${statusBadge}</td>
+                                </tr>`;
+                            }).join('')}
                         </tbody>
                     </table>` : `
-                    <div style="padding:20px; text-align:center; color:#475569; font-size:0.8rem;">
-                        No active audit sessions right now. Start an audit to see live metrics.
+                    <div style="padding:28px; text-align:center; color:#475569; font-size:0.82rem;">
+                        <div style="font-size:1.5rem; margin-bottom:8px;">📋</div>
+                        No audit sessions recorded yet. Sessions appear here when auditors run scans.
                     </div>`}
             </div>`;
     } catch (err) {

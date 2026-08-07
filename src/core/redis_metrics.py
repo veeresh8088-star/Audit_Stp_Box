@@ -184,7 +184,8 @@ def push_error(session_id: str):
 
 
 def session_done(session_id: str, status: str = "done"):
-    """Mark session as done/error. Removes from active sessions list."""
+    """Mark session as done/error. Moves from active_sessions to completed_sessions.
+    Keeps completed sessions visible in admin for SESSION_TTL seconds."""
     r = _get_redis()
     if not r:
         return
@@ -194,14 +195,29 @@ def session_done(session_id: str, status: str = "done"):
         pipe.set(f"session:{session_id}:updated_at", _ts())
         pipe.expire(f"session:{session_id}:status",     SESSION_TTL)
         pipe.expire(f"session:{session_id}:updated_at", SESSION_TTL)
-        raw = r.get("global:active_sessions") or "[]"
+
+        # Move from active -> completed (do NOT delete — admin must still see it)
+        raw_active = r.get("global:active_sessions") or "[]"
         try:
-            active = json.loads(raw)
+            active = json.loads(raw_active)
         except Exception:
             active = []
-        active = [s for s in active if s != session_id]
+        active = [s for s in active if s != session_id]  # remove from active
         pipe.set("global:active_sessions", json.dumps(active))
         pipe.expire("global:active_sessions", SESSION_TTL)
+
+        # Add to completed_sessions list so admin can still display them
+        raw_done = r.get("global:completed_sessions") or "[]"
+        try:
+            done_list = json.loads(raw_done)
+        except Exception:
+            done_list = []
+        if session_id not in done_list:
+            done_list.append(session_id)
+        # Keep only the last 50 completed sessions
+        done_list = done_list[-50:]
+        pipe.set("global:completed_sessions", json.dumps(done_list))
+        pipe.expire("global:completed_sessions", SESSION_TTL)
         pipe.execute()
     except Exception as e:
         logger.warning(f"[Redis] session_done failed: {e}")
@@ -235,8 +251,14 @@ def get_live_metrics() -> dict:
         except Exception:
             active_ids = []
 
+        # ── Build session rows: active first, then completed ──────────────────
         sessions = []
-        for sid in active_ids:
+        seen_sids = set()
+
+        def _build_session_row(sid):
+            if sid in seen_sids:
+                return None
+            seen_sids.add(sid)
             status     = r.get(f"session:{sid}:status") or "unknown"
             auditor    = r.get(f"session:{sid}:auditor") or "SYSTEM"
             tokens     = int(r.get(f"session:{sid}:tokens") or 0)
@@ -246,9 +268,10 @@ def get_live_metrics() -> dict:
             controls   = int(r.get(f"session:{sid}:controls") or 0)
             errors     = int(r.get(f"session:{sid}:errors") or 0)
             updated_at = r.get(f"session:{sid}:updated_at") or ""
+            started_at = r.get(f"session:{sid}:started_at") or ""
             mins = int(latency // 60); secs = round(latency % 60, 1)
             lat_str = f"{mins}m {secs}s" if mins > 0 else f"0m {secs}s"
-            sessions.append({
+            return {
                 "session_id":  sid,
                 "auditor":     auditor,
                 "status":      status,
@@ -260,7 +283,31 @@ def get_live_metrics() -> dict:
                 "controls":    controls,
                 "errors":      errors,
                 "updated_at":  updated_at,
-            })
+                "started_at":  started_at,
+            }
+
+        # Active sessions first
+        for sid in active_ids:
+            row = _build_session_row(sid)
+            if row:
+                sessions.append(row)
+
+        # Completed sessions (most recent last 50, reversed so newest first)
+        raw_done = r.get("global:completed_sessions") or "[]"
+        try:
+            done_ids = list(reversed(json.loads(raw_done)))
+        except Exception:
+            done_ids = []
+        for sid in done_ids:
+            row = _build_session_row(sid)
+            if row:
+                sessions.append(row)
+
+        # Sort: running first, then done by updated_at descending
+        def _sort_key(s):
+            order = 0 if s["status"] == "running" else (1 if s["status"] == "done" else 2)
+            return (order, s.get("updated_at", ""))
+        sessions.sort(key=_sort_key)
 
         g_mins = int(global_latency // 60); g_secs = round(global_latency % 60, 1)
         g_lat_str = f"{g_mins}m {g_secs}s" if g_mins > 0 else f"0m {g_secs}s"
