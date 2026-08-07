@@ -152,37 +152,46 @@ def map_new_schema_to_legacy(finding):
     evidence_list = finding.get("evidence", [])
     evidence_quote = "NOT_FOUND"
     if evidence_list and isinstance(evidence_list, list):
-        # BUG FIX 1: Collect ALL evidence items, not just first_ev = evidence_list[0].
-        # Previously only index [0] was stored — all other quotes were discarded.
-        # Now: join all excerpts into one combined snippet (newline-separated).
+        # Collect ALL evidence excerpts (not just first)
         all_excerpts = []
-        first_doc_ref = None   # Track first real filename for evidence_location
         for ev_item in evidence_list:
             if isinstance(ev_item, dict):
                 excerpt = ev_item.get("excerpt") or ev_item.get("text") or ""
                 if excerpt and excerpt != "NOT_FOUND":
                     all_excerpts.append(excerpt.strip())
-                # BUG FIX 2: evidence_location should be the document FILENAME,
-                # not ev_item["source"] which contains the control name
-                # (e.g. "5.15 Access Control") causing "5.15 Access Control | Page/Sec 1"
-                # in the UI. Use ev_item["file"] or ev_item["filename"] first.
-                if first_doc_ref is None:
-                    doc_ref = (
-                        ev_item.get("file") or
-                        ev_item.get("filename") or
-                        ev_item.get("document") or
-                        ev_item.get("source") or ""
-                    )
-                    page_ref = ev_item.get("page") or ev_item.get("page_number") or ""
-                    if doc_ref:
-                        first_doc_ref = f"{doc_ref} | Page/Sec {page_ref}" if page_ref else doc_ref
             elif isinstance(ev_item, str) and ev_item.strip():
                 all_excerpts.append(ev_item.strip())
-
         if all_excerpts:
             evidence_quote = "\n\n".join(all_excerpts)
-        if first_doc_ref:
-            mapped["evidence_location"] = first_doc_ref
+
+    # evidence_location: prefer finding-level source which is set correctly by
+    # bg_worker (Excel scoping gate). ev_item["source"] contains LLM hallucinations
+    # like "Document Context" or "Document Text" — never use those as filenames.
+    _FAKE_SOURCES = {"document context", "document text", "n/a", "na", "none",
+                     "policy document", "uploaded document", "evidence document",
+                     "context", "evidence", "document", ""}
+    
+    # Priority 1: evidence_source_file set by safety gate (Excel scoping)
+    _loc = (
+        finding.get("evidence_source_file") or
+        finding.get("source_files") or
+        finding.get("evidence_location") or ""
+    ).strip()
+
+    # Only fall back to ev_item["source"] if it's a real filename (has an extension)
+    if not _loc or _loc.lower() in _FAKE_SOURCES:
+        for ev_item in (evidence_list if isinstance(evidence_list, list) else []):
+            if isinstance(ev_item, dict):
+                src = (ev_item.get("file") or ev_item.get("filename") or
+                       ev_item.get("document") or ev_item.get("source") or "").strip()
+                # Accept only if it looks like a real filename (has a dot extension)
+                if src and "." in src and src.lower() not in _FAKE_SOURCES:
+                    page_ref = ev_item.get("page") or ev_item.get("page_number") or ""
+                    _loc = f"{src} | Page/Sec {page_ref}" if page_ref else src
+                    break
+
+    if _loc and _loc.lower() not in _FAKE_SOURCES:
+        mapped["evidence_location"] = _loc
 
     mapped["evidence_quote"] = evidence_quote
     mapped["evidence_snippet"] = evidence_quote if evidence_quote != "NOT_FOUND" else ""

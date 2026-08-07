@@ -2985,17 +2985,23 @@ function renderFindingsList() {
                 });
             }
         } else {
+            // Resolve source doc — skip fake/generic values the LLM hallucinates
+            const _fakeSrc = new Set(["document context","document text","n/a","na","none",
+                "policy document","uploaded document","evidence document","context","evidence","document"]);
+            const _pick = (v) => v && v.trim() && !_fakeSrc.has(v.trim().toLowerCase()) ? v.trim() : null;
+            const singleDocName =
+                _pick(f.evidence_location) ||
+                _pick(f.evidence_source_file) ||
+                _pick(srcDocs[0]) ||
+                "Uploaded Evidence File";
             expandedCards.push({
                 originalFinding: f,
-                singleDocName: (f.evidence_location && f.evidence_location.trim() && f.evidence_location !== "N/A")
-                    ? f.evidence_location
-                    : ((f.evidence_source_file && f.evidence_source_file.trim() && f.evidence_source_file !== "N/A")
-                        ? f.evidence_source_file
-                        : (srcDocs[0] || "Uploaded Policy Document & Evidence Files")),
+                singleDocName,
                 singleSnippet: rawSnippet || "N/A",
                 cardId: `${f.id}`
             });
         }
+
     });
 
     expandedCards.forEach(item => {
