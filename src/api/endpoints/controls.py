@@ -154,12 +154,15 @@ async def api_parse_scope_excel(file: UploadFile = File(...)):
 
         custom_evidence = {}
         custom_documents = {}
-        matched_sls = set()
+        # BUG FIX: Use LIST not SET — two rows with same ctrl_id (e.g. two 8.17 NTP checks)
+        # must each appear so progress counter and control loop both get 8 items, not 6.
+        matched_sls_list = []
 
         for item in items:
             ctrl_id = item.get("control_id")
             ctrl_label = item.get("control_label")
-            expected_ev = item.get("expected_evidence") or item.get("question") or ""
+            question = item.get("question") or item.get("control_label") or ctrl_id
+            expected_ev = item.get("expected_evidence") or question or ""
             files = item.get("files") or item.get("raw_file_refs") or []
             files_str = ", ".join(files) if isinstance(files, list) else str(files)
 
@@ -174,11 +177,18 @@ async def api_parse_scope_excel(file: UploadFile = File(...)):
                 uc_key = matched_uc["use_case"]
                 uc_id = uc_key.split(" ")[0]
 
-                matched_sls.add(int(matched_uc["sl"]))
+                # BUG FIX: append to list so two 8.17 rows both appear
+                matched_sls_list.append(int(matched_uc["sl"]))
 
+                # BUG FIX: merge files for same ctrl_id rather than overwrite.
+                # This means both NTP evidence files end up in the mapping for 8.17.
                 for target_k in (uc_key, uc_id, ctrl_label):
                     if target_k:
-                        custom_documents[target_k] = files_str
+                        if target_k not in custom_documents or not custom_documents[target_k]:
+                            custom_documents[target_k] = files_str
+                        elif files_str and files_str not in custom_documents[target_k]:
+                            # Append additional file for same control, comma-separated
+                            custom_documents[target_k] = custom_documents[target_k] + ", " + files_str
                         if expected_ev:
                             custom_evidence[target_k] = expected_ev
 
@@ -186,12 +196,11 @@ async def api_parse_scope_excel(file: UploadFile = File(...)):
 
         return {
             "success": True,
-            "matched_sls": list(matched_sls),
+            "matched_sls": matched_sls_list,        # list with duplicates — 8 items, not 6
             "custom_evidence": custom_evidence,
             "custom_documents": custom_documents,
             "total_rows": len(items),
-
-            "message": f"Loaded {len(items)} checklist items across {len(matched_sls)} unique controls!"
+            "message": f"Successfully loaded {len(items)} Excel audit checklist items ({len(set(matched_sls_list))} unique ISO controls)."
         }
     except HTTPException:
         raise
