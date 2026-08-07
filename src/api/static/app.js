@@ -3069,19 +3069,19 @@ function renderFindingsList() {
                         if (parts.length < 2 && lowerBase.length > 3) {
                             parts = rawSnippet.split(new RegExp(baseName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
                         }
-                    if (lowerSnip.includes(lowerDoc) || lowerSnip.includes(baseName.toLowerCase())) {
-                        specificSnippet = rawSnippet;
+                        if (lowerSnip.includes(lowerDoc) || lowerSnip.includes(baseName.toLowerCase())) {
+                            specificSnippet = rawSnippet;
+                        }
                     }
-                }
-                if (specificSnippet || idx === 0) {
-                    validDocCards.push({
-                        originalFinding: f,
-                        singleDocName: docName,
-                        singleSnippet: specificSnippet,
-                        cardId: `${f.id}_doc_${idx}`
-                    });
-                }
-            });
+                    if (specificSnippet || idx === 0) {
+                        validDocCards.push({
+                            originalFinding: f,
+                            singleDocName: docName,
+                            singleSnippet: specificSnippet,
+                            cardId: `${f.id}_doc_${idx}`
+                        });
+                    }
+                });
 
             if (validDocCards.length > 0) {
                 expandedCards.push(...validDocCards);
@@ -3121,7 +3121,7 @@ function renderFindingsList() {
         const rawTitle = f.control_name || f.title || f.control_id || 'ISO Control';
 
         let cleanTitleStr = String(rawTitle).trim();
-        cleanTitleStr = cleanTitleStr.replace(/\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)$/g, '').trim(); 
+        cleanTitleStr = cleanTitleStr.replace(/\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)$/g, '').trim();
         cleanTitleStr = cleanTitleStr.replace(/^(\b[\w\s]+\b)\s+\1$/i, '$1').trim();
         if (safeCtrlId && cleanTitleStr.startsWith(safeCtrlId)) {
             cleanTitleStr = cleanTitleStr.substring(safeCtrlId.length).trim();
@@ -3150,49 +3150,188 @@ function renderFindingsList() {
             ? `<span class="badge badge-success" style="background:#10b981; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">COMPLIANT</span>`
             : `<span class="badge badge-danger" style="background:#ef4444; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">NON_COMPLIANT</span>`;
 
-        card.innerHTML = `
-            <div class="finding-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:10px; margin-bottom:12px;">
-                <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-primary);">${escapeHtml(displayHeaderTitle)}</h3>
-                <div class="badge-group" style="display:flex; gap:6px; align-items:center;">
-                    ${policyBadgeHtml}
-                    ${evidenceBadgeHtml}
-                    ${mainBadgeHtml}
-                    <span class="badge" style="background:rgba(148,163,184,0.15); color:#94a3b8; border:1px solid rgba(148,163,184,0.3); font-weight:600; padding:2px 6px; border-radius:4px; font-size:0.72rem;">N/A</span>
-                </div>
-            </div>
+        const isVapt = isVaptFinding(f);
 
-            <div class="finding-body">
-                <!-- ── FINDING DESCRIPTION ── -->
-                <div class="finding-detail-row" style="margin-bottom: 12px;">
-                    <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">FINDING DESCRIPTION</label>
-                    <p style="margin:0; font-size:0.86rem; color:var(--text-primary); line-height:1.5;">${getCleanFindingDescription(f)}</p>
-                </div>
+        if (isVapt) {
+            let _target = f.target_host || f.host || f.ip || "";
+            let _cves = f.cves || f.cve_list || [];
+            if (typeof _cves === "string") {
+                _cves = _cves.split(",").map(s => s.trim()).filter(Boolean);
+            }
+            let _pluginId = f.plugin_id || "";
+            let _tool = f.tool || f.scanner || "";
+            let _cvssVec = f.cvss_vector || f.cvss || "";
+            const _poc = String(singleSnip || f.evidence_snippet || f.evidence || "").trim();
+            const _desc = String(getCleanFindingDescription(f)).trim();
+            const _remed = String(getCleanRecommendation(f)).trim();
 
-                <!-- ── EVIDENCE SNIPPET (Single Box matching screenshot) ── -->
-                <div class="finding-detail-row" style="margin-bottom: 12px;">
-                    <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">EVIDENCE SNIPPET</label>
-                    <pre class="finding-snippet" style="margin:0; font-family:'Consolas','Fira Code',monospace; font-size:0.78rem; color:#f8fafc; background:rgba(15,23,42,0.9); padding:10px 12px; border-radius:8px; border:1px solid rgba(59,130,246,0.3); line-height:1.45; white-space:pre-wrap; word-break:break-word;">${escapeHtml(formatEvidenceSnippet(singleSnip))}</pre>
-                </div>
+            if (_poc) {
+                if (!_target) {
+                    const m = _poc.match(/Target Host:\s*(.+)/);
+                    if (m) _target = m[1].trim();
+                }
+                if (!_cves.length) {
+                    const m = _poc.match(/CVE\(s\):\s*(.+)/);
+                    if (m) {
+                        _cves = m[1].split(",").map(s => s.trim()).filter(s => s.startsWith("CVE-"));
+                    }
+                }
+                if (!_pluginId) {
+                    const m = _poc.match(/Plugin ID:\s*(.+)/);
+                    if (m) _pluginId = m[1].trim();
+                }
+                if (!_tool) {
+                    const m = _poc.match(/Scanner:\s*(.+)/);
+                    if (m) _tool = m[1].trim();
+                }
+            }
+            if (!_tool) _tool = "Scanner";
 
-                <!-- ── LEAD AUDITOR RECOMMENDATIONS ── -->
-                <div class="finding-detail-row" style="margin-bottom: 12px;">
-                    <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">LEAD AUDITOR RECOMMENDATIONS</label>
-                    <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${getCleanRecommendation(f)}</p>
-                </div>
+            let _cleanPoc = _poc;
+            if (_cleanPoc.includes("Plugin Output:\n")) {
+                _cleanPoc = _cleanPoc.split("Plugin Output:\n")[1].trim();
+            } else if (_cleanPoc.includes("Plugin Output:")) {
+                _cleanPoc = _cleanPoc.split("Plugin Output:")[1].trim();
+            } else {
+                _cleanPoc = _cleanPoc.replace(/^(Target Host|Plugin ID|CVE\(s\)|Scanner):[^\n]*\n?/gm, '').trim();
+            }
 
-                <!-- ── FOOTER: Evidence Source Location & Action Buttons ── -->
-                <div class="finding-actions" style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid rgba(148,163,184,0.15);">
-                    <div style="font-size:0.78rem; color:#2563eb; font-weight:600; display:flex; align-items:center; gap:6px;">
-                        <span>📁 Evidence Source Location: <i style="color:var(--text-muted); font-weight:400; font-style:italic;">${safeDoc}</i></span>
+            const cveBadges = _cves.length
+                ? _cves.map(cve => `<a href="https://nvd.nist.gov/vuln/detail/${cve}" target="_blank"
+                    style="font-size:0.72rem; padding:2px 7px; border-radius:4px;
+                           background:rgba(239,68,68,0.12); color:#f87171;
+                           border:1px solid rgba(239,68,68,0.3); font-weight:700;
+                           text-decoration:none; margin-right:4px;" title="View on NVD">${cve} ↗</a>`).join("")
+                : `<span style="font-size:0.72rem; color:var(--text-muted);">No CVE assigned</span>`;
+
+            let vectorHint = "";
+            if (_cvssVec) {
+                const isNetwork  = _cvssVec.includes("AV:N");
+                const noAuth     = _cvssVec.includes("PR:N");
+                const noUI       = _cvssVec.includes("UI:N");
+                const hints = [];
+                if (isNetwork)  hints.push("🌐 Exploitable Remotely");
+                if (noAuth)     hints.push("🔓 No Auth Required");
+                if (noUI)       hints.push("👤 No User Interaction");
+                vectorHint = hints.length
+                    ? `<span style="font-size:0.72rem; color:#fbbf24; margin-left:8px;">${hints.join(" · ")}</span>`
+                    : "";
+            }
+
+            const sevText = f.severity || "P3 Medium";
+            let sevBadgeHtml = "";
+            const sUpper = sevText.toUpperCase();
+            if (sUpper.includes("CRITICAL") || sUpper.includes("P1")) {
+                sevBadgeHtml = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Critical</span>`;
+            } else if (sUpper.includes("HIGH") || sUpper.includes("P2")) {
+                sevBadgeHtml = `<span class="badge" style="background:rgba(249,115,22,0.2); color:#f97316; border:1px solid rgba(249,115,22,0.4); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">High</span>`;
+            } else if (sUpper.includes("MEDIUM") || sUpper.includes("P3")) {
+                sevBadgeHtml = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Medium</span>`;
+            } else {
+                sevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.2); color:#3b82f6; border:1px solid rgba(59,130,246,0.4); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Low</span>`;
+            }
+
+            card.innerHTML = `
+                <div class="finding-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:10px; margin-bottom:12px;">
+                    <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-primary);">${escapeHtml(displayHeaderTitle)}</h3>
+                    <div class="badge-group" style="display:flex; gap:6px; align-items:center;">
+                        ${policyBadgeHtml}
+                        ${evidenceBadgeHtml}
+                        ${mainBadgeHtml}
+                        ${sevBadgeHtml}
                     </div>
-                    <div class="btn-card-group" style="display:flex; gap:8px;">
-                        <button class="btn-secondary" style="color:#10b981; font-weight:700; border-color:rgba(16,185,129,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="updateFindingWorkflowStatus(${f.id}, 'Accepted')">✓ Accept</button>
-                        <button class="btn-secondary" style="color:#3b82f6; font-weight:700; border-color:rgba(59,130,246,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick='openEditFindingModal(${findingJsonStr})'>✏️ Modify</button>
-                        <button class="btn-danger" style="font-weight:700; padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="rejectSingleDocCard(${f.id}, '${singleDoc.replace(/'/g, "\'").replace(/"/g, '&quot;')}', '${safeCtrlId}')">✕ Reject</button>
+                </div>
+
+                <div class="finding-body">
+                    <div class="finding-detail-row" style="border-left: 3px solid #f87171; padding-left: 10px; margin-bottom: 10px;">
+                        <label style="color:#f87171; font-weight:700; font-size:0.78rem; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:2px;">🎯 Target Host & Scope</label>
+                        <p style="font-family: monospace; font-size: 0.92rem; color: var(--text-primary); font-weight: 700; margin: 2px 0;">
+                            ${escapeHtml(_target || "Target Scope Evaluated")}
+                            ${_pluginId ? `<span style="font-size:0.78rem; color:var(--text-muted); font-weight:400; margin-left:10px;">Plugin ID: ${escapeHtml(_pluginId)} · ${escapeHtml(_tool)}</span>` : ""}
+                        </p>
+                    </div>
+
+                    <div class="finding-detail-row" style="margin-bottom: 10px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">🔴 CVE References (click to view on NVD)</label>
+                        <div style="margin-top: 4px;">${cveBadges}</div>
+                    </div>
+
+                    ${_cvssVec ? `
+                    <div class="finding-detail-row" style="margin-bottom: 10px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">📊 CVSS Vector</label>
+                        <p style="font-family: monospace; font-size: 0.82rem; color: #a78bfa; margin: 2px 0;">
+                            ${escapeHtml(_cvssVec)} ${vectorHint}
+                        </p>
+                    </div>` : ""}
+
+                    <div class="finding-detail-row" style="margin-bottom: 12px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">📄 Vulnerability Description</label>
+                        <p style="margin:0; font-size:0.86rem; color:var(--text-primary); line-height:1.5;">${escapeHtml(_desc)}</p>
+                    </div>
+
+                    ${_cleanPoc ? `
+                    <div class="finding-detail-row" style="margin-bottom: 12px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#34d399; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">📋 Proof of Concept (Scanner Plugin Output)</label>
+                        <pre class="finding-snippet" style="margin:0; font-family:'Consolas','Fira Code',monospace; font-size:0.78rem; color:#f8fafc; background:rgba(16,185,129,0.07); padding:10px 12px; border-radius:8px; border:1px solid rgba(16,185,129,0.2); line-height:1.45; max-height:240px; overflow-y:auto; white-space:pre-wrap; word-break:break-word;">${escapeHtml(_cleanPoc)}</pre>
+                    </div>` : ""}
+
+                    <div class="finding-detail-row" style="margin-bottom: 12px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">🔧 Recommended Remediation & Action</label>
+                        <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${escapeHtml(_remed)}</p>
+                    </div>
+
+                    <div class="finding-actions" style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid rgba(148,163,184,0.15);">
+                        <div style="font-size:0.78rem; color:#2563eb; font-weight:600; display:flex; align-items:center; gap:6px;">
+                            <span>📁 Scan File: <i style="color:var(--text-muted); font-weight:400; font-style:italic;">${safeDoc}</i></span>
+                        </div>
+                        <div class="btn-card-group" style="display:flex; gap:8px;">
+                            <button class="btn-secondary" style="color:#10b981; font-weight:700; border-color:rgba(16,185,129,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="updateFindingWorkflowStatus(${f.id}, 'Accepted')">✓ Accept</button>
+                            <button class="btn-secondary" style="color:#3b82f6; font-weight:700; border-color:rgba(59,130,246,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick='openEditFindingModal(${findingJsonStr})'>✏️ Modify</button>
+                            <button class="btn-danger" style="font-weight:700; padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="rejectSingleDocCard(${f.id}, '${singleDoc.replace(/'/g, "\'").replace(/"/g, '&quot;')}', '${safeCtrlId}')">✕ Reject</button>
+                        </div>
                     </div>
                 </div>
-            </div>
-        `;
+            `;
+        } else {
+            card.innerHTML = `
+                <div class="finding-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:10px; margin-bottom:12px;">
+                    <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-primary);">${escapeHtml(displayHeaderTitle)}</h3>
+                    <div class="badge-group" style="display:flex; gap:6px; align-items:center;">
+                        ${policyBadgeHtml}
+                        ${evidenceBadgeHtml}
+                        ${mainBadgeHtml}
+                    </div>
+                </div>
+
+                <div class="finding-body">
+                    <div class="finding-detail-row" style="margin-bottom: 12px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">FINDING DESCRIPTION</label>
+                        <p style="margin:0; font-size:0.86rem; color:var(--text-primary); line-height:1.5;">${getCleanFindingDescription(f)}</p>
+                    </div>
+
+                    <div class="finding-detail-row" style="margin-bottom: 12px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">EVIDENCE SNIPPET</label>
+                        <pre class="finding-snippet" style="margin:0; font-family:'Consolas','Fira Code',monospace; font-size:0.78rem; color:#f8fafc; background:rgba(15,23,42,0.9); padding:10px 12px; border-radius:8px; border:1px solid rgba(59,130,246,0.3); line-height:1.45; white-space:pre-wrap; word-break:break-word;">${escapeHtml(formatEvidenceSnippet(singleSnip))}</pre>
+                    </div>
+
+                    <div class="finding-detail-row" style="margin-bottom: 12px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">LEAD AUDITOR RECOMMENDATIONS</label>
+                        <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${getCleanRecommendation(f)}</p>
+                    </div>
+
+                    <div class="finding-actions" style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid rgba(148,163,184,0.15);">
+                        <div style="font-size:0.78rem; color:#2563eb; font-weight:600; display:flex; align-items:center; gap:6px;">
+                            <span>📁 Evidence Source Location: <i style="color:var(--text-muted); font-weight:400; font-style:italic;">${safeDoc}</i></span>
+                        </div>
+                        <div class="btn-card-group" style="display:flex; gap:8px;">
+                            <button class="btn-secondary" style="color:#10b981; font-weight:700; border-color:rgba(16,185,129,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="updateFindingWorkflowStatus(${f.id}, 'Accepted')">✓ Accept</button>
+                            <button class="btn-secondary" style="color:#3b82f6; font-weight:700; border-color:rgba(59,130,246,0.4); padding:4px 12px; border-radius:5px; cursor:pointer;" onclick='openEditFindingModal(${findingJsonStr})'>✏️ Modify</button>
+                            <button class="btn-danger" style="font-weight:700; padding:4px 12px; border-radius:5px; cursor:pointer;" onclick="rejectSingleDocCard(${f.id}, '${singleDoc.replace(/'/g, "\'").replace(/"/g, '&quot;')}', '${safeCtrlId}')">✕ Reject</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
         container.appendChild(card);
     });
 

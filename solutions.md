@@ -95,3 +95,30 @@ Four dedicated REST endpoints in `src/api/endpoints/logs.py` support per-auditor
 | **Slot Allocation** | Fixed / Single Thread | **Dynamic (`2x CPU Cores`)** |
 | **Timeouts / Errors** | Common 504 Gateway Timeouts | **0 Timeouts (Adaptive Scale)** |
 | **Port Release Latency** | 100ms - 500ms | **Sub-millisecond (< 1ms)** |
+
+---
+
+## 7. VAPT Finding Card UI Architecture & Display Specifications
+
+The **Audit Records & Compliance Gaps Workspace** formats VAPT vulnerability finding records with structured UI elements:
+
+### Card Visual Structure
+1. **Header & Control Identifier**:
+   - Format: `VAPT-{ID} {Vulnerability Title}` (e.g., `VAPT-12 ASP.NET Core SEoL`).
+2. **Compliance Badges**:
+   - **Policy Badge**: `✕ Policy: Non-Compliant` / `✓ Policy: Compliant`
+   - **Evidence Badge**: `✓ Evidence: Present` / `⚠ Evidence: Missing`
+   - **Status Badge**: `NON_COMPLIANT` / `COMPLIANT`
+3. **Finding Description**:
+   - High-level technical impact and risk explanation (e.g. vendor EOL, unpatched vulnerability impact).
+4. **Technical Evidence Snippet Box**:
+   - Dark monospaced console block (`rgba(15,23,42,0.9)`) rendering exact scanner proof:
+     ```text
+     Target Host: <IP / Hostname>
+     Plugin ID: <ID>
+     Scanner: <Nessus / Burp / Qualys / OpenVAS>
+     Plugin Output: <Path, Installed Version, End-of-Life details>
+     ```
+5. **Lead Auditor Recommendations**:
+   - Actionable remediation advice (e.g., *"Upgrade to a version of ASP.NET Core that is currently supported."*).
+
