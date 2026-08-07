@@ -2828,8 +2828,13 @@ function formatStructuredPoc(pocText) {
         .replace(/([^\n])\s*(Path\s*:)/gi, "$1\n• Installation Path           :")
         .replace(/([^\n])\s*(Installed version\s*:)/gi, "$1\n• Installed Version           :")
         .replace(/([^\n])\s*(Security End of Life\s*:)/gi, "$1\n• Security End-of-Life Date   :")
-        .replace(/([^\n])\s*(Time since Security End of Life \(Est\.\)\s*:)/gi, "$1\n• Time Since EoL (Estimated)  :")
-    function formatEvidenceSnippet(snip) {
+        .replace(/([^\n])\s*(Time since Security End of Life \(Est\.\)\s*:)/gi, "$1\n• Time Since EoL (Estimated)  :");
+
+    return clean.trim();
+}
+
+function formatEvidenceSnippet(snip) {
+
     if (!snip) return "No specific evidence quote found in document.";
     if (typeof snip !== "string") snip = String(snip);
     snip = snip.trim();
