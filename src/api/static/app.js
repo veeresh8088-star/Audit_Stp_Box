@@ -3283,6 +3283,11 @@ function renderFindingsList() {
 
         const isVapt = isVaptFinding(f);
 
+        // ── Safe-escape variables used in onclick handlers for BOTH VAPT and ISO cards ──
+        // Must be declared here (before if/else) to be in scope for both branches.
+        const safeRemedForClick = escapeHtml(getCleanRecommendation(f)).replace(/'/g, "\\'");
+        const safeDocForClick = escapeHtml(singleDoc).replace(/'/g, "\\'");
+
         if (isVapt) {
             let _target = f.target_host || f.host || f.ip || "";
             let _cves = f.cves || f.cve_list || [];
@@ -3360,9 +3365,6 @@ function renderFindingsList() {
             } else {
                 sevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.2); color:#3b82f6; border:1px solid rgba(59,130,246,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Low (CVSS 2.5)</span>`;
             }
-
-            const safeRemedForClick = escapeHtml(_remed).replace(/'/g, "\\\\'");
-            const safeDocForClick = escapeHtml(singleDoc).replace(/'/g, "\\\\'");
 
             card.innerHTML = `
                 <div class="finding-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:10px; margin-bottom:12px;">
