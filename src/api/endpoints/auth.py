@@ -4,6 +4,9 @@ from typing import Optional
 import pyotp
 import qrcode
 import time
+import os
+import jwt
+from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 import base64
 from io import BytesIO
@@ -16,6 +19,35 @@ from src.core.auth import (
 from src.db.database import SessionLocal, User, force_master
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+# ── JWT Configuration ─────────────────────────────────────────────────────────
+_JWT_SECRET  = os.environ.get("JWT_SECRET", "aicyberauditbox-change-this-in-production-2026")
+_JWT_ALGO    = "HS256"
+_JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
+
+def _create_token(username: str, role: str) -> str:
+    """Create a signed JWT token with username, role, and expiry."""
+    payload = {
+        "sub": username,
+        "role": role,
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=_JWT_EXPIRY_HOURS)
+    }
+    return jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGO)
+
+def _require_auth(request: Request) -> dict:
+    """Validates the JWT token in the Authorization header. Returns {username, role} or raises 401."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized. A valid authentication token is required.")
+    token = auth_header[len("Bearer "):].strip()
+    try:
+        payload = jwt.decode(token, _JWT_SECRET, algorithms=[_JWT_ALGO])
+        return {"username": payload.get("sub"), "role": payload.get("role")}
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Session expired. Please log in again.")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token. Please log in again.")
 
 # --- Request / Response Schemas ---
 class RegisterRequest(BaseModel):
@@ -47,7 +79,6 @@ RATE_WINDOW_SECONDS = 60
 def _check_rate_limit(ip: str):
     """Raises HTTP 429 if more than MAX_ATTEMPTS login attempts in RATE_WINDOW_SECONDS."""
     now = time.time()
-    # Remove old attempts outside the window
     _login_attempts[ip] = [t for t in _login_attempts[ip] if now - t < RATE_WINDOW_SECONDS]
     if len(_login_attempts[ip]) >= MAX_ATTEMPTS:
         raise HTTPException(
@@ -55,16 +86,6 @@ def _check_rate_limit(ip: str):
             detail=f"Too many login attempts. Please wait {RATE_WINDOW_SECONDS} seconds before trying again."
         )
     _login_attempts[ip].append(now)
-
-# --- Simple Token Validator (checks mock token format until real JWT is implemented) ---
-def _require_auth(request: Request):
-    """Validates that a valid Authorization Bearer token is present in the request header."""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer mock-jwt-token-"):
-        raise HTTPException(
-            status_code=401,
-            detail="Unauthorized. A valid authentication token is required."
-        )
 
 # --- Endpoints ---
 
@@ -151,7 +172,7 @@ def api_verify_otp(req: VerifyOTPRequest, request: Request):
             "success": True,
             "username": user.username,
             "role": user.role,
-            "token": f"mock-jwt-token-{user.username}-{user.role}"
+            "token": _create_token(user.username, user.role)
         }
     else:
         raise HTTPException(status_code=400, detail="Invalid OTP code. Please enter the 6-digit code from your Google Authenticator app.")

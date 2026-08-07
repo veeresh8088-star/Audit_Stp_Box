@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, File, UploadFile
+from fastapi import APIRouter, HTTPException, Query, File, UploadFile, Request
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from src.db.database import (
@@ -8,6 +8,7 @@ from src.db.database import (
     delete_custom_control
 )
 from src.ai.keyword_generator import generate_keywords
+from src.api.endpoints.auth import _require_auth
 
 router = APIRouter(prefix="/controls", tags=["Manage Controls"])
 
@@ -33,18 +34,19 @@ class AutogenKeywordsRequest(BaseModel):
 # --- Endpoints ---
 
 @router.get("")
-def api_get_controls(active_only: bool = Query(True, description="Filter for active controls only")):
+def api_get_controls(request: Request, active_only: bool = Query(True)):
+    _require_auth(request)
     try:
         controls = get_all_custom_controls(active_only=active_only)
         return {"success": True, "controls": controls}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to load controls.")
 
 @router.post("")
-def api_create_control(req: CreateControlRequest):
+def api_create_control(request: Request, req: CreateControlRequest):
+    _require_auth(request)
     if not req.control_id.strip() or not req.control_name.strip():
         raise HTTPException(status_code=400, detail="Control ID and Control Name are required.")
-    
     try:
         new_id = add_custom_control(
             control_id=req.control_id.strip(),
@@ -57,22 +59,23 @@ def api_create_control(req: CreateControlRequest):
             is_global=req.is_global
         )
         return {"success": True, "message": "Control saved successfully", "id": new_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save control: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to save control.")
 
 @router.post("/autogen-keywords")
-def api_autogen_keywords(req: AutogenKeywordsRequest):
+def api_autogen_keywords(request: Request, req: AutogenKeywordsRequest):
+    _require_auth(request)
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Control name is required for keyword generation.")
-    
     try:
         keywords = generate_keywords(req.name.strip(), req.description.strip())
         return {"success": True, "keywords": keywords}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI keyword generation failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Keyword generation failed.")
 
 @router.put("/{db_id}")
-def api_update_control(db_id: int, req: UpdateControlRequest):
+def api_update_control(request: Request, db_id: int, req: UpdateControlRequest):
+    _require_auth(request)
     try:
         success = update_custom_control(
             control_db_id=db_id,
@@ -83,46 +86,43 @@ def api_update_control(db_id: int, req: UpdateControlRequest):
         if not success:
             raise HTTPException(status_code=404, detail="Control not found in database.")
         return {"success": True, "message": "Control updated successfully"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database update failed: {e}")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to update control.")
 
 @router.delete("/{db_id}")
-def api_delete_control(db_id: int, soft: bool = Query(True, description="Soft delete (deactivate) or hard delete")):
+def api_delete_control(request: Request, db_id: int, soft: bool = Query(True)):
+    user = _require_auth(request)
+    if user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied.")
     try:
         success = delete_custom_control(control_db_id=db_id, soft=soft)
         if not success:
             raise HTTPException(status_code=404, detail="Control not found in database.")
         action_type = "deactivated" if soft else "deleted"
         return {"success": True, "message": f"Control successfully {action_type}"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database deletion failed: {e}")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to delete control.")
 
 @router.get("/framework")
-def api_get_framework_controls():
+def api_get_framework_controls(request: Request):
+    _require_auth(request)
     """Returns combined list of standard ISO/VAPT framework controls and custom controls."""
     try:
         from src.core.controls_data import USE_CASES
         from src.core.bg_worker import _load_custom_use_cases
-        
         customs = _load_custom_use_cases(force=True)
         combined = []
         for uc in USE_CASES:
-            combined.append({
-                "sl": uc["sl"],
-                "use_case": uc["use_case"],
-                "label": uc["label"],
-                "category": uc["category"]
-            })
+            combined.append({"sl": uc["sl"], "use_case": uc["use_case"], "label": uc["label"], "category": uc["category"]})
         for c in customs:
-            combined.append({
-                "sl": c["sl"],
-                "use_case": c["use_case"],
-                "label": c["label"],
-                "category": c["category"]
-            })
+            combined.append({"sl": c["sl"], "use_case": c["use_case"], "label": c["label"], "category": c["category"]})
         return {"success": True, "controls": combined}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to load framework controls.")
 
 @router.post("/parse-scope-excel")
 async def api_parse_scope_excel(file: UploadFile = File(...)):

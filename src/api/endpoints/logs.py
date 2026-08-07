@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from typing import Optional
 import os
 from src.db.database import (
@@ -8,6 +8,7 @@ from src.db.database import (
     purge_old_logs,
     force_master
 )
+from src.api.endpoints.auth import _require_auth
 
 router = APIRouter(prefix="/logs", tags=["Admin Logs"])
 
@@ -15,6 +16,7 @@ LOG_PATH = "data/audit_run_latency.log"
 
 @router.get("/system")
 def api_get_system_events(
+    request: Request,
     severity: str = Query("All", description="Filter by severity level"),
     event_type: str = Query("", description="Filter by event type substring"),
     session_id: Optional[str] = Query(None, description="Filter by session ID"),
@@ -22,6 +24,7 @@ def api_get_system_events(
     page: int = Query(0, ge=0),
     page_size: int = Query(20, ge=1, le=100)
 ):
+    _require_auth(request)  # Admin/auditor auth required
     db = SessionLocal()
     try:
         query = db.query(SystemEvent)
@@ -57,16 +60,18 @@ def api_get_system_events(
             "total_count": total_count,
             "total_pages": (total_count + page_size - 1) // page_size
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch system events: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to fetch system events.")
     finally:
         db.close()
 
 @router.get("/audit-trail")
 def api_get_audit_trail(
+    request: Request,
     page: int = Query(0, ge=0),
     page_size: int = Query(20, ge=1, le=100)
 ):
+    _require_auth(request)  # Auth required
     db = SessionLocal()
     try:
         query = db.query(AuditTrail)
@@ -92,13 +97,14 @@ def api_get_audit_trail(
             "total_count": total_count,
             "total_pages": (total_count + page_size - 1) // page_size
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch audit trail: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to fetch audit trail.")
     finally:
         db.close()
 
 @router.get("/developer")
-def api_get_developer_logs():
+def api_get_developer_logs(request: Request):
+    _require_auth(request)  # Auth required — logs contain sensitive server info
     if not os.path.exists(LOG_PATH):
         return {"success": True, "logs": "", "message": "No logs recorded yet."}
     
@@ -110,22 +116,28 @@ def api_get_developer_logs():
         raise HTTPException(status_code=500, detail=f"Failed to read developer log file: {e}")
 
 @router.delete("/developer")
-def api_clear_developer_logs():
+def api_clear_developer_logs(request: Request):
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     try:
         if os.path.exists(LOG_PATH):
             os.remove(LOG_PATH)
             return {"success": True, "message": "Developer log file successfully cleared."}
         return {"success": True, "message": "No log file existed to delete."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete log file: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to delete log file.")
 
 @router.post("/purge")
-def api_purge_logs(days: int = Query(90, ge=1)):
+def api_purge_logs(request: Request, days: int = Query(90, ge=1)):
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     try:
         deleted = purge_old_logs(days=days)
         return {"success": True, "message": f"Successfully purged {deleted} events older than {days} days."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to purge logs: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to purge logs.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -155,8 +167,7 @@ def api_get_live_metrics():
             "avg_latency_per_ctrl_str": "0m 0.0s",
             "global_files": 0,
             "global_errors": 0,
-            "active_sessions": [],
-            "_error": str(e)
+            "active_sessions": []
         }
 
 
@@ -224,8 +235,10 @@ def _fetch_benchmark_records(auditor_user: Optional[str] = None) -> list:
 
 @router.get("/system/export-excel")
 def api_export_system_logs_excel(
+    request: Request,
     auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
 ):
+    _require_auth(request)
     """
     Download System Audit Event Logs as a styled Excel (.xlsx) file.
     Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
@@ -238,8 +251,8 @@ def api_export_system_logs_excel(
     out  = f"data/tmp/System_Event_Logs_{slug}_{ts}.xlsx"
     try:
         generate_excel_system_logs_report(logs, out)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Excel export failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
     return _FileResponse(
         path=out,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -250,8 +263,10 @@ def api_export_system_logs_excel(
 
 @router.get("/system/export-pdf")
 def api_export_system_logs_pdf(
+    request: Request,
     auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
 ):
+    _require_auth(request)
     """
     Download System Audit Event Logs as an executive PDF (.pdf) file.
     Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
@@ -264,8 +279,8 @@ def api_export_system_logs_pdf(
     out  = f"data/tmp/System_Event_Logs_{slug}_{ts}.pdf"
     try:
         generate_pdf_system_logs_report(logs, out)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF export failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
     return _FileResponse(
         path=out,
         media_type="application/pdf",
@@ -276,8 +291,10 @@ def api_export_system_logs_pdf(
 
 @router.get("/benchmark/export-excel")
 def api_export_benchmark_excel(
+    request: Request,
     auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
 ):
+    _require_auth(request)
     """
     Download Telemetry Benchmark Report as a styled Excel (.xlsx) file.
     Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
@@ -290,8 +307,8 @@ def api_export_benchmark_excel(
     out     = f"data/tmp/Executive_Telemetry_Report_{slug}_{ts}.xlsx"
     try:
         generate_excel_benchmark_report(records, out)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Excel export failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
     return _FileResponse(
         path=out,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -302,8 +319,10 @@ def api_export_benchmark_excel(
 
 @router.get("/benchmark/export-pdf")
 def api_export_benchmark_pdf(
+    request: Request,
     auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
 ):
+    _require_auth(request)
     """
     Download Telemetry Benchmark Report as an executive PDF (.pdf) file.
     Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
@@ -316,8 +335,8 @@ def api_export_benchmark_pdf(
     out     = f"data/tmp/Executive_Telemetry_Report_{slug}_{ts}.pdf"
     try:
         generate_pdf_benchmark_report(records, out, auditor_filter=auditor_user)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"PDF export failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
     return _FileResponse(
         path=out,
         media_type="application/pdf",

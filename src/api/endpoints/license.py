@@ -5,10 +5,11 @@ Implements Time-Bound & Audit-Count Limited Free Trial & Token-to-Rupee Billing.
 """
 
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from src.db.database import SessionLocal, LicenseWallet, TokenUsageLog, force_master
+from src.api.endpoints.auth import _require_auth
 
 router = APIRouter(prefix="/api/license", tags=["License & Token Billing"])
 
@@ -49,8 +50,9 @@ def _get_or_create_default_wallet(db):
         return wallet
 
 @router.get("/wallet")
-def get_license_wallet_status():
+def get_license_wallet_status(request: Request):
     """Returns real-time trial license status, Rupee token balance, and remaining audits."""
+    _require_auth(request)
     db = SessionLocal()
     try:
         wallet = _get_or_create_default_wallet(db)
@@ -89,8 +91,11 @@ def get_license_wallet_status():
         db.close()
 
 @router.post("/activate")
-def activate_license(req: LicenseActivateRequest):
-    """Activates an enterprise key or recharges trial credit balance."""
+def activate_license(request: Request, req: LicenseActivateRequest):
+    """Activates an enterprise key or recharges trial credit balance. Admin only."""
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     db = SessionLocal()
     try:
         key_clean = req.license_key.strip().upper()
@@ -142,8 +147,9 @@ def activate_license(req: LicenseActivateRequest):
         db.close()
 
 @router.post("/deduct")
-def deduct_tokens(req: TokenDeductRequest):
+def deduct_tokens(request: Request, req: TokenDeductRequest):
     """Deducts tokens from active wallet balance and logs token transaction."""
+    _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():

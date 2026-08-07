@@ -976,8 +976,8 @@ def api_export_benchmark_excel():
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         raise HTTPException(status_code=404, detail="Benchmark report not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to generate report. Please try again.")
 
 
 
@@ -1027,8 +1027,8 @@ def api_deliver_report(
             db.commit()
             
         return {"success": True, "message": f"Report successfully delivered to auditee '{target_user.username if target_user else raw_target}'."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Operation failed. Please try again.")
     finally:
         db.close()
 
@@ -1243,8 +1243,8 @@ def api_get_chat_history(session_id: str, username: Optional[str] = None):
                 "created_at": str(m.created_at)
             })
         return {"success": True, "messages": res}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
     finally:
         db.close()
 
@@ -1262,8 +1262,8 @@ def api_clear_chat_session(session_id: str = Form(...), username: Optional[str] 
             db.query(AuditCheckpoint).filter(AuditCheckpoint.session_id == session_id).delete()
             db.commit()
         return {"success": True, "message": "Chat history cleared successfully."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
 # ── COMPANY LOGO MANAGEMENT ENDPOINTS ──────────────────────────────────────
 
 @router.post("/upload-logo")
@@ -1296,8 +1296,8 @@ def api_reset_company_logo():
         if os.path.exists(logo_path):
             os.remove(logo_path)
         return {"success": True, "message": "Reset to default template logo"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Reset logo failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Reset logo failed. Please try again.")
 
 
 @router.get("/export/docx")
@@ -1369,8 +1369,8 @@ def api_export_docx(session_id: str, saved_only: bool = False, auditor_logo_path
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 headers={"Content-Disposition": f"attachment; filename={fw_name}_Report.docx"}
             )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Operation failed. Please try again.")
     finally:
         db.close()
 
@@ -1508,8 +1508,8 @@ Provide a clear, helpful, professional, and directly relevant answer as an exper
             "reply": assistant_reply,
             "response": assistant_reply
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
     finally:
         db.close()
 
@@ -1608,8 +1608,8 @@ def api_export_pdf(session_id: str, saved_only: bool = False, auditor_logo_path:
                 media_type="application/pdf",
                 headers={"Content-Disposition": f"attachment; filename={fw_name}_Report.pdf"}
             )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
     finally:
         db.close()
 
