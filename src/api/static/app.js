@@ -2829,60 +2829,7 @@ function formatStructuredPoc(pocText) {
         .replace(/([^\n])\s*(Installed version\s*:)/gi, "$1\n• Installed Version           :")
         .replace(/([^\n])\s*(Security End of Life\s*:)/gi, "$1\n• Security End-of-Life Date   :")
         .replace(/([^\n])\s*(Time since Security End of Life \(Est\.\)\s*:)/gi, "$1\n• Time Since EoL (Estimated)  :")
-        .replace(/([^\n])\s*(Service\s*:)/gi, "$1\n• Target Service              :")
-        .replace(/([^\n])\s*(Port\s*:)/gi, "$1\n• Target Port                 :")
-        .replace(/([^\n])\s*(URL\s*:)/gi, "$1\n• Target URL                  :")
-        .replace(/([^\n])\s*(Parameter\s*:)/gi, "$1\n• Affected Parameter          :")
-        .replace(/([^\n])\s*(Method\s*:)/gi, "$1\n• HTTP Request Method         :");
-
-    // If starts with IP/Port like 13.126.199.93 (tcp/0), add a clean header
-    clean = clean.replace(/^([0-9\.]+\s*\([a-z0-9\/]+\))/i, "Target Endpoint: $1\n");
-
-    return clean.trim();
-}
-
-function _cleanOcrText(raw) {
-    if (!raw) return "";
-    let cleaned = raw
-        .replace(/Irrox\s+sudarsnanzatna\s+wom/gi, "")
-        .replace(/Privilcged/gi, "Privileged")
-        .replace(/Accs\s*:\s*Manager/gi, "Access Manager")
-        .replace(/Ask\s+Gemini\s+Holsecure/gi, "")
-        .replace(/Irrox\s+sudarsnanzatna\s+wom/gi, "")
-        .replace(/Irrox|sudarsnanzatna|wom/gi, "")
-        .replace(/0tte5\/\//gi, "https://")
-        .replace(/Wceneme/gi, "Welcome")
-        .replace(/O4uth2/gi, "OAuth2")
-        .replace(/opentext/gi, "OpenText")
-        .replace(/Cojmijhi[^\s]*/gi, "")
-        .replace(/Cern\s+Te[^\s]*/gi, "")
-        .replace(/AvikyedMtess/gi, "Access")
-        .replace(/Nalsecuie/gi, "NetIQ")
-        .replace(/pamy#/gi, "pam/#")
-        .replace(/fuserConsoleH/gi, "User Console")
-        .replace(/Iome\/privSessions/gi, "Home/Privileged Sessions")
-        .replace(/Inccgnito/gi, "Incognito")
-        .replace(/Minager/gi, "Manager")
-        .replace(/Accrss/gi, "Access")
-        .replace(/EDIRECTORMFaJhar/gi, "eDirectory / IAM")
-        .replace(/Sstjn\?/gi, "Sessions")
-        .replace(/Rzolasts/gi, "")
-        .replace(/Chectoue/gi, "Checkout")
-        .replace(/Selcctcd/gi, "Selected")
-        .replace(/typE\s+No/gi, "Type: Active")
-        .replace(/\s+/g, " ")
-        .trim();
-    return cleaned;
-}
-
-function _isOcrNoiseText(snip) {
-    if (!snip || typeof snip !== "string") return false;
-    return snip.includes("[Embedded Image OCR]") ||
-        /timedatectl|ntp\s+enabled|ntp\s+synchronized|privilcged|wceneme|o4uth2|pamy#|fuserconsole|inccgnito|opentext|nalsecuie|avikyed|cojmijhi|sudarsnanzatna|irrox|wom/i.test(snip) ||
-        (/https?:\/\/[0-9\.]+/i.test(snip) && /pam|login|privilege|access/i.test(snip));
-}
-
-function formatEvidenceSnippet(snip) {
+    function formatEvidenceSnippet(snip) {
     if (!snip) return "No specific evidence quote found in document.";
     if (typeof snip !== "string") snip = String(snip);
     snip = snip.trim();
@@ -2895,6 +2842,52 @@ function formatEvidenceSnippet(snip) {
         return "System Screenshot Evidence verified via Optical Character Recognition (OCR).";
     }
 
+    // ── Structure CloudWatch & System Monitoring OCR Evidence ──
+    const lowerSnip = snip.toLowerCase();
+    const isCloudWatchOrMetrics = /cloudwatch|aws\/ec2|mem_used|cpuutilization|ebswriteops|ebsreadops|srit-monitoring/i.test(snip);
+
+    if (isCloudWatchOrMetrics) {
+        let bullets = [];
+        
+        // Extract EC2 instances cleanly
+        const ec2Matches = Array.from(snip.matchAll(/i-[0-9a-f]{17}/gi)).map(m => m[0]);
+        const uniqueEc2 = Array.from(new Set(ec2Matches));
+        
+        // Extract App/Instance Labels
+        const appMatches = Array.from(snip.matchAll(/(App\d+|Web\d+|numedist[a-z0-9]+)/gi)).map(m => m[0]);
+        const uniqueApps = Array.from(new Set(appMatches));
+
+        // Extract Monitored Metrics
+        let metrics = [];
+        if (/mem_used/i.test(snip)) metrics.push("Memory Utilization (mem_used)");
+        if (/cpuutilization|cpu/i.test(snip)) metrics.push("CPU Utilization (CPUUtilization)");
+        if (/ebswriteops|ebsreadops|ebs/i.test(snip)) metrics.push("EBS Storage I/O Operations (Read/Write Ops)");
+
+        bullets.push("📊 CLOUDWATCH MONITORING DASHBOARD EVIDENCE:");
+        if (uniqueEc2.length > 0) {
+            bullets.push(`• Monitored EC2 Instance IDs: ${uniqueEc2.join(", ")}`);
+        }
+        if (uniqueApps.length > 0) {
+            bullets.push(`• System Workload Targets: ${uniqueApps.join(", ")}`);
+        }
+        if (metrics.length > 0) {
+            bullets.push(`• Active Resource Metrics: ${metrics.join(" | ")}`);
+        }
+
+        // Clean up repeated raw text snippet for the raw excerpt box
+        let cleanExcerpt = snip
+            .replace(/(AWS\/EC2\s+i-[0-9a-f]{17}\s*\([^)]*\)\s*)+/gi, "AWS/EC2 Instance ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        if (cleanExcerpt.length > 350) {
+            cleanExcerpt = cleanExcerpt.slice(0, 350) + "...";
+        }
+
+        return `${bullets.join("\n")}\n\n[Cleaned Dashboard Metric Excerpt]:\n"${cleanExcerpt}"`;
+    }
+
+    // ── Structure OCR Noise Text ──
     if (_isOcrNoiseText(snip)) {
         const rawOcr = snip.replace(/^\[Embedded Image OCR\]:\s*/i, "").trim();
         let cleanedOcr = _cleanOcrText(rawOcr);
@@ -2918,12 +2911,23 @@ function formatEvidenceSnippet(snip) {
         let summaryHeader = /timedatectl|ntp/i.test(rawOcr)
             ? "🖼️ SCREENSHOT EVIDENCE EXCERPT (System Time & Clock Synchronization Console):"
             : "🖼️ SCREENSHOT EVIDENCE EXCERPT (Privileged Access Management System):";
+
         let bulletText = detectedItems.length > 0 ? detectedItems.join("\n") : "• Embedded System Screenshot verified via Optical Character Recognition (OCR).";
 
         return `${summaryHeader}\n${bulletText}\n\n[Extracted & Cleaned Screenshot Evidence Text]:\n"${cleanedOcr}"`;
     }
+
+    // Handle multi-line / multiple quotes nicely with bullet formatting
+    if (snip.includes("\n\n")) {
+        const parts = snip.split("\n\n").map(p => p.trim()).filter(Boolean);
+        if (parts.length > 1) {
+            return parts.map((p, idx) => `[Evidence Quote ${idx + 1}]:\n"${p}"`).join("\n\n");
+        }
+    }
+
     return snip;
 }
+
 
 function getCleanFindingDescription(f) {
     if (!f) return "Control evaluation performed against compliance requirements.";
