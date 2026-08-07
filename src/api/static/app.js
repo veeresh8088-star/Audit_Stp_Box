@@ -3322,8 +3322,6 @@ function renderFindingsList() {
                 <div class="finding-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:10px; margin-bottom:12px;">
                     <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-primary);">${escapeHtml(displayHeaderTitle)}</h3>
                     <div class="badge-group" style="display:flex; gap:6px; align-items:center;">
-                        ${policyBadgeHtml}
-                        ${evidenceBadgeHtml}
                         ${mainBadgeHtml}
                         ${sevBadgeHtml}
                     </div>
@@ -3358,12 +3356,15 @@ function renderFindingsList() {
 
                     ${_cleanPoc ? `
                     <div class="finding-detail-row" style="margin-bottom: 12px;">
-                        <label style="font-weight:700; font-size:0.78rem; color:#34d399; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">📋 Proof of Concept (Scanner Plugin Output)</label>
-                        <pre class="finding-snippet" style="margin:0; font-family:'Consolas','Fira Code',monospace; font-size:0.78rem; color:#f8fafc; background:rgba(16,185,129,0.07); padding:10px 12px; border-radius:8px; border:1px solid rgba(16,185,129,0.2); line-height:1.45; max-height:240px; overflow-y:auto; white-space:pre-wrap; word-break:break-word;">${escapeHtml(_cleanPoc)}</pre>
+                        <label style="font-weight:700; font-size:0.78rem; color:#10b981; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">📋 Proof of Concept (Scanner Plugin Output)</label>
+                        <pre class="finding-snippet" style="margin:0; font-family:'Consolas','Fira Code',monospace; font-size:0.78rem; color:#064e3b; background:rgba(16,185,129,0.08); padding:10px 12px; border-radius:8px; border:1px solid rgba(16,185,129,0.25); line-height:1.45; max-height:240px; overflow-y:auto; white-space:pre-wrap; word-break:break-word; font-weight:600;">${escapeHtml(_cleanPoc)}</pre>
                     </div>` : ""}
 
                     <div class="finding-detail-row" style="margin-bottom: 12px;">
-                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">🔧 Recommended Remediation & Action</label>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label style="font-weight:700; font-size:0.78rem; color:#3b82f6; text-transform:uppercase; letter-spacing:0.5px;">🔧 Recommended Remediation & Action</label>
+                            <button type="button" onclick="navigator.clipboard.writeText('${escapeHtml(_remed).replace(/'/g, "\\'")}'); showToastBanner('Remediation script copied to clipboard!');" style="padding:2px 8px; font-size:0.72rem; border-radius:4px; border:1px solid rgba(59,130,246,0.4); background:rgba(59,130,246,0.1); color:#3b82f6; font-weight:700; cursor:pointer;">📋 Copy Fix Command</button>
+                        </div>
                         <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${escapeHtml(_remed)}</p>
                     </div>
 
