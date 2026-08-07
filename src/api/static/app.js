@@ -710,6 +710,10 @@ function openNewSessionModal() {
 function closeNewSessionModal() {
     const modal = document.getElementById("new-session-modal");
     if (modal) modal.style.display = "none";
+    // If no active session yet (user cancelled on first login), create a default-named session silently
+    if (!activeSessionId || activeSessionId === "") {
+        startNewAuditSession(true);
+    }
 }
 
 function handleNewSessionSubmit(e) {
@@ -884,9 +888,12 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
 }
 
 async function loadOrCreateSession(user) {
-    // When newly opening the app, check for interrupted sessions first!
-    await startNewAuditSession(true);
+    // Check for interrupted sessions first
     await checkInterruptedAuditSessions();
+    // If no interrupted session was resumed, show the naming modal immediately on first login
+    if (!currentInterruptedSession) {
+        openNewSessionModal();
+    }
 }
 
 let currentInterruptedSession = null;
