@@ -1350,6 +1350,7 @@ def api_export_docx(session_id: str, saved_only: bool = False, auditor_logo_path
                     
                 findings_mapped.append({
                     "control_id": f.control_id,
+                    "control_name": f.control_name or f.control_id,
                     "control": f.control_name or f.control_id,
                     "clause": "ISO 27001 Annex A",
                     "finding": f.description or f.gap_detected or "",
@@ -1361,7 +1362,9 @@ def api_export_docx(session_id: str, saved_only: bool = False, auditor_logo_path
                     "recommendation": f.recommendation or "",
                     "evidence_snippet": f.evidence_snippet or "",
                     "evidence_quote": f.evidence_snippet or "",
-                    "source_files": f.source_files or ""
+                    "source_files": f.source_files or "",
+                    "reasoning": f.reasoning or "",
+                    "gap_description": f.description or f.gap_detected or "",
                 })
                 if f.status == "Compliant":
                     resolved_list.append(f.control_id)
@@ -1568,6 +1571,7 @@ def api_export_pdf(session_id: str, saved_only: bool = False, auditor_logo_path:
 
                 findings_mapped.append({
                     "control_id": f.control_id,
+                    "control_name": f.control_name or f.control_id,
                     "title": f.control_name or f.control_id,
                     "finding": f.control_name or f.description or "",
                     "control": f.control_name or f.control_id,
@@ -1583,7 +1587,9 @@ def api_export_pdf(session_id: str, saved_only: bool = False, auditor_logo_path:
                     "recommendation": f.recommendation or "",
                     "evidence_snippet": f.evidence_snippet or "",
                     "evidence_quote": f.evidence_snippet or "",
-                    "source_files": f.source_files or ""
+                    "source_files": f.source_files or "",
+                    "reasoning": f.reasoning or "",
+                    "gap_description": f.description or f.gap_detected or "",
                 })
                 if is_comp:
                     resolved_list.append(f.control_id)

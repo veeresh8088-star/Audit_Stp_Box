@@ -1923,9 +1923,12 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
     for f in (active_findings + acc):
         ctrl = str(f.get("control_id") or f.get("control") or "General").strip()
-        # Use use_case name if available
+        # Use use_case name if available; fall back to full control_id (not just first number)
         uc_name = f.get("use_case") or f.get("control_category") or ctrl
-        cat_key = str(uc_name).split(".")[0].strip() if "." in str(uc_name) else str(uc_name)
+        # BUG FIX: cat_key was previously only the FIRST number ("5" for "5.15", "8" for "8.17")
+        # This caused ALL clause-5 controls to merge under one header and ALL clause-8 under another.
+        # Fix: use the full control_id (e.g. "5.15", "8.17") as the group key.
+        cat_key = ctrl  # Use the full control_id as the grouping key
         if cat_key not in control_groups:
             control_groups[cat_key] = []
         control_groups[cat_key].append(f)
@@ -1940,20 +1943,34 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
         # Finding rows
         for f in grp_findings:
-            # ── Clean Control points text (avoid duplicate title string concatenation) ──
+            # ── BUG FIX: ctrl_pt for Excel-mode findings ──────────────────────────
+            # In Excel mode, control_id = bare "8.17" and control_name has the
+            # checklist question ("8.17 Whether NTP is enabled").
+            # Two rows with same control_id (e.g. both 8.17) MUST show distinct
+            # question text in the report — NOT both showing the same "8.17" label.
+            # Fix: if control_name is richer than control_id, use control_name.
+            import re as _re
+            _bare_id_pat = _re.compile(r'^\d{1,2}\.\d{1,2}(?:\.\d{1,2})?$')
+            c_id = str(f.get("control_id") or "").strip()
+            c_name = str(f.get("control_name") or "").strip()
+            u_c = str(f.get("use_case") or "").strip()
+            c_n = str(f.get("control") or "").strip()
             audit_chk = f.get("audit_check") or f.get("control_check") or f.get("check") or f.get("scenario")
+
             if audit_chk:
                 ctrl_pt = str(audit_chk).strip()
+            elif _bare_id_pat.match(c_id) and c_name and len(c_name) > len(c_id) + 2:
+                # Excel mode: control_name has the checklist question text
+                # Strip trailing paren-ID suffix e.g. "Capacity Management (8.6)"
+                ctrl_pt = _re.sub(r'\s*\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)\s*$', '', c_name).strip()
+            elif u_c and c_n and u_c.lower() == c_n.lower():
+                ctrl_pt = u_c
+            elif u_c and c_n and (u_c in c_n or c_n in u_c):
+                ctrl_pt = max(u_c, c_n, key=len)
+            elif c_id and (c_name and len(c_name) > len(c_id) + 2):
+                ctrl_pt = c_name
             else:
-                u_c = str(f.get("use_case") or "").strip()
-                c_n = str(f.get("control") or "").strip()
-                c_id = str(f.get("control_id") or "").strip()
-                if u_c and c_n and u_c.lower() == c_n.lower():
-                    ctrl_pt = u_c
-                elif u_c and c_n and (u_c in c_n or c_n in u_c):
-                    ctrl_pt = max(u_c, c_n, key=len)
-                else:
-                    ctrl_pt = f"{c_id} {u_c or c_n}".strip() if c_id and (c_id not in (u_c or c_n)) else (u_c or c_n or c_id)
+                ctrl_pt = f"{c_id} {u_c or c_n or c_name}".strip() if c_id and (c_id not in (u_c or c_n or c_name)) else (u_c or c_n or c_name or c_id)
 
             policy_ref = str(f.get("policy_reference") or f.get("reference") or f.get("control_id") or "")
             obs        = str(f.get("gap_description") or f.get("reasoning") or f.get("observation") or f.get("finding") or "")[:800]
@@ -2891,7 +2908,19 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
             # Cells
             r.cell(clean_text(str(f_idx)), style=cell_style)
             
-            ctrl_text = f.get("control_id", "") + " " + f.get("control", "")
+            # BUG FIX: use control_name for bare-ID Excel-mode findings
+            # (e.g. control_id="8.17" + control_name="8.17 Whether NTP is enabled")
+            # so two rows with same control_id display distinct question text.
+            _pdf_cid = str(f.get("control_id") or "").strip()
+            _pdf_cname = str(f.get("control_name") or "").strip()
+            _pdf_ctrl = str(f.get("control") or "").strip()
+            import re as _re2
+            _bare_id = bool(_re2.match(r'^\d{1,2}\.\d{1,2}(?:\.\d{1,2})?$', _pdf_cid))
+            if _bare_id and _pdf_cname and len(_pdf_cname) > len(_pdf_cid) + 2:
+                # Excel mode: use control_name which has the checklist question
+                ctrl_text = _re2.sub(r'\s*\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)\s*$', '', _pdf_cname).strip()
+            else:
+                ctrl_text = (_pdf_cid + " " + (_pdf_ctrl or _pdf_cname)).strip()
             r.cell(clean_text(truncate_cell_text(ctrl_text, 150)), style=cell_style)
             
             ref_text = f.get("clause", "") or "ISO 27001 Annex A"
