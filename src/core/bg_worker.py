@@ -838,16 +838,20 @@ Return format: ["topic1", "topic2", ...]"""
                         print(f"[SAFETY GATE ERROR] {_sg_err}", flush=True)
 
                 # ── Evidence provenance fix ───────────────────────────────────────
-                # Validator sets source_files only when grounding succeeds (quote found).
-                # If validator did not set it (e.g. NOT_GROUNDED), fall back to the
-                # specific evidence file targeted for this control, NOT all 8 files.
-                # This ensures Evidence Source Location always shows 1 accurate file.
-                existing_src = result.get("source_files") or ""
-                if not existing_src.strip():
-                    if target_evidence_files:
-                        result["source_files"] = ", ".join(target_evidence_files)
-                    else:
-                        # No Excel scoping: leave empty — don't dump all filenames
+                # BUG FIX: source_files must ALWAYS reflect the Excel-mapped file.
+                # Previously: only overrode source_files when it was empty, allowing
+                # the validator to write the WRONG file (e.g. MFA doc for Capacity
+                # Management) when a fallback-pool search happened.
+                # Fix: if Excel strictly mapped this control to specific files, ALWAYS
+                # set source_files to those mapped files — ignore whatever the validator
+                # may have written from searching the wrong-pool fallback.
+                if target_evidence_files:
+                    # Excel scoping is active → enforce the mapped file unconditionally.
+                    result["source_files"] = ", ".join(target_evidence_files)
+                else:
+                    # No Excel scoping → use whatever the validator set (or leave empty).
+                    existing_src = result.get("source_files") or ""
+                    if not existing_src.strip():
                         result["source_files"] = ""
                 all_results.append(result)
             ctrl_duration = time.time() - control_start_time

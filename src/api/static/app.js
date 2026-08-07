@@ -2965,23 +2965,41 @@ function renderFindingsList() {
 
         const findingJsonStr = escapeHtml(JSON.stringify(f));
         const safeCtrlId = escapeHtml(f.control_id || '');
-        const rawTitle = f.control_name || f.title || f.control_id || 'ISO Control';
 
-        let cleanTitleStr = String(rawTitle).trim();
-        cleanTitleStr = cleanTitleStr.replace(/\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)$/g, '').trim();
-        cleanTitleStr = cleanTitleStr.replace(/^(\b[\w\s]+\b)\s+\1$/i, '$1').trim();
-        if (safeCtrlId && cleanTitleStr.startsWith(safeCtrlId)) {
-            cleanTitleStr = cleanTitleStr.substring(safeCtrlId.length).trim();
+        // ── BUG FIX: Prevent "5.15 Access Control Access Control" duplication ──
+        // control_id is already "5.15 Access Control" (ID + name combined).
+        // control_name is "Access Control (5.15)" (name + ID in parentheses).
+        // Using control_name causes the name to appear TWICE in the header.
+        // Fix: always derive displayHeaderTitle from control_id which is canonical.
+        let displayHeaderTitle = safeCtrlId || escapeHtml(f.control_name || f.title || 'ISO Control');
+        // Strip trailing duplicate paren-ID suffix e.g. "5.15 Access Control (5.15)"
+        displayHeaderTitle = displayHeaderTitle.replace(/\s*\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)\s*$/, '').trim();
+        // Strip any trailing " — question text" (Excel mode appends checklist question after " — ")
+        // but keep it if control_id alone is just a number like "5.15".
+        if (displayHeaderTitle.includes(' — ')) {
+            const parts = displayHeaderTitle.split(' — ');
+            // If first part already contains the control name, use the full string (don't truncate)
+            displayHeaderTitle = parts[0].trim();
         }
-        cleanTitleStr = cleanTitleStr.replace(/^[\-\:\(\)\s]+|[\-\:\(\)\s]+$/g, '').trim();
-        const displayHeaderTitle = safeCtrlId ? `${safeCtrlId}${cleanTitleStr ? ' ' + cleanTitleStr : ''}` : cleanTitleStr;
+        // Final safety: strip duplicate adjacent words e.g. "Access Control Access Control"
+        displayHeaderTitle = displayHeaderTitle.replace(/(\b[\w ]{5,}?)\s+\1/gi, '$1').trim();
 
         const safeDoc = escapeHtml(singleDoc);
 
         // Header Badges matching evidence presence accurately
-        const isComp = isFindingCompliant(f, singleSnip);
         const cleanSnipCheck = (singleSnip || "").toLowerCase().trim().replace(/^[\"\']+|[\"\']+$/g, '');
-        const hasValidQuote = cleanSnipCheck !== "n/a" && cleanSnipCheck !== "none" && cleanSnipCheck.length > 12 && !cleanSnipCheck.includes("no specific evidence quote") && !cleanSnipCheck.includes("no evidence excerpt");
+        const hasValidQuote = cleanSnipCheck !== "n/a" && cleanSnipCheck !== "none"
+            && cleanSnipCheck.length > 12
+            && !cleanSnipCheck.includes("no specific evidence quote")
+            && !cleanSnipCheck.includes("no evidence excerpt")
+            && !cleanSnipCheck.includes("not found in the document")
+            && !cleanSnipCheck.includes("no explicit evidence")
+            && !cleanSnipCheck.includes("not_found");
+        // ── BUG FIX: Evidence Missing must override COMPLIANT status ──
+        // If evidence snippet is absent/invalid, the finding CANNOT be marked COMPLIANT
+        // regardless of the LLM status field. This prevents the paradox of
+        // "⚠ Evidence: Missing" + green "COMPLIANT" badge appearing simultaneously.
+        const isComp = hasValidQuote && isFindingCompliant(f, singleSnip);
 
         const policyBadgeHtml = isComp
             ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Policy: Compliant</span>`
