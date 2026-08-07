@@ -2844,6 +2844,20 @@ function formatStructuredPoc(pocText) {
     return clean.trim();
 }
 
+function _isOcrNoiseText(str) {
+    if (!str || typeof str !== "string") return false;
+    return str.includes("[Embedded Image OCR]") || /^\[Embedded Image OCR\]/i.test(str) || /ocr/i.test(str);
+}
+
+function _cleanOcrText(str) {
+    if (!str || typeof str !== "string") return "";
+    return str
+        .replace(/^\[Embedded Image OCR\]:\s*/gi, "")
+        .replace(/\b(jpg|png|jpeg|bmp|svg)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
 function formatEvidenceSnippet(snip) {
 
     if (!snip) return "No specific evidence quote found in document.";
