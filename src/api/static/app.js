@@ -2943,6 +2943,33 @@ function calculateSeverityStats(currentExpandedCards) {
 
     const elP4 = document.getElementById("count-p4");
     if (elP4) elP4.innerText = p4Count;
+function formatStructuredPoc(pocText) {
+    if (!pocText || typeof pocText !== "string") return "";
+    let clean = pocText.trim();
+
+    if (clean.includes("Plugin Output:\n")) {
+        clean = clean.split("Plugin Output:\n")[1].trim();
+    } else if (clean.includes("Plugin Output:")) {
+        clean = clean.split("Plugin Output:")[1].trim();
+    }
+    clean = clean.replace(/^(Target Host|Plugin ID|CVE\(s\)|Scanner):[^\n]*\n?/gm, '').trim();
+
+    // Auto-structure Nessus / Burp key-value outputs cleanly with bullet points
+    clean = clean
+        .replace(/([^\n])\s*(Path\s*:)/gi, "$1\n• Installation Path           :")
+        .replace(/([^\n])\s*(Installed version\s*:)/gi, "$1\n• Installed Version           :")
+        .replace(/([^\n])\s*(Security End of Life\s*:)/gi, "$1\n• Security End-of-Life Date   :")
+        .replace(/([^\n])\s*(Time since Security End of Life \(Est\.\)\s*:)/gi, "$1\n• Time Since EoL (Estimated)  :")
+        .replace(/([^\n])\s*(Service\s*:)/gi, "$1\n• Target Service              :")
+        .replace(/([^\n])\s*(Port\s*:)/gi, "$1\n• Target Port                 :")
+        .replace(/([^\n])\s*(URL\s*:)/gi, "$1\n• Target URL                  :")
+        .replace(/([^\n])\s*(Parameter\s*:)/gi, "$1\n• Affected Parameter          :")
+        .replace(/([^\n])\s*(Method\s*:)/gi, "$1\n• HTTP Request Method         :");
+
+    // If starts with IP/Port like 13.126.199.93 (tcp/0), add a clean header
+    clean = clean.replace(/^([0-9\.]+\s*\([a-z0-9\/]+\))/i, "Target Endpoint: $1\n");
+
+    return clean.trim();
 }
 
 function _cleanOcrText(raw) {
@@ -3266,14 +3293,7 @@ function renderFindingsList() {
 
             if (!_tool) _tool = "Scanner";
 
-            let _cleanPoc = _poc;
-            if (_cleanPoc.includes("Plugin Output:\n")) {
-                _cleanPoc = _cleanPoc.split("Plugin Output:\n")[1].trim();
-            } else if (_cleanPoc.includes("Plugin Output:")) {
-                _cleanPoc = _cleanPoc.split("Plugin Output:")[1].trim();
-            } else {
-                _cleanPoc = _cleanPoc.replace(/^(Target Host|Plugin ID|CVE\(s\)|Scanner):[^\n]*\n?/gm, '').trim();
-            }
+            let _cleanPoc = formatStructuredPoc(_poc);
 
             const cveBadges = _cves.length
                 ? _cves.map(cve => `<a href="https://nvd.nist.gov/vuln/detail/${cve}" target="_blank"
