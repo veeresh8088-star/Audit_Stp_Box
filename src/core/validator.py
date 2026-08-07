@@ -171,27 +171,19 @@ def map_new_schema_to_legacy(finding):
                      "policy document", "uploaded document", "evidence document",
                      "context", "evidence", "document", ""}
     
-    # Priority 1: evidence_source_file set by safety gate (Excel scoping)
-    _loc = (
-        finding.get("evidence_source_file") or
-        finding.get("source_files") or
-        finding.get("evidence_location") or ""
-    ).strip()
+    # Combine Parent Document and Child Image Filename (e.g. "Monitoring AWS CloudWatch.docx (image1.png)")
+    parent_file = (finding.get("source_files") or finding.get("parent_document") or "").strip()
+    child_file = (finding.get("evidence_source_file") or "").strip()
 
-    # Only fall back to ev_item["source"] if it's a real filename (has an extension)
-    if not _loc or _loc.lower() in _FAKE_SOURCES:
-        for ev_item in (evidence_list if isinstance(evidence_list, list) else []):
-            if isinstance(ev_item, dict):
-                src = (ev_item.get("file") or ev_item.get("filename") or
-                       ev_item.get("document") or ev_item.get("source") or "").strip()
-                # Accept only if it looks like a real filename (has a dot extension)
-                if src and "." in src and src.lower() not in _FAKE_SOURCES:
-                    page_ref = ev_item.get("page") or ev_item.get("page_number") or ""
-                    _loc = f"{src} | Page/Sec {page_ref}" if page_ref else src
-                    break
+    if child_file and parent_file and child_file != parent_file:
+        if child_file.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff")) and parent_file not in child_file:
+            _loc = f"{parent_file} ({child_file})"
+        elif parent_file not in _loc and child_file in _loc:
+            _loc = _loc.replace(child_file, f"{parent_file} ({child_file})")
 
     if _loc and _loc.lower() not in _FAKE_SOURCES:
         mapped["evidence_location"] = _loc
+
 
     mapped["evidence_quote"] = evidence_quote
     mapped["evidence_snippet"] = evidence_quote if evidence_quote != "NOT_FOUND" else ""
@@ -987,6 +979,22 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
         ]
         is_negative_description = any(neg in description_lower for neg in _neg_description)
 
+        # RULE 8 INTENT OVERRIDE: If description/reasoning explicitly states that the evidence
+        # directly satisfies or meets the control objective, override negative policy phrases!
+        _satisfies_phrases = [
+            "directly satisfies", "satisfies the control", "satisfies the intent",
+            "satisfies the control objective", "meets the control objective",
+            "fully satisfies", "directly supports", "satisfies the requirement"
+        ]
+        explicitly_satisfies = (
+            any(sp in description_lower for sp in _satisfies_phrases) or
+            any(sp in reasoning_lower for sp in _satisfies_phrases)
+        )
+
+        if explicitly_satisfies:
+            is_negative_quote = False
+            is_negative_description = False
+
         if is_negative_quote or is_negative_description:
             # Quote or observation explicitly states absence of evidence — do NOT upgrade.
             cid = finding.get("control_id") or ""
@@ -994,7 +1002,7 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                   f"Keeping NON_COMPLIANT to prevent self-contradiction.", flush=True)
         else:
             # Evidence exists in the quote — check if the reasoning acknowledges it was found
-            evidence_acknowledged = any(kw in reasoning_lower for kw in [
+            evidence_acknowledged = explicitly_satisfies or any(kw in reasoning_lower for kw in [
                 "evidence was found", "demonstrating", "mfa", "pam", "multi-factor",
                 "privileged access", "db_backup", "backup", "implementation", "screenshot",
                 "cloudwatch", "ntp", "clock sync", "log archive", "policy", "approved",
@@ -1011,6 +1019,7 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                 finding["severity"] = "N/A"
                 finding["recommendation"] = "No action required. Evidence satisfies the control objective. Continue periodic evidence review."
                 finding["review_note"] = "Rule 8 Applied: Evidence in any form (document/screenshot/log) satisfied control objective."
+
 
     # ── POLICY VS EVIDENCE COMBINATION MATRIX RULE ───────────────────────
     # Both Policy AND Evidence must be Compliant/YES for overall COMPLIANT.

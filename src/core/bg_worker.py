@@ -1217,8 +1217,16 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                         f_recom = f.get("recommendation") or f.get("remediation") or (f"Maintain current documented policies and verification procedures for {f.get('control_id')}." if is_comp else f"Establish formal policy documentation, access controls, and logging evidence for {f.get('control_id')}.")
 
                         ev_loc = f.get("evidence_location") or f.get("evidence_source_file") or f.get("source_file") or ""
-                        if not ev_loc and f.get("source_files"):
-                            ev_loc = f.get("source_files").split(",")[0].strip()
+                        src_files = f.get("source_files") or ""
+
+                        if not ev_loc and src_files:
+                            ev_loc = src_files.split(",")[0].strip()
+
+                        # If evidence location is a child image file, include parent document name
+                        if ev_loc and src_files and ev_loc != src_files:
+                            if ev_loc.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff")) and src_files not in ev_loc:
+                                ev_loc = f"{src_files} ({ev_loc})"
+
 
                         db_write.add(Finding(
                             report_id=report.id,
