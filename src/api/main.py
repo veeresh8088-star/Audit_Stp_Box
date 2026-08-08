@@ -70,10 +70,15 @@ app.add_middleware(NoCacheMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://aicyberauditbox.com",
-        "https://www.aicyberauditbox.com",
+        "http://localhost",
+        "https://localhost",
+        "http://127.0.0.1",
+        "https://127.0.0.1",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
+        "https://localhost:443",
+        "https://127.0.0.1:443",
+        "*"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -81,50 +86,6 @@ app.add_middleware(
 )
 
 from fastapi.responses import FileResponse, RedirectResponse
-
-# ── AUTO HTTP (80) -> HTTPS (443) REDIRECTOR ──
-# When users type 'aicyberauditbox.com' without typing 'https://', browsers try Port 80 first.
-# This background server listens on Port 80 and immediately redirects them to https://aicyberauditbox.com/
-def _start_http_redirector():
-    try:
-        import threading
-        import socket
-        from http.server import HTTPServer, BaseHTTPRequestHandler
-
-        class RedirectHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                target_url = f"https://aicyberauditbox.com{self.path}"
-                self.send_response(301)
-                self.send_header("Location", target_url)
-                self.end_headers()
-            def log_message(self, format, *args):
-                pass  # Silence stdout noise
-
-        class DualStackHTTPServer(HTTPServer):
-            address_family = socket.AF_INET6
-            def server_bind(self):
-                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-                super().server_bind()
-
-        def _run_server():
-            try:
-                server = DualStackHTTPServer(('::', 80), RedirectHandler)
-                print("[HTTP REDIRECTOR] Active on Dual-Stack Port 80 -> Redirecting HTTP requests to HTTPS https://aicyberauditbox.com/", flush=True)
-                server.serve_forever()
-            except Exception:
-                try:
-                    server = HTTPServer(('0.0.0.0', 80), RedirectHandler)
-                    print("[HTTP REDIRECTOR] Active on 0.0.0.0:80 -> Redirecting HTTP requests to HTTPS https://aicyberauditbox.com/", flush=True)
-                    server.serve_forever()
-                except Exception as e:
-                    print(f"[HTTP REDIRECTOR] Could not bind Port 80 (already in use or permission restricted): {e}", flush=True)
-
-        t = threading.Thread(target=_run_server, daemon=True)
-        t.start()
-    except Exception as ex:
-        print(f"[HTTP REDIRECTOR ERROR] {ex}", flush=True)
-
-_start_http_redirector()
 
 
 

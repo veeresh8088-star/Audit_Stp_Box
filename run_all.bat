@@ -32,22 +32,25 @@ if exist "C:\Users\veeresh988V\Desktop\llama\llama-server.exe" (
     set "LLAMA_SERVER_EXE=%~dp0llama-server.exe"
 )
 
-:: Calculate full CPU thread distribution for max performance
+:: Calculate Physical Cores (Logical / 2) for thread distribution
 set /a LLM_THREADS=%NUMBER_OF_PROCESSORS%
 if %LLM_THREADS% LSS 1 set LLM_THREADS=4
+
+set /a PHYSICAL_CORES=%NUMBER_OF_PROCESSORS% / 2
+if %PHYSICAL_CORES% LSS 1 set PHYSICAL_CORES=4
 
 set /a EMBED_THREADS=%NUMBER_OF_PROCESSORS%
 if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 
-:: Calculate parallel LLM slots for C++ continuous batching.
-:: Set to 2x CPU cores so 15+ users run simultaneously with NO queue.
-:: Tradeoff: each auditor runs at ~50% speed instead of 100%, but ZERO queueing.
-:: RAM cost: each extra slot = ~200MB KV cache. Adjust multiplier if RAM is low.
-set /a LLM_SLOTS=%NUMBER_OF_PROCESSORS% * 2
-if %LLM_SLOTS% LSS 16 set LLM_SLOTS=16
+:: Calculate parallel LLM slots for C++ continuous batching based strictly on Physical Cores:
+:: Formula: Physical Cores * 2 (2 slots per physical core)
+:: 4 Physical Cores -> 8 Concurrent Members
+:: 8 Physical Cores -> 16 Concurrent Members
+set /a LLM_SLOTS=%PHYSICAL_CORES% * 2
+if %LLM_SLOTS% LSS 4 set LLM_SLOTS=4
 
 echo.
-echo [2/5] Starting llama.cpp LLM Server (Port 11434 with %LLM_THREADS% threads, %LLM_SLOTS% parallel slots, --cont-batching)...
+echo [2/5] Starting llama.cpp LLM Server (%PHYSICAL_CORES% Physical Cores -> %LLM_SLOTS% Parallel Slots for %LLM_SLOTS% Concurrent Members, --cont-batching)...
 start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 0 -np %LLM_SLOTS% -t %LLM_THREADS% -b 2048 -ub 512 --mlock --flash-attn on --cont-batching
 
 echo.
@@ -78,10 +81,10 @@ set JWT_SECRET=3f955ad04cac120284051dc8bdaed7320dfeaba546860e8a3507dc8583a06ec9
 
 echo.
 echo ==================================================
-echo   AICyberAuditBox Secure HTTPS Server Active
-echo   Domain URL: https://aicyberauditbox.com/
+echo   AICyberAuditBox Local Web Dashboard Active
+echo   Local URL: http://localhost:8000/
 echo   Press Ctrl+C in this terminal to stop server.
 echo ==================================================
-start https://aicyberauditbox.com/
-python -m uvicorn src.api.main:app --host :: --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem
+start http://localhost:8000/
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 pause

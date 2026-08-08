@@ -8,13 +8,9 @@ def generate_ssl_cert(cert_path="cert.pem", key_path="key.pem", domains=None):
     """Generates trusted SSL certificate using mkcert or cryptography fallback."""
     if domains is None:
         domains = [
-            "aicyberauditbox.com",
-            "www.aicyberauditbox.com",
-            "aisecurityaudit.local",
-            "localauditshakti.centralindia.cloudapp.azure.com",
             "localhost",
             "127.0.0.1",
-            "40.81.235.37"
+            "::1"
         ]
 
     abs_cert = os.path.abspath(cert_path)
@@ -86,19 +82,18 @@ def generate_ssl_cert(cert_path="cert.pem", key_path="key.pem", domains=None):
 
     if sys.platform == "win32":
         try:
-            cmd = f'powershell -Command "Import-Certificate -FilePath \'{abs_cert}\' -CertStoreLocation \'Cert:\\LocalMachine\\Root\'"'
-            res = subprocess.run(cmd, shell=True, capture_output=True, text=True, errors="ignore")
-            if res.returncode == 0:
-                print("[SUCCESS] Installed SSL Certificate into Windows Trusted Root Store!")
+            cmd1 = f'powershell -Command "Import-Certificate -FilePath \'{abs_cert}\' -CertStoreLocation \'Cert:\\CurrentUser\\Root\'"'
+            subprocess.run(cmd1, shell=True, capture_output=True, text=True, errors="ignore")
+            cmd2 = f'powershell -Command "Import-Certificate -FilePath \'{abs_cert}\' -CertStoreLocation \'Cert:\\LocalMachine\\Root\'"'
+            subprocess.run(cmd2, shell=True, capture_output=True, text=True, errors="ignore")
+            print("[SUCCESS] Installed SSL Certificate into Windows Trusted Root Store!")
         except Exception:
             pass
 
 if __name__ == "__main__":
     custom_domains = sys.argv[1:] if len(sys.argv) > 1 else [
-        "aisecurityaudit.local",
-        "localauditshakti.centralindia.cloudapp.azure.com",
         "localhost",
         "127.0.0.1",
-        "40.81.235.37"
+        "::1"
     ]
     generate_ssl_cert(domains=custom_domains)

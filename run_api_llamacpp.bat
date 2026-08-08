@@ -62,12 +62,12 @@ exit /b 1
 echo.
 
 :: 3. Launching FastAPI & browser with llama.cpp environment
-echo [3/3] Launching AISecurityAudit HTTPS Dashboard...
+echo [3/3] Launching AISecurityAudit Local HTTP Dashboard...
 set LLM_BACKEND=llama.cpp
 set EMBEDDING_HOST=http://127.0.0.1:11435
 set OLLAMA_KEEP_ALIVE=24h
 set OLLAMA_NUM_PARALLEL=4
 set OLLAMA_MAX_LOADED_MODELS=3
 
-start https://aicyberauditbox.com/
-python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem
+start http://localhost:8000/
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000

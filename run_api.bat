@@ -55,10 +55,11 @@ echo.
 :: 3. Launching FastAPI & browser
 echo [3/3] Launching AICyberAuditBox Dashboard...
 
-:: Set dynamic concurrency and Redis env vars
-:: 2x CPU cores = all 15+ users run simultaneously with NO queue (slight speed tradeoff per user)
-set /a MAX_CONCURRENT_AUDITS=%NUMBER_OF_PROCESSORS% * 2
-if %MAX_CONCURRENT_AUDITS% LSS 16 set MAX_CONCURRENT_AUDITS=16
+:: Set dynamic concurrency strictly based on Physical Cores (Physical Cores * 2)
+set /a PHYSICAL_CORES=%NUMBER_OF_PROCESSORS% / 2
+if %PHYSICAL_CORES% LSS 1 set PHYSICAL_CORES=2
+set /a MAX_CONCURRENT_AUDITS=%PHYSICAL_CORES% * 2
+if %MAX_CONCURRENT_AUDITS% LSS 4 set MAX_CONCURRENT_AUDITS=4
 set REDIS_URL=redis://127.0.0.1:6379/0
 
 :: Check for Let's Encrypt (Certbot) trusted certificates first
@@ -68,16 +69,6 @@ set CERTBOT_KEY=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com
 :: FIX: --workers 4 spawns 4 parallel Python processes.
 :: 10 simultaneous users are distributed across 4 workers instead of queuing through 1.
 :: --reload is incompatible with --workers (removed for production multi-user mode).
-if exist "%CERTBOT_CERT%" if exist "%CERTBOT_KEY%" (
-    echo [🔒 TRUSTED SSL] Let's Encrypt Certificate detected! Starting HTTPS server...
-    start https://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host :: --port 443 --workers 4 --ssl-keyfile "%CERTBOT_KEY%" --ssl-certfile "%CERTBOT_CERT%"
-) else if exist cert.pem if exist key.pem (
-    echo [🔒 SSL] Self-Signed Certificate detected! Starting HTTPS server...
-    start https://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host :: --port 443 --workers 4 --ssl-keyfile key.pem --ssl-certfile cert.pem
-) else (
-    echo [HTTP] Starting standard HTTP server...
-    start http://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host :: --port 80 --workers 4
-)
+echo [HTTP] Starting standard HTTP server on port 8000...
+start http://localhost:8000/
+python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
