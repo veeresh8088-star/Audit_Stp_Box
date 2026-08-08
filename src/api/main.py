@@ -88,6 +88,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 def _start_http_redirector():
     try:
         import threading
+        import socket
         from http.server import HTTPServer, BaseHTTPRequestHandler
 
         class RedirectHandler(BaseHTTPRequestHandler):
@@ -99,13 +100,24 @@ def _start_http_redirector():
             def log_message(self, format, *args):
                 pass  # Silence stdout noise
 
+        class DualStackHTTPServer(HTTPServer):
+            address_family = socket.AF_INET6
+            def server_bind(self):
+                self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+                super().server_bind()
+
         def _run_server():
             try:
-                server = HTTPServer(('0.0.0.0', 80), RedirectHandler)
-                print("[HTTP REDIRECTOR] Active on 0.0.0.0:80 -> Redirecting HTTP requests to HTTPS https://aicyberauditbox.com/", flush=True)
+                server = DualStackHTTPServer(('::', 80), RedirectHandler)
+                print("[HTTP REDIRECTOR] Active on Dual-Stack Port 80 -> Redirecting HTTP requests to HTTPS https://aicyberauditbox.com/", flush=True)
                 server.serve_forever()
-            except Exception as e:
-                print(f"[HTTP REDIRECTOR] Could not bind Port 80 (already in use or permission restricted): {e}", flush=True)
+            except Exception:
+                try:
+                    server = HTTPServer(('0.0.0.0', 80), RedirectHandler)
+                    print("[HTTP REDIRECTOR] Active on 0.0.0.0:80 -> Redirecting HTTP requests to HTTPS https://aicyberauditbox.com/", flush=True)
+                    server.serve_forever()
+                except Exception as e:
+                    print(f"[HTTP REDIRECTOR] Could not bind Port 80 (already in use or permission restricted): {e}", flush=True)
 
         t = threading.Thread(target=_run_server, daemon=True)
         t.start()

@@ -71,13 +71,13 @@ set CERTBOT_KEY=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com
 if exist "%CERTBOT_CERT%" if exist "%CERTBOT_KEY%" (
     echo [🔒 TRUSTED SSL] Let's Encrypt Certificate detected! Starting HTTPS server...
     start https://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --workers 4 --ssl-keyfile "%CERTBOT_KEY%" --ssl-certfile "%CERTBOT_CERT%"
+    python -m uvicorn src.api.main:app --host :: --port 443 --workers 4 --ssl-keyfile "%CERTBOT_KEY%" --ssl-certfile "%CERTBOT_CERT%"
 ) else if exist cert.pem if exist key.pem (
     echo [🔒 SSL] Self-Signed Certificate detected! Starting HTTPS server...
     start https://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --workers 4 --ssl-keyfile key.pem --ssl-certfile cert.pem
+    python -m uvicorn src.api.main:app --host :: --port 443 --workers 4 --ssl-keyfile key.pem --ssl-certfile cert.pem
 ) else (
     echo [HTTP] Starting standard HTTP server...
     start http://localauditshakti.centralindia.cloudapp.azure.com
-    python -m uvicorn src.api.main:app --host 0.0.0.0 --port 80 --workers 4
+    python -m uvicorn src.api.main:app --host :: --port 80 --workers 4
 )

@@ -83,5 +83,5 @@ echo   Domain URL: https://aicyberauditbox.com/
 echo   Press Ctrl+C in this terminal to stop server.
 echo ==================================================
 start https://aicyberauditbox.com/
-python -m uvicorn src.api.main:app --host 0.0.0.0 --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem
+python -m uvicorn src.api.main:app --host :: --port 443 --ssl-keyfile key.pem --ssl-certfile cert.pem
 pause
