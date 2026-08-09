@@ -25,14 +25,14 @@ Key schema
   global:latency_sec          INCRBYFLOAT
   global:files                INCRBY
   global:errors               INCRBY
-  global:active_sessions      SET       JSON list of active session ids
+  global:active_sessions      SADD/SREM   native Redis Set of active session ids
+  global:completed_sessions   LPUSH/LTRIM native Redis List, newest-first, capped at 50
 
 TTL: each session key expires after 24 hours automatically.
 Falls back silently to no-op if Redis is not reachable.
 """
 
 import os
-import json
 import logging
 from datetime import datetime, timezone
 
@@ -119,14 +119,9 @@ def session_start(session_id: str, auditor: str = "SYSTEM", files_count: int = 0
         ]:
             pipe.expire(key, SESSION_TTL)
 
-        raw = r.get("global:active_sessions") or "[]"
-        try:
-            active = json.loads(raw)
-        except Exception:
-            active = []
-        if session_id not in active:
-            active.append(session_id)
-        pipe.set("global:active_sessions", json.dumps(active))
+        # Native Redis SET (SADD) — atomic, no read-modify-write race between
+        # concurrent sessions starting/finishing at the same time.
+        pipe.sadd("global:active_sessions", session_id)
         pipe.expire("global:active_sessions", SESSION_TTL)
         pipe.incrby("global:files", files_count)
         pipe.expire("global:files", SESSION_TTL)
@@ -196,27 +191,15 @@ def session_done(session_id: str, status: str = "done"):
         pipe.expire(f"session:{session_id}:status",     SESSION_TTL)
         pipe.expire(f"session:{session_id}:updated_at", SESSION_TTL)
 
-        # Move from active -> completed (do NOT delete — admin must still see it)
-        raw_active = r.get("global:active_sessions") or "[]"
-        try:
-            active = json.loads(raw_active)
-        except Exception:
-            active = []
-        active = [s for s in active if s != session_id]  # remove from active
-        pipe.set("global:active_sessions", json.dumps(active))
+        # Move from active -> completed (do NOT delete — admin must still see it).
+        # Native atomic Redis ops: SREM needs no prior read, and LREM+LPUSH+LTRIM
+        # dedups/prepends/caps the completed list without a read-modify-write race.
+        pipe.srem("global:active_sessions", session_id)
         pipe.expire("global:active_sessions", SESSION_TTL)
 
-        # Add to completed_sessions list so admin can still display them
-        raw_done = r.get("global:completed_sessions") or "[]"
-        try:
-            done_list = json.loads(raw_done)
-        except Exception:
-            done_list = []
-        if session_id not in done_list:
-            done_list.append(session_id)
-        # Keep only the last 50 completed sessions
-        done_list = done_list[-50:]
-        pipe.set("global:completed_sessions", json.dumps(done_list))
+        pipe.lrem("global:completed_sessions", 0, session_id)
+        pipe.lpush("global:completed_sessions", session_id)
+        pipe.ltrim("global:completed_sessions", 0, 49)  # keep newest 50
         pipe.expire("global:completed_sessions", SESSION_TTL)
         pipe.execute()
     except Exception as e:
@@ -245,11 +228,7 @@ def get_live_metrics() -> dict:
         global_files   = int(r.get("global:files") or 0)
         global_errors  = int(r.get("global:errors") or 0)
 
-        raw_active = r.get("global:active_sessions") or "[]"
-        try:
-            active_ids = json.loads(raw_active)
-        except Exception:
-            active_ids = []
+        active_ids = r.smembers("global:active_sessions") or set()
 
         # ── Build session rows: active first, then completed ──────────────────
         sessions = []
@@ -292,12 +271,8 @@ def get_live_metrics() -> dict:
             if row:
                 sessions.append(row)
 
-        # Completed sessions (most recent last 50, reversed so newest first)
-        raw_done = r.get("global:completed_sessions") or "[]"
-        try:
-            done_ids = list(reversed(json.loads(raw_done)))
-        except Exception:
-            done_ids = []
+        # Completed sessions — LPUSH prepends, so LRANGE already returns newest first.
+        done_ids = r.lrange("global:completed_sessions", 0, 49) or []
         for sid in done_ids:
             row = _build_session_row(sid)
             if row:

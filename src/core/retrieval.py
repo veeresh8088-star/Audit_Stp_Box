@@ -770,14 +770,14 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
 
     deduplicated = deduplicated[:configured_top_k]
 
-    # Dynamic Relevance-Cutoff Token Budget Accumulation
+    # Token Budget Accumulation. No absolute relevance-score cutoff: the cross-encoder
+    # reranker's scores are raw unbounded logits (commonly negative), not a 0-1 scale, so
+    # a fixed threshold rejects almost everything regardless of actual relevance. The
+    # reranker's ordering (already sorted best-first above) is what determines quality;
+    # the token budget below is the real, meaningful stopping condition.
     selected_chunks = []
     current_tokens = 0
     for item in deduplicated:
-        relevance_score = item[0]
-        # Dynamic cutoff: if score drops below relevance threshold and we already have evidence, stop immediately!
-        if relevance_score < 0.05 and selected_chunks:
-            break
         chunk_tokens = len(item[1]) // 4
         if current_tokens + chunk_tokens > HARD_MAX_CONTEXT_TOKENS:
             break

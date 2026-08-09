@@ -5,7 +5,10 @@ Configures prompt templates and LangChain chains using ChatOllama.
 """
 
 import json
-import ollama
+try:
+    import ollama
+except ImportError:
+    ollama = None
 from pydantic import ValidationError
 from src.ai.audit_models import AuditFindingSchema
 
@@ -173,11 +176,25 @@ You MUST respond with findings wrapped in XML tags matching this format:
   <requirement>Requirement 2</requirement>
 </missing_requirements>
 <recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
+
+The control objective above may name several distinct requirements (e.g. authorization
+procedures, visitor sign-ins, badges, escort rules). For EACH distinct requirement it names,
+check whether the document contains a supporting passage, and include a separate <evidence_item>
+for each one that does — do not merge multiple distinct excerpts into a single excerpt. Do NOT
+pad the list with repeated or near-duplicate excerpts for the same requirement just to increase
+the count — quality and distinctness matter, not quantity. If a requirement has no supporting
+evidence, simply do not include an item for it.
+
 <evidence_items>
   <evidence_item>
     <source>Document Name</source>
     <page>Page Number</page>
     <excerpt>Supporting evidence text / verbatim quote</excerpt>
+  </evidence_item>
+  <evidence_item>
+    <source>Document Name</source>
+    <page>Page Number</page>
+    <excerpt>A second distinct supporting excerpt, if one exists</excerpt>
   </evidence_item>
 </evidence_items>
 
@@ -255,11 +272,25 @@ You MUST respond with findings wrapped in XML tags matching this format:
   <requirement>Requirement 2</requirement>
 </missing_requirements>
 <recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
+
+The control objective above may name several distinct requirements (e.g. authorization
+procedures, visitor sign-ins, badges, escort rules). For EACH distinct requirement it names,
+check whether the pre-extracted paragraphs contain a supporting passage, and include a separate
+<evidence_item> for each one that does — do not merge multiple distinct excerpts into a single
+excerpt. Do NOT pad the list with repeated or near-duplicate excerpts for the same requirement
+just to increase the count — quality and distinctness matter, not quantity. If a requirement has
+no supporting evidence, simply do not include an item for it.
+
 <evidence_items>
   <evidence_item>
     <source>Exact filename from locked file(s)</source>
     <page>Page Number or Section</page>
     <excerpt>Verbatim quote from the pre-extracted paragraphs above</excerpt>
+  </evidence_item>
+  <evidence_item>
+    <source>Exact filename from locked file(s)</source>
+    <page>Page Number or Section</page>
+    <excerpt>A second distinct verbatim quote from the pre-extracted paragraphs above, if one exists</excerpt>
   </evidence_item>
 </evidence_items>
 
@@ -574,11 +605,25 @@ You MUST respond with findings wrapped in XML tags matching this format:
   <requirement>Requirement 2</requirement>
 </missing_requirements>
 <recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
+
+The control objective above may name several distinct requirements (e.g. authorization
+procedures, visitor sign-ins, badges, escort rules). For EACH distinct requirement it names,
+check whether the document contains a supporting passage, and include a separate <evidence_item>
+for each one that does — do not merge multiple distinct excerpts into a single excerpt. Do NOT
+pad the list with repeated or near-duplicate excerpts for the same requirement just to increase
+the count — quality and distinctness matter, not quantity. If a requirement has no supporting
+evidence, simply do not include an item for it.
+
 <evidence_items>
   <evidence_item>
     <source>Document Name</source>
     <page>Page Number</page>
     <excerpt>Supporting evidence text / verbatim quote</excerpt>
+  </evidence_item>
+  <evidence_item>
+    <source>Document Name</source>
+    <page>Page Number</page>
+    <excerpt>A second distinct supporting excerpt, if one exists</excerpt>
   </evidence_item>
 </evidence_items>
 
@@ -608,7 +653,8 @@ class NativeOllamaChain:
     def __init__(self, model_name: str, prompt_template: str, url: str = None):
         self.model_name = model_name
         self.prompt_template = prompt_template
-        
+        self.last_token_stats = {"prompt_tokens": 0, "completion_tokens": 0}
+
         import os
         host_env = os.environ.get("OLLAMA_HOST", "").strip()
         if host_env:
@@ -619,8 +665,14 @@ class NativeOllamaChain:
         else:
             resolved_url = url or "http://127.0.0.1:11434"
             
-        # Set a 9 minute timeout — allows local llama.cpp CPU inference to complete without freezing.
-        self.client = ollama.Client(host=resolved_url, timeout=540.0)
+        # Set a 9 minute timeout -- allows local llama.cpp CPU inference to complete without freezing.
+        if ollama is not None:
+            try:
+                self.client = ollama.Client(host=resolved_url, timeout=540.0)
+            except Exception:
+                self.client = None
+        else:
+            self.client = None
         
     def invoke(self, input_dict: dict) -> AuditFindingSchema:
         import re
@@ -931,17 +983,18 @@ class NativeOllamaChain:
         prompt = active_template.format(**input_dict)
 
         
-        import os
-        backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
-        print(f"[{backend.upper()} CHAIN] Querying '{self.model_name}' for {input_dict.get('control_id', 'unknown')}...", flush=True)
+        print(f"[LLM CHAIN] Querying '{self.model_name}' for {input_dict.get('control_id', 'unknown')}...", flush=True)
         try:
             from src.core.llm_client import query_llm
+            _stats = {}
             content = query_llm(
                 prompt=prompt,
                 model=self.model_name,
                 num_ctx=get_num_ctx(self.model_name),
-                temperature=0.0
+                temperature=0.0,
+                token_stats=_stats
             )
+            self.last_token_stats = _stats
             if not content or not content.strip():
                 raise ValueError("Backend returned an empty response.")
                 
@@ -949,7 +1002,7 @@ class NativeOllamaChain:
             
             # Check if response is JSON (fallback support)
             if content_clean.startswith("{") or (content_clean.startswith("```json") and "{" in content_clean):
-                print(f"[OLLAMA CHAIN] Model returned JSON instead of XML. Parsing as JSON...", flush=True)
+                print(f"[LLM CHAIN] Model returned JSON instead of XML. Parsing as JSON...", flush=True)
                 json_str = content_clean
                 if "```" in json_str:
                     blocks = re.findall(r'```(?:json)?\s*(.*?)\s*```', json_str, re.DOTALL)
@@ -969,35 +1022,12 @@ class NativeOllamaChain:
             return AuditFindingSchema(**normalized_data)
             
         except Exception as e:
-            print(f"[OLLAMA CHAIN ERROR] Parse failed for {input_dict.get('control_id', 'unknown')}: {e}", flush=True)
+            print(f"[LLM CHAIN ERROR] Parse failed for {input_dict.get('control_id', 'unknown')}: {e}", flush=True)
             control_id_str = str(input_dict.get('control_id', 'unknown'))
-            retrieved_ctx = str(input_dict.get('condensed_context', ''))
-            
-            # Check if retrieved context contains explicit evidence for ANY control
-            has_explicit_evidence = len(retrieved_ctx.strip()) >= 20 and not any(kw in retrieved_ctx.lower() for kw in [
-                "no relevant context found", "no evidence found", "not found in context"
-            ])
 
-            if has_explicit_evidence:
-                print(f"[RECOVERY FALLBACK] Control {control_id_str}: Evidence found in retrieved context despite LLM parse error. Recovering as COMPLIANT for control {control_id_str}.", flush=True)
-                evidence_snippet = retrieved_ctx[:1500].strip()
-                return AuditFindingSchema(
-                    status="COMPLIANT",
-                    severity="N/A",
-                    evidence_strength="Strong",
-                    control_coverage=100,
-                    evidence_count=1,
-                    business_impact="",
-                    remediation_priority="Low",
-                    justification=f"Document contains direct evidence supporting control {control_id_str}.",
-                    missing_requirements=[],
-                    recommendation="No action required. Continue periodic evidence review.",
-                    evidence=[{"source": control_id_str, "page": "1", "excerpt": evidence_snippet}],
-                    policy_present="Yes",
-                    evidence_present="Yes",
-                    severity_score=0.0
-                )
-            
+            # A parse/validation failure always falls through to an honest NON_COMPLIANT
+            # finding below — never inferred as compliant from raw, un-vetted context text.
+
             # Detect if it's a validation gate failure (compliant status with no evidence)
             err_msg = str(e)
             if "status cannot be set to 'COMPLIANT' if no evidence is found" in err_msg or "NO_EVIDENCE" in err_msg:

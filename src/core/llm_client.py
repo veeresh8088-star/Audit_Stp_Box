@@ -34,34 +34,21 @@ def _get_next_llm_host():
     return host
 
 def get_llm_backend():
-    """Reads LLM_BACKEND env var or auto-detects llama.cpp vs Ollama by probing port 11434."""
-    env = os.environ.get("LLM_BACKEND", "").strip().lower()
-    if env:
-        return env
-    # Auto-detect: probe llama.cpp vs Ollama endpoints on 11434
-    try:
-        host = os.environ.get("OLLAMA_HOST", "http://127.0.0.1:11434").strip()
-        if not host.startswith("http"):
-            host = f"http://{host}"
-        r = requests.get(f"{host}/props", timeout=1)
-        if r.status_code == 200 and "default_generation_settings" in r.text:
-            return "llama.cpp"
-    except Exception:
-        pass
-    return "ollama"
+    """Returns llama.cpp as the sole, dedicated inference engine."""
+    return "llama.cpp"
 
 def _resolve_host(url=None, default_port=11434):
-    """Resolves host URL. Uses round-robin when LLM_HOSTS is configured."""
+    """Resolves host URL. Round-robin (LLM_HOSTS) only applies to the standard completion
+    port — callers asking for a different port (e.g. the embedding server) get that port
+    directly instead of silently landing on the completion server."""
     if url is None:
-        url = _get_next_llm_host()
+        url = _get_next_llm_host() if default_port == 11434 else f"http://127.0.0.1:{default_port}"
     if url and not url.startswith("http://") and not url.startswith("https://"):
         url = f"http://{url}" if ":" in url else f"http://{url}:{default_port}"
     return url
 
-def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=None, stop=None, session_id=None):
-    """Sends a non-streaming prompt completion request through port_pool_manager per-port lock."""
-    backend = get_llm_backend()
-
+def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=None, stop=None, session_id=None, token_stats=None):
+    """Sends a non-streaming prompt completion request exclusively to llama-server.exe."""
     if timeout is None or timeout in (1800, 600):
         try:
             from src.core.redis_metrics import get_live_metrics
@@ -76,75 +63,46 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
             timeout = 600
 
     with port_pool_manager.acquire_control_slot(session_id=session_id, timeout=timeout) as host:
-        if backend in ("llama.cpp", "llamacpp"):
-            if "gemma" in model.lower():
-                prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
-            url = f"{host}/completion"
+        if "gemma" in model.lower():
+            prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
+        url = f"{host}/completion"
+        stop_tokens = stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>", "</audit_finding>", "</gap_analysis>", "</vapt_finding>", "</finding>", "```"]
+
+        def _complete(n_predict):
             payload = {
                 "prompt": prompt,
                 "temperature": temperature,
                 "stream": False,
-                "n_predict": 1024,
-                "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>", "</audit_finding>", "</gap_analysis>", "</vapt_finding>", "</finding>", "```"]
+                "n_predict": n_predict,
+                "stop": stop_tokens
             }
             if format == "json":
                 payload["response_format"] = {"type": "json_object"}
-                
             r = requests.post(url, json=payload, timeout=timeout)
-            if r.status_code == 200:
-                return r.json().get("content", "").strip()
-            else:
-                raise Exception(f"llama.cpp server error: {r.status_code} - {r.text}")
-        else:
-            # Default: Ollama
-            url = f"{host}/api/generate"
-            options_dict = {
-                "temperature": temperature,
-                "num_ctx": num_ctx,
-                "num_predict": 1024 if format == "json" else 2048
-            }
-            if num_thread is not None:
-                options_dict["num_thread"] = num_thread
-            if stop:
-                options_dict["stop"] = stop
-                
-            payload = {
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": options_dict,
-                "keep_alive": "15m"
-            }
-            if format:
-                payload["format"] = format
-                
-            r = requests.post(url, json=payload, timeout=timeout)
-            if r.status_code == 200:
-                return r.json().get("response", "").strip()
-            elif r.status_code == 404:
-                # Fallback check for llama.cpp server running on same host
-                l_url = f"{host}/completion"
-                l_prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n" if "gemma" in model.lower() else prompt
-                l_payload = {
-                    "prompt": l_prompt,
-                    "temperature": temperature,
-                    "stream": False,
-                    "n_predict": 1024,
-                    "stop": stop or ["<end_of_turn>", "<eos>", "<|im_end|>", "</s>", "</audit_finding>", "</gap_analysis>", "</vapt_finding>", "</finding>", "```"]
-                }
-                l_r = requests.post(l_url, json=l_payload, timeout=timeout)
-                if l_r.status_code == 200:
-                    return l_r.json().get("content", "").strip()
-                raise Exception(f"Ollama server error: 404 - Model '{model}' not found or endpoint invalid")
-            else:
-                raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
+            if r.status_code != 200:
+                raise Exception(f"llama-server.exe error: HTTP {r.status_code} - {r.text}")
+            return r.json()
 
-def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=None):
-    """Generates streaming tokens from the LLM backend."""
-    backend = get_llm_backend()
-    host = _resolve_host()
-    
-    if backend in ("llama.cpp", "llamacpp"):
+        result = _complete(1536)
+        if result.get("stop_type") == "limit":
+            # Response was cut off before it finished — retry once with a much larger
+            # budget instead of silently returning (and downstream, failing to parse) a
+            # truncated answer.
+            result = _complete(4096)
+
+        if token_stats is not None:
+            # Real counts from the server itself, not a character-count estimate.
+            token_stats["prompt_tokens"] = result.get("tokens_evaluated", 0)
+            token_stats["completion_tokens"] = result.get("tokens_predicted", 0)
+
+        return result.get("content", "").strip()
+
+def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=None, session_id=None):
+    """Generates streaming tokens from the dedicated llama-server.exe engine.
+    Shares the same port_pool_manager slots as query_llm() instead of an independent,
+    uncoordinated round-robin — otherwise a streaming and non-streaming call could
+    collide on the same in-use slot."""
+    with port_pool_manager.acquire_control_slot(session_id=session_id) as host:
         if "gemma" in model.lower():
             prompt = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
         url = f"{host}/completion"
@@ -155,8 +113,8 @@ def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=No
         }
         r = requests.post(url, json=payload, stream=True, timeout=300)
         if r.status_code != 200:
-            raise Exception(f"llama.cpp server error: {r.status_code} - {r.text}")
-            
+            raise Exception(f"llama-server.exe streaming error: HTTP {r.status_code} - {r.text}")
+
         for line in r.iter_lines():
             if line:
                 decoded = line.decode("utf-8").strip()
@@ -166,75 +124,39 @@ def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=No
                         yield data_json.get("content", "")
                     except Exception:
                         pass
-    else:
-        # Default: Ollama
-        url = f"{host}/api/generate"
-        options_dict = {
-            "temperature": temperature,
-            "num_ctx": num_ctx
-        }
-        if num_thread is not None:
-            options_dict["num_thread"] = num_thread
-
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": True,
-            "options": options_dict,
-            "keep_alive": "15m"
-        }
-        r = requests.post(url, json=payload, stream=True, timeout=300)
-        if r.status_code != 200:
-            raise Exception(f"Ollama server error: {r.status_code} - {r.text}")
-            
-        for line in r.iter_lines():
-            if line:
-                chunk = json.loads(line)
-                yield chunk.get("response", "")
 
 def get_embedding(text, model="nomic-embed-text"):
-    """Fetches text embedding vector from the configured embedding backend."""
+    """Fetches text embedding vector exclusively from the llama-server.exe embedding endpoint."""
     if not text or not str(text).strip():
         return None
 
     # Truncate text to 4000 chars to avoid overloading embedding server context
     text_sample = str(text)[:4000]
 
-    backend = os.environ.get("EMBEDDING_BACKEND", get_llm_backend()).lower()
-    
-    # Resolving hosting ports (Ollama on 11434, llama.cpp embedding server default on 11435)
-    default_port = 11435 if backend in ("llama.cpp", "llamacpp") else 11434
     host_env = os.environ.get("EMBEDDING_HOST") or os.environ.get("OLLAMA_HOST")
-    host = _resolve_host(host_env, default_port)
-    
+    host = _resolve_host(host_env, default_port=11435)
     embed_timeout = int(os.environ.get("EMBEDDING_TIMEOUT", "60"))
-    if backend in ("llama.cpp", "llamacpp"):
-        # native llama.cpp /embedding endpoint
-        url = f"{host}/embedding"
-        try:
-            r = requests.post(url, json={"content": text_sample}, timeout=embed_timeout)
-            if r.status_code == 200:
-                emb = r.json().get("embedding")
-                if emb:
-                    return emb
-        except Exception:
-            # Fallback to OpenAI-compatible /v1/embeddings
-            try:
-                url_v1 = f"{host}/v1/embeddings"
-                r = requests.post(url_v1, json={"input": text_sample, "model": model}, timeout=embed_timeout)
-                if r.status_code == 200:
-                    data = r.json().get("data")
-                    if data and isinstance(data, list) and len(data) > 0:
-                        return data[0].get("embedding")
-            except Exception as e:
-                print(f"[LLM CLIENT ERROR] Failed to query llama.cpp embeddings: {e}")
-    else:
-        # Default Ollama
-        url = f"{host}/api/embeddings"
-        try:
-            r = requests.post(url, json={"model": model, "prompt": text_sample}, timeout=embed_timeout)
-            if r.status_code == 200:
-                return r.json().get("embedding")
-        except Exception as e:
-            print(f"[LLM CLIENT ERROR] Failed to query Ollama embeddings: {e}")
+
+    # Query native llama-server /embedding endpoint
+    url = f"{host}/embedding"
+    try:
+        r = requests.post(url, json={"content": text_sample}, timeout=embed_timeout)
+        if r.status_code == 200:
+            emb = r.json().get("embedding")
+            if emb:
+                return emb
+    except Exception:
+        pass
+
+    # Fallback to OpenAI-compatible /v1/embeddings on llama-server.exe
+    try:
+        url_v1 = f"{host}/v1/embeddings"
+        r = requests.post(url_v1, json={"input": text_sample, "model": model}, timeout=embed_timeout)
+        if r.status_code == 200:
+            data = r.json().get("data")
+            if data and isinstance(data, list) and len(data) > 0:
+                return data[0].get("embedding")
+    except Exception as e:
+        print(f"[LLM CLIENT ERROR] Failed to query llama-server.exe embeddings: {e}")
     return None
+

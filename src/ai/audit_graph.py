@@ -40,6 +40,7 @@ class AuditState(TypedDict):
     validation_error: Optional[str]
     retry_count: int
     final_finding: Optional[Dict[str, Any]]
+    token_stats: Optional[Dict[str, int]]  # real prompt/completion token counts from the LLM server
 
     # Progress reporting
     bg_key: Optional[str]
@@ -183,6 +184,18 @@ def _calculate_adaptive_timeout() -> int:
     return max(600, active_cnt * 180)
 
 
+def _accumulate_token_stats(state: AuditState, chain) -> Dict[str, int]:
+    """Adds a chain's real token usage (from the LLM server) on top of whatever's
+    already recorded in state — generate + reflection are separate LLM calls, so
+    a reflection pass adds to the total rather than replacing it."""
+    prior = state.get("token_stats") or {}
+    new_stats = getattr(chain, "last_token_stats", {}) or {}
+    return {
+        "prompt_tokens": prior.get("prompt_tokens", 0) + new_stats.get("prompt_tokens", 0),
+        "completion_tokens": prior.get("completion_tokens", 0) + new_stats.get("completion_tokens", 0),
+    }
+
+
 def generate_node(state: AuditState) -> Dict[str, Any]:
     """Node: Calls ChatOllama to generate the initial finding draft based on context."""
     _update_progress(state, "Drafting compliance finding", 0.3)
@@ -258,13 +271,16 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
 
         return {
             "draft_finding": draft.model_dump(),
-            "validation_error": None
+            "validation_error": None,
+            "token_stats": _accumulate_token_stats(state, generator_chain)
         }
     except Exception as e:
         print(f"[LANGGRAPH GENERATOR ERROR] Schema parsing failed for control {state['control_id']}: {e}", flush=True)
         return {
             "draft_finding": None,
-            "validation_error": f"Schema parsing/validation failed: {str(e)}"
+            "validation_error": f"Schema parsing/validation failed: {str(e)}",
+            # LLM call may have consumed real tokens even though parsing failed afterward.
+            "token_stats": _accumulate_token_stats(state, generator_chain)
         }
 
 def validate_node(state: AuditState) -> Dict[str, Any]:
@@ -506,13 +522,16 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
         return {
             "draft_finding": refined.model_dump(),
             "validation_error": None,
-            "retry_count": state["retry_count"] + 1
+            "retry_count": state["retry_count"] + 1,
+            "token_stats": _accumulate_token_stats(state, reflection_chain)
         }
     except Exception as e:
         print(f"[LANGGRAPH REFLECTION ERROR] Self-correction call failed: {e}", flush=True)
         return {
             "validation_error": f"Reflection parse failed: {str(e)}",
-            "retry_count": state["retry_count"] + 1
+            "retry_count": state["retry_count"] + 1,
+            # Reflection's LLM call may have consumed real tokens even though parsing failed.
+            "token_stats": _accumulate_token_stats(state, reflection_chain)
         }
 
 # Define edge routing condition

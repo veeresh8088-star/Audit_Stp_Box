@@ -1,7 +1,7 @@
 import os
 import html
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 def _get_all_parsed_findings_from_registry():
     """Returns empty list when no session findings exist — prevents cross-session evidence leakage."""
@@ -130,43 +130,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         val = val.encode("latin-1", "replace").decode("latin-1")
         return val
 
-    # Helper to get dynamic values from st.session_state
-    try:
-        # streamlit removed - core module fallback
-        auditor_lead = st.session_state.get("auditor_lead", "Mr. Vikas Dubey")
-        auditor_firm = st.session_state.get("auditor_firm", "TÜV SÜD South Asia Pvt. Ltd.")
-        auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
-        auditor_approver = st.session_state.get("auditor_approver", "Mr. Atul Srivastava")
-        report_doc_id = st.session_state.get("report_doc_id", "3153142723")
-        
-        # Extract client name from uploaded document filename or active session state
-        file_registry = st.session_state.get("file_registry", {})
-        extracted_scan_dates = extract_scan_dates_from_registry(file_registry)
-        uploaded_names = list(file_registry.keys()) if file_registry else []
-        extracted_client = ""
-        if uploaded_names:
-            first_fname = uploaded_names[0]
-            base_fname = os.path.splitext(os.path.basename(first_fname))[0]
-            clean_name = base_fname.split("_")[0].upper()
-            if len(clean_name) >= 3:
-                extracted_client = clean_name
-                
-        target_client = st.session_state.get("target_entity") or st.session_state.get("auditor_client") or extracted_client or "NOCPL"
-        submitted_to = st.session_state.get("submitted_to", "Ashish Jaiswal")
-        designation = st.session_state.get("designation", "Head of India Channel Sales")
-        email = st.session_state.get("client_email", "ashish.jaiswal1@motorolasolutions.com")
-        testing_dates = st.session_state.get("testing_dates") or extracted_scan_dates or f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
-    except Exception:
-        auditor_lead = "Mr. Vikas Dubey"
-        auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
-        auditor_reviewer = "Ms. Prianka Singla"
-        auditor_approver = "Mr. Atul Srivastava"
-        report_doc_id = "3153142723"
-        target_client = "NOCPL"
-        submitted_to = "Ashish Jaiswal"
-        designation = "Head of India Channel Sales"
-        email = "ashish.jaiswal1@motorolasolutions.com"
-        testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
+    auditor_lead = "Mr. Vikas Dubey"
+    auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
+    auditor_reviewer = "Ms. Prianka Singla"
+    auditor_approver = "Mr. Atul Srivastava"
+    report_doc_id = "3153142723"
+    target_client = "NOCPL"
+    submitted_to = "Ashish Jaiswal"
+    designation = "Head of India Channel Sales"
+    email = "ashish.jaiswal1@motorolasolutions.com"
+    testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
 
     assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "assets"))
     custom_logo_file = os.path.join(assets_dir, "custom_company_logo.png")
@@ -347,11 +320,6 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
 
     # Revision History (Only rendered if real user-entered review process dates exist)
     custom_revs = None
-    try:
-        # streamlit removed - core module fallback
-        custom_revs = st.session_state.get("custom_revision_history")
-    except Exception:
-        custom_revs = None
 
     if custom_revs and isinstance(custom_revs, list) and len(custom_revs) > 0:
         pdf.ln(4)
@@ -606,8 +574,6 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     # Scope IPs Table (3 columns - dynamic)
     dynamic_ips = None
     try:
-        # streamlit removed - core module fallback
-        dynamic_ips = st.session_state.get("target_ips") or st.session_state.get("scoped_ips")
         if findings:
             extracted_hosts = set()
             for f in findings:
@@ -1206,36 +1172,14 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
             tcBorders.append(border)
         tcPr.append(tcBorders)
 
-    try:
-        # streamlit removed - core module fallback
-        auditor_lead = st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")
-        auditor_firm = st.session_state.get("auditor_firm", "TÜV SÜD South Asia Pvt. Ltd.")
-        auditor_reviewer = st.session_state.get("auditor_reviewer", "Ms. Prianka Singla")
-        auditor_approver = st.session_state.get("auditor_approver", "Mr. Atul Srivastava")
-        report_doc_id = st.session_state.get("report_doc_id", "3153142723")
-        file_registry = st.session_state.get("file_registry", {})
-        extracted_scan_dates = extract_scan_dates_from_registry(file_registry)
-        uploaded_names = list(file_registry.keys()) if file_registry else []
-        extracted_client = ""
-        if uploaded_names:
-            first_fname = uploaded_names[0]
-            base_fname = os.path.splitext(os.path.basename(first_fname))[0]
-            clean_name = base_fname.split("_")[0].upper()
-            if len(clean_name) >= 3:
-                extracted_client = clean_name
-                
-        target_client = st.session_state.get("target_entity") or st.session_state.get("auditor_client") or extracted_client or "NOCPL"
-        logo_path = st.session_state.get("auditor_logo_path")
-        testing_dates = st.session_state.get("testing_dates") or extracted_scan_dates or f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
-    except Exception:
-        auditor_lead = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
-        auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
-        auditor_reviewer = "Ms. Prianka Singla"
-        auditor_approver = "Mr. Atul Srivastava"
-        report_doc_id = "3153142723"
-        target_client = "NOCPL"
-        logo_path = None
-        testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
+    auditor_lead = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
+    auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
+    auditor_reviewer = "Ms. Prianka Singla"
+    auditor_approver = "Mr. Atul Srivastava"
+    report_doc_id = "3153142723"
+    target_client = "NOCPL"
+    logo_path = None
+    testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
 
 
     scope_type = "External" if "external" in session_title.lower() else "Internal"
@@ -1706,28 +1650,16 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
     today = datetime.now().strftime("%d.%m.%Y")
 
-    # ── Read sidebar branding from session_state ──────────────────────────────
-    try:
-        # streamlit removed - core module fallback
-        auditor_lead     = st.session_state.get("auditor_lead",     "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")
-        auditor_firm     = st.session_state.get("auditor_firm",     "Digital Age Strategies Pvt Ltd")
-        auditor_reviewer = st.session_state.get("auditor_reviewer", "Mr. Subhash Rao")
-        auditor_approver = st.session_state.get("auditor_approver", "Mr. Dinesh S Shastry")
-        report_doc_id    = st.session_state.get("report_doc_id",    "DigAge:0001:2025-26")
-        target_client    = st.session_state.get("target_entity") or st.session_state.get("auditor_client") or "Client Organization"
-        submitted_to     = st.session_state.get("submitted_to",     "Audit Committee")
-        designation      = st.session_state.get("designation",      "IS Audit Lead")
-        testing_dates    = st.session_state.get("testing_dates",    today)
-    except Exception:
-        auditor_lead     = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
-        auditor_firm     = "Digital Age Strategies Pvt Ltd"
-        auditor_reviewer = "Mr. Subhash Rao"
-        auditor_approver = "Mr. Dinesh S Shastry"
-        report_doc_id    = "DigAge:0001:2025-26"
-        target_client    = "Client Organization"
-        submitted_to     = "Audit Committee"
-        designation      = "IS Audit Lead"
-        testing_dates    = today
+    # ── Report branding defaults ────────────────────────────────────────────
+    auditor_lead     = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
+    auditor_firm     = "Digital Age Strategies Pvt Ltd"
+    auditor_reviewer = "Mr. Subhash Rao"
+    auditor_approver = "Mr. Dinesh S Shastry"
+    report_doc_id    = "DigAge:0001:2025-26"
+    target_client    = "Client Organization"
+    submitted_to     = "Audit Committee"
+    designation      = "IS Audit Lead"
+    testing_dates    = today
 
     # ── Load template (search multiple paths) ─────────────────────────────────
     template_path = None
@@ -2001,11 +1933,7 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
 
 def export_docx_report(session_title, findings, resolved_list, status, comments="", custom_logo=None):
-    try:
-        # streamlit removed - core module fallback
-        st_std = st.session_state.get("selected_standard", "")
-    except Exception:
-        st_std = ""
+    st_std = ""
 
     title_u = str(session_title or "").upper()
     state_u = str(st_std or "").upper()
@@ -2080,11 +2008,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         run.font.color.rgb = _rgb(15, 23, 42)
 
     # ── COVER PAGE ─────────────────────────────────────────────────────────────
-    try:
-        # streamlit removed - core module fallback
-        logo_path = st.session_state.get("auditor_logo_path")
-    except Exception:
-        logo_path = None
+    logo_path = None
     if logo_path and os.path.exists(logo_path):
         logo_p = doc.add_paragraph()
         logo_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -2161,7 +2085,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         ("Date of the Agreement", "[Date of Agreement]"),
         ("Date of Document", datetime.now().strftime("%dth %B %Y")),
         ("Version", "1.0"),
-        ("Prepared By", st.session_state.get("auditor_firm", "Digital Age Strategies"))
+        ("Prepared By", "Digital Age Strategies")
     ]
     for r_idx, (label, val) in enumerate(prep_data):
         c1, c2 = tbl_prep.rows[r_idx].cells
@@ -2220,7 +2144,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     tbl_auditee = doc.add_table(rows=3, cols=3)
     tbl_auditee.style = 'Table Grid'
     auditee_data = [
-        ("1", "Name of Organization", st.session_state.get("target_entity", "the Organization")),
+        ("1", "Name of Organization", "the Organization"),
         ("2", "Audit Area", f"IS Audit of {session_title}"),
         ("3", "Location", "Mumbai, India")
     ]
@@ -2240,7 +2164,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     tbl_auditor = doc.add_table(rows=2, cols=3)
     tbl_auditor.style = 'Table Grid'
     auditor_data = [
-        ("1", "Auditor", st.session_state.get("auditor_lead", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar")),
+        ("1", "Auditor", "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"),
         ("2", "Auditor", "Mr. Mahaveer Rajannavar BE.CEH, ISO 27001 LA")
     ]
     for r_idx, row_data in enumerate(auditor_data):
@@ -2488,11 +2412,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
 
 
 def export_pdf_report(session_title, findings, resolved_list, status, comments=""):
-    try:
-        # streamlit removed - core module fallback
-        st_std = st.session_state.get("selected_standard", "")
-    except Exception:
-        st_std = ""
+    st_std = ""
 
     title_u = str(session_title or "").upper()
     state_u = str(st_std or "").upper()
@@ -2554,11 +2474,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
 
     # ── COVER PAGE ─────────────────────────────────────────────────────────────
     pdf.add_page()
-    try:
-        # streamlit removed - core module fallback
-        logo_path = st.session_state.get("auditor_logo_path")
-    except Exception:
-        logo_path = None
+    logo_path = None
     if logo_path and os.path.exists(logo_path):
         pdf.image(logo_path, x=85, y=15, w=40)
         pdf.ln(35)

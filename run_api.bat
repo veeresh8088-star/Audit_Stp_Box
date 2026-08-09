@@ -56,7 +56,9 @@ echo.
 echo [3/3] Launching AICyberAuditBox Dashboard...
 
 :: Set dynamic concurrency strictly based on Physical Cores (Physical Cores * 2)
-set /a PHYSICAL_CORES=%NUMBER_OF_PROCESSORS% / 2
+set "PHYSICAL_CORES="
+for /f "tokens=*" %%c in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).NumberOfCores" 2^>nul') do set PHYSICAL_CORES=%%c
+if "%PHYSICAL_CORES%"=="" set /a PHYSICAL_CORES=%NUMBER_OF_PROCESSORS% / 2
 if %PHYSICAL_CORES% LSS 1 set PHYSICAL_CORES=2
 set /a MAX_CONCURRENT_AUDITS=%PHYSICAL_CORES% * 2
 if %MAX_CONCURRENT_AUDITS% LSS 4 set MAX_CONCURRENT_AUDITS=4

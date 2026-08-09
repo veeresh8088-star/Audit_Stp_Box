@@ -32,25 +32,28 @@ if exist "C:\Users\veeresh988V\Desktop\llama\llama-server.exe" (
     set "LLAMA_SERVER_EXE=%~dp0llama-server.exe"
 )
 
-:: Calculate Physical Cores (Logical / 2) for thread distribution
+:: Calculate Physical Cores using WMI/CIM (or fallback to logical/2) for accurate thread/slot distribution
+set "PHYSICAL_CORES="
+for /f "tokens=*" %%c in ('powershell -NoProfile -Command "(Get-CimInstance Win32_Processor).NumberOfCores" 2^>nul') do set PHYSICAL_CORES=%%c
+if "%PHYSICAL_CORES%"=="" set /a PHYSICAL_CORES=%NUMBER_OF_PROCESSORS% / 2
+if %PHYSICAL_CORES% LSS 1 set PHYSICAL_CORES=4
+
 set /a LLM_THREADS=%NUMBER_OF_PROCESSORS%
 if %LLM_THREADS% LSS 1 set LLM_THREADS=4
-
-set /a PHYSICAL_CORES=%NUMBER_OF_PROCESSORS% / 2
-if %PHYSICAL_CORES% LSS 1 set PHYSICAL_CORES=4
 
 set /a EMBED_THREADS=%NUMBER_OF_PROCESSORS%
 if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 
-:: Calculate parallel LLM slots for C++ continuous batching based strictly on Physical Cores:
-:: Formula: Physical Cores * 2 (2 slots per physical core)
-:: 4 Physical Cores -> 8 Concurrent Members
-:: 8 Physical Cores -> 16 Concurrent Members
-set /a LLM_SLOTS=%PHYSICAL_CORES% * 2
+:: Calculate parallel LLM slots for llama.cpp continuous batching.
+:: Total context (-c 0, the model's native max) is split evenly across these slots,
+:: so more slots = more concurrent audits but less context room per slot. Formula:
+:: Physical Cores / 2 (e.g. 10 Physical Cores -> 5 Slots) keeps each slot's context
+:: large enough for a full audit document + multi-evidence findings without truncating.
+set /a LLM_SLOTS=%PHYSICAL_CORES% / 2
 if %LLM_SLOTS% LSS 4 set LLM_SLOTS=4
 
 echo.
-echo [2/5] Starting llama.cpp LLM Server (%PHYSICAL_CORES% Physical Cores -> %LLM_SLOTS% Parallel Slots for %LLM_SLOTS% Concurrent Members, --cont-batching)...
+echo [2/5] Starting llama.cpp LLM Server (%PHYSICAL_CORES% Physical Cores --^> %LLM_SLOTS% Parallel Slots for %LLM_SLOTS% Concurrent Members, --cont-batching)...
 start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 0 -np %LLM_SLOTS% -t %LLM_THREADS% -b 2048 -ub 512 --mlock --flash-attn on --cont-batching
 
 echo.
@@ -58,7 +61,7 @@ echo [3/5] Starting llama.cpp Embedding Server (Port 11435 with %EMBED_THREADS% 
 start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t %EMBED_THREADS% --mlock --embedding
 
 echo.
-echo [4/5] Starting Database & Live Telemetry (SQLite / PostgreSQL & Redis Port 6380)...
+echo [4/5] Starting Database ^& Live Telemetry (SQLite / PostgreSQL ^& Redis Port 6380)...
 if exist "%~dp0tools\redis\redis-server.exe" (
     start "Windows Redis Server" /d "%~dp0tools\redis" /min "%~dp0tools\redis\redis-server.exe" --port 6380
 )

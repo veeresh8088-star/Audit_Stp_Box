@@ -635,6 +635,8 @@ Return format: ["topic1", "topic2", ...]"""
     all_results = []
     total = len(controls)
     overall_start_time = time.time()
+    _audit_real_prompt_toks = 0
+    _audit_real_comp_toks = 0
     
     msg = f"[AUDIT START] Starting LangGraph ISO 27001 Audit for {total} controls (Model: {model_choice}, Mode: {audit_mode})"
     print(f"\n[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -802,6 +804,7 @@ Return format: ["topic1", "topic2", ...]"""
             "validation_error": None,
             "retry_count": 0,
             "final_finding": None,
+            "token_stats": {},
 
             # Progress tracking
             "bg_key": bg_key,
@@ -861,9 +864,12 @@ Return format: ["topic1", "topic2", ...]"""
             c_secs = round(ctrl_duration % 60, 1)
             c_lat_str = f"{c_mins}m {c_secs}s" if c_mins > 0 else f"0m {c_secs}s"
 
-            ctrl_p_toks = int(len(str(control_context or "")) / 3.8) + 650
-            ctrl_c_toks = int(len(str(result.get("reasoning", "") if result else "")) / 3.8) + 120
+            _real_token_stats = state_output.get("token_stats") or {}
+            ctrl_p_toks = _real_token_stats.get("prompt_tokens", 0)
+            ctrl_c_toks = _real_token_stats.get("completion_tokens", 0)
             ctrl_t_toks = ctrl_p_toks + ctrl_c_toks
+            _audit_real_prompt_toks += ctrl_p_toks
+            _audit_real_comp_toks += ctrl_c_toks
 
             print(f"[{time.strftime('%H:%M:%S')}] [CONTROL EVALUATED] {c['control']} ({c['label']}) | Status: {res_status} | Latency: {c_lat_str} ({ctrl_duration:.1f}s) | Tokens Used: {ctrl_t_toks:,} (Prompt: {ctrl_p_toks:,}, Completion: {ctrl_c_toks:,})", flush=True)
             log_dev_latency(f"[{idx + 1}/{total}] [SUCCESS] Control {c['control']} {c['label']} completed in {ctrl_duration:.2f}s ({c_lat_str}) | Tokens: {ctrl_t_toks:,}")
@@ -962,8 +968,8 @@ Return format: ["topic1", "topic2", ...]"""
 
         cpu_cores_cnt = os.cpu_count() or 4
 
-        prompt_toks = int(text_chars / 3.8) + (total * 800)
-        comp_toks = total * 175
+        prompt_toks = _audit_real_prompt_toks
+        comp_toks = _audit_real_comp_toks
         tot_tokens_all = prompt_toks + comp_toks
         avg_tokens_ctrl = round(tot_tokens_all / max(1, total), 1)
 
@@ -1055,7 +1061,8 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
     acquired_slot = False
     try:
         if not _audit_semaphore.acquire(timeout=5.0):
-            print(f"[_run_ollama_bg WARNING] Concurrency slot busy; auto-releasing semaphore slot for {bg_key}...", flush=True)
+            print(f"[_run_ollama_bg WARNING] Concurrency slot busy for {bg_key}; waiting for a slot to free up...", flush=True)
+            _audit_semaphore.acquire()
         acquired_slot = True
 
 

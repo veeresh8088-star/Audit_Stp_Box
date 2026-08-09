@@ -1,12 +1,18 @@
 import os
 import json
 import time
+import threading
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 BENCHMARK_JSON_PATH = "data/audit_token_benchmark.json"
 BENCHMARK_EXCEL_PATH = "data/audit_token_benchmark.xlsx"
+
+# Serializes the read-modify-write cycle below across concurrent audit threads —
+# without this, two audits finishing close together can each read the same file,
+# append their own record, and the second write silently overwrites the first.
+_benchmark_file_lock = threading.Lock()
 
 def record_token_metrics(
     session_id: str,
@@ -75,23 +81,24 @@ def record_token_metrics(
     }
 
     # 1. Update JSON database
-    records = []
-    if os.path.exists(BENCHMARK_JSON_PATH):
-        try:
-            with open(BENCHMARK_JSON_PATH, "r", encoding="utf-8") as f:
-                records = json.load(f)
-        except Exception:
-            records = []
-    
-    # Check if entry already exists for session_id to avoid duplication
-    records = [r for r in records if r.get("session_id") != session_id]
-    records.append(record)
+    with _benchmark_file_lock:
+        records = []
+        if os.path.exists(BENCHMARK_JSON_PATH):
+            try:
+                with open(BENCHMARK_JSON_PATH, "r", encoding="utf-8") as f:
+                    records = json.load(f)
+            except Exception:
+                records = []
 
-    with open(BENCHMARK_JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump(records, f, indent=2)
+        # Check if entry already exists for session_id to avoid duplication
+        records = [r for r in records if r.get("session_id") != session_id]
+        records.append(record)
 
-    # 2. Export Styled Excel Spreadsheet
-    generate_excel_benchmark_report(records, BENCHMARK_EXCEL_PATH)
+        with open(BENCHMARK_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=2)
+
+        # 2. Export Styled Excel Spreadsheet
+        generate_excel_benchmark_report(records, BENCHMARK_EXCEL_PATH)
     print(f"[TOKEN TRACKER] Recorded metrics for session {session_id[:8]} ({scoping_mode}): {total_tokens} tokens, {round(total_latency_sec,1)}s latency, {cpu_cores} CPU cores.", flush=True)
     return record
 

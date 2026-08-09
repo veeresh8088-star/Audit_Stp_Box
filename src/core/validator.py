@@ -572,19 +572,36 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
 
     # ════════════════════════════════════════
     # GATE 2: Verbatim Grounding & Chunk Mapping (Normalized)
+    # evidence_clean may contain multiple distinct excerpts joined by "\n\n" (multi-
+    # evidence findings). Each one is verified INDEPENDENTLY here — checking the whole
+    # joined blob as a single quote would (and did) always fail, since 6 sentences from
+    # different parts of a document never appear as one continuous block anywhere in the
+    # source, which silently collapsed correct multi-item findings down to whichever
+    # single prefix happened to match first.
     # ════════════════════════════════════════
     grounded_state = "NOT_GROUNDED"
     matched_chunk_id = None
-    
-    norm_evidence = normalize_text(evidence_clean)
-    if norm_evidence and norm_evidence != "not_found":
-        found_in_chunk = False
+
+    candidate_items = (
+        [c.strip() for c in evidence_clean.split("\n\n") if c.strip()]
+        if evidence_clean != "NOT_FOUND" else []
+    )
+    grounded_items = []
+
+    for item_text in candidate_items:
+        norm_item = normalize_text(item_text)
+        if not norm_item or norm_item == "not_found":
+            continue
+
+        item_grounded = False
+        item_final_text = item_text
+
         if db_chunks:
             for chunk in db_chunks:
                 norm_chunk = normalize_text(chunk.content)
-                if norm_evidence in norm_chunk:
-                    grounded_state = "GROUNDED"
-                    matched_chunk_id = chunk.id
+                if norm_item in norm_chunk:
+                    item_grounded = True
+                    matched_chunk_id = matched_chunk_id or chunk.id
                     # Extract source details from metadata_json if present (to map to specific files inside a ZIP)
                     if chunk.metadata_json:
                         try:
@@ -598,46 +615,47 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
                         except Exception:
                             pass
                     break
-        
+
         # Fallback to checking the full document text (essential when retrieval bypassed chunking for small files)
-        if not found_in_chunk and document_text:
+        if not item_grounded and document_text:
             norm_doc = normalize_text(document_text)
-            if norm_evidence in norm_doc:
-                grounded_state = "GROUNDED"
+            if norm_item in norm_doc:
+                item_grounded = True
             else:
                 # Fallback: check via alphanumeric-only match to handle smart quote / encoding differences
-                alpha_evidence = clean_alphanumeric(evidence_clean)
+                alpha_item = clean_alphanumeric(item_text)
                 alpha_doc = clean_alphanumeric(document_text)
-                if alpha_evidence and alpha_evidence in alpha_doc:
-                    grounded_state = "GROUNDED"
+                if alpha_item and alpha_item in alpha_doc:
+                    item_grounded = True
                     print(f"[VALIDATOR] Grounding matched via alphanumeric fallback for control {control_id}", flush=True)
                 else:
-                    # Look for the longest prefix of the quote (word by word) that exists in the document
-                    words = evidence_clean.split()
-                    found_prefix = False
+                    # Look for the longest prefix of THIS item (word by word) that exists in the document
+                    words = item_text.split()
                     for i in range(len(words), 5, -1):  # Check down to minimum of 6 words
                         prefix = " ".join(words[:i])
                         norm_prefix = normalize_text(prefix)
                         if norm_prefix in norm_doc:
-                            evidence_clean = prefix
-                            finding["evidence_quote"] = prefix
-                            finding["evidence_snippet"] = prefix
-                            norm_evidence = norm_prefix
-                            grounded_state = "GROUNDED"
-                            found_prefix = True
+                            item_final_text = prefix
+                            item_grounded = True
                             print(f"[VALIDATOR] Longest matching quote prefix accepted: '{prefix}'", flush=True)
                             break
-                        else:
-                            alpha_prefix = clean_alphanumeric(prefix)
-                            if alpha_prefix and alpha_prefix in alpha_doc:
-                                evidence_clean = prefix
-                                finding["evidence_quote"] = prefix
-                                finding["evidence_snippet"] = prefix
-                                norm_evidence = norm_prefix
-                                grounded_state = "GROUNDED"
-                                found_prefix = True
-                                print(f"[VALIDATOR] Longest matching quote prefix accepted (alphanumeric): '{prefix}'", flush=True)
-                                break
+                        alpha_prefix = clean_alphanumeric(prefix)
+                        if alpha_prefix and alpha_prefix in alpha_doc:
+                            item_final_text = prefix
+                            item_grounded = True
+                            print(f"[VALIDATOR] Longest matching quote prefix accepted (alphanumeric): '{prefix}'", flush=True)
+                            break
+
+        if item_grounded:
+            grounded_items.append(item_final_text)
+
+    if grounded_items:
+        grounded_state = "GROUNDED"
+        evidence_clean = "\n\n".join(grounded_items)
+        finding["evidence_quote"] = evidence_clean
+        finding["evidence_snippet"] = evidence_clean
+
+    norm_evidence = normalize_text(evidence_clean) if evidence_clean != "NOT_FOUND" else ""
 
 
     # ════════════════════════════════════════

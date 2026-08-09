@@ -3025,6 +3025,34 @@ function formatEvidenceSnippet(snip) {
     return snip;
 }
 
+// Renders the ISO "Evidence Snippet" section as a real point-wise list when the finding
+// has multiple distinct evidence excerpts, instead of one merged block of text. Falls back
+// to the existing single-block rendering for OCR/CloudWatch snippets and single-quote cases.
+const EVIDENCE_SNIPPET_PRE_STYLE = "margin:0; font-family:'Consolas','Fira Code',monospace; font-size:0.78rem; color:#f8fafc; background:rgba(15,23,42,0.9); padding:10px 12px; border-radius:8px; border:1px solid rgba(59,130,246,0.3); line-height:1.45; white-space:pre-wrap; word-break:break-word;";
+
+function buildEvidenceSnippetHtml(rawSnip) {
+    let snip = rawSnip;
+    if (typeof snip !== "string") snip = String(snip || "");
+    snip = snip.trim();
+
+    const isSpecialCase = !snip || snip.length <= 3
+        || snip.includes("Business Impact:") || snip.includes("Missing Requirements:")
+        || _isOcrNoiseText(snip)
+        || /cloudwatch|aws\/ec2|mem_used|cpuutilization|ebswriteops|ebsreadops|srit-monitoring/i.test(snip);
+
+    if (!isSpecialCase && snip.includes("\n\n")) {
+        const parts = snip.split("\n\n").map(p => p.trim()).filter(Boolean);
+        if (parts.length > 1) {
+            const items = parts.map((p, idx) =>
+                `<li style="margin-bottom:10px;"><span style="color:#60a5fa; font-weight:700;">Evidence ${idx + 1} of ${parts.length}:</span><br>"${escapeHtml(p)}"</li>`
+            ).join("");
+            return `<ol class="finding-snippet" style="${EVIDENCE_SNIPPET_PRE_STYLE.replace('white-space:pre-wrap;', '')} padding-left:22px;">${items}</ol>`;
+        }
+    }
+
+    return `<pre class="finding-snippet" style="${EVIDENCE_SNIPPET_PRE_STYLE}">${escapeHtml(formatEvidenceSnippet(rawSnip))}</pre>`;
+}
+
 
 function getCleanFindingDescription(f) {
     if (!f) return "Control evaluation performed against compliance requirements.";
@@ -3424,17 +3452,17 @@ function renderFindingsList() {
                 <div class="finding-body">
                     <div class="finding-detail-row" style="margin-bottom: 12px;">
                         <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">FINDING DESCRIPTION</label>
-                        <p style="margin:0; font-size:0.86rem; color:var(--text-primary); line-height:1.5;">${getCleanFindingDescription(f)}</p>
+                        <p style="margin:0; font-size:0.86rem; color:var(--text-primary); line-height:1.5;">${escapeHtml(getCleanFindingDescription(f))}</p>
                     </div>
 
                     <div class="finding-detail-row" style="margin-bottom: 12px;">
                         <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">EVIDENCE SNIPPET</label>
-                        <pre class="finding-snippet" style="margin:0; font-family:'Consolas','Fira Code',monospace; font-size:0.78rem; color:#f8fafc; background:rgba(15,23,42,0.9); padding:10px 12px; border-radius:8px; border:1px solid rgba(59,130,246,0.3); line-height:1.45; white-space:pre-wrap; word-break:break-word;">${escapeHtml(formatEvidenceSnippet(singleSnip))}</pre>
+                        ${buildEvidenceSnippetHtml(singleSnip)}
                     </div>
 
                     <div class="finding-detail-row" style="margin-bottom: 12px;">
                         <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">LEAD AUDITOR RECOMMENDATIONS</label>
-                        <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${getCleanRecommendation(f)}</p>
+                        <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${escapeHtml(getCleanRecommendation(f))}</p>
                     </div>
 
                     <div class="finding-actions" style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid rgba(148,163,184,0.15);">
