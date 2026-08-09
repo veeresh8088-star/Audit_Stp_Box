@@ -1876,7 +1876,7 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
             risk_lbl   = _risk_level(f)
             impact     = str(f.get("impact") or f.get("risk_impact") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Business Risk"))
             suggestion = str(f.get("recommendation") or f.get("suggestion") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Remediate as per IS guidelines."))[:400]
-            evidence   = str(f.get("source_files") or f.get("evidence_quote") or f.get("evidence") or "Audit Evidence Files")[:200]
+            evidence   = str(f.get("source_files") or f.get("evidence_quote") or f.get("evidence") or "Audit Evidence Files")
 
 
             _add_obs_row(

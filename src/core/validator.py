@@ -458,9 +458,9 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     print(f"\n{'='*60}", flush=True)
     print(f"[VALIDATOR DEBUG] Control: {control_id}", flush=True)
     print(f"[VALIDATOR DEBUG] RAW LLM Status: {raw_status}", flush=True)
-    print(f"[VALIDATOR DEBUG] RAW LLM Evidence: {raw_evidence[:200]}", flush=True)
+    print(f"[VALIDATOR DEBUG] RAW LLM Evidence: {raw_evidence}", flush=True)
     print(f"[VALIDATOR DEBUG] RAW LLM Confidence: {raw_confidence}", flush=True)
-    print(f"[VALIDATOR DEBUG] RAW LLM Gap: {raw_gap[:200]}", flush=True)
+    print(f"[VALIDATOR DEBUG] RAW LLM Gap: {raw_gap}", flush=True)
     print(f"{'='*60}", flush=True)
     
     evidence = finding.get("evidence_quote") or "NOT_FOUND"
@@ -929,7 +929,8 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         else:
             finding["recommendation"] = "No recommendation required. This control has been identified as not applicable to the audited document scope."
     else:
-        if not finding.get("recommendation") or finding.get("recommendation", "").lower().startswith("establish"):
+        _rec_lower = finding.get("recommendation", "").lower()
+        if not finding.get("recommendation") or _rec_lower.startswith("establish") or _is_stale_no_action_recommendation(_rec_lower):
             from src.core.controls_data import USE_CASES
             rec = ""
             for uc in USE_CASES:
@@ -956,6 +957,20 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             finding["recommendation"] = rec
 
     return finding
+
+
+_STALE_NO_ACTION_PHRASES = [
+    "no action required", "no action needed", "no further action",
+    "no corrective action", "no remediation required", "no remediation needed",
+    "evidence satisfies", "adequately addressed", "not required",
+    "continue to maintain current procedures",
+]
+
+
+def _is_stale_no_action_recommendation(rec_lower: str) -> bool:
+    """True if a recommendation reads like a COMPLIANT closure note (any phrasing),
+    which must never survive on a finding whose final status is NON_COMPLIANT."""
+    return any(phrase in rec_lower for phrase in _STALE_NO_ACTION_PHRASES)
 
 
 def post_process(finding, document_text, expected_evidence_map=None, db_chunks=None):
@@ -1067,9 +1082,17 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
             is_negative_description = False
 
         if is_negative_quote or is_negative_description:
-            # Quote or observation explicitly states absence of evidence — do NOT upgrade.
+            # Do NOT upgrade — but state the real reason instead of one generic message,
+            # since "evidence is absent" is misleading when a real quote exists and the
+            # actual trigger was a stated (but unmet) gap/missing-requirement.
             cid = finding.get("control_id") or ""
-            print(f"[RULE 8 SKIP] Control {cid}: Quote or description explicitly states evidence is absent. "
+            if is_negative_quote:
+                _skip_reason = "Evidence quote itself explicitly states evidence is absent/not found"
+            elif any(neg in description_lower for neg in _neg_description) or any(neg in gap_lower for neg in _neg_description):
+                _skip_reason = "Description/gap text explicitly states evidence is absent/not documented"
+            else:
+                _skip_reason = "Gap description states a real, unmet 'Missing Requirements' item (evidence exists but does not fully satisfy the control)"
+            print(f"[RULE 8 SKIP] Control {cid}: {_skip_reason}. "
                   f"Keeping NON_COMPLIANT to prevent self-contradiction.", flush=True)
         else:
             # Evidence exists in the quote — check if the reasoning acknowledges it was found
@@ -1106,6 +1129,16 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
         pol_pres = str(finding.get("policy_present") or "No").strip().upper()
         ev_pres  = str(finding.get("evidence_present") or "No").strip().upper()
 
+        # Reconcile with the already-verified grounded evidence quote: grounding
+        # independently confirmed (against the source document, not the LLM's opinion)
+        # whether real evidence text exists. Trust that over the LLM's separate,
+        # unverified evidence_present self-rating so the two can't disagree on the
+        # same underlying fact (e.g. Evidence=YES above vs Evidence=NOT FOUND here).
+        _quote_check = str(finding.get("evidence_quote") or "").strip()
+        if (finding.get("hallucination_check") in ("GROUNDED", "GROUNDED_WITH_OCR_WARNING")
+                and _quote_check and _quote_check.upper() != "NOT_FOUND"):
+            ev_pres = "YES"
+
         if pol_pres in ("YES", "COMPLIANT") and ev_pres in ("YES", "COMPLIANT"):
             finding["status"] = "COMPLIANT"
             finding["policy_present"] = "Compliant"
@@ -1137,7 +1170,7 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                 finding["policy_present"]  = "Found"
                 finding["evidence_present"] = "Found"
                 rec_str = str(finding.get("recommendation") or "").lower()
-                if not rec_str or "no action required" in rec_str or "evidence satisfies" in rec_str:
+                if not rec_str or _is_stale_no_action_recommendation(rec_str):
                     finding["recommendation"] = (
                         f"The uploaded document was read but does not fully satisfy {cname} "
                         f"(ISO 27001 Control {cid}). Review and update the existing policy to address "
@@ -1153,7 +1186,7 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                 if any(neg in snip_lower for neg in ["no evidence", "not found", "focuses entirely on", "exclusively details"]):
                     finding["evidence_snippet"] = ""
                 rec_str = str(finding.get("recommendation") or "").lower()
-                if not rec_str or "no action required" in rec_str or "evidence satisfies" in rec_str:
+                if not rec_str or _is_stale_no_action_recommendation(rec_str):
                     finding["recommendation"] = (
                         f"No policy or evidence document was uploaded for {cname} "
                         f"(ISO 27001 Control {cid}). Create a formally approved policy document, "

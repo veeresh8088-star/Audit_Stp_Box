@@ -40,18 +40,32 @@ _DIRECT_KEYWORD_CONTROL_MAP = [
     (["multifactor", "mfa", "multi-factor", "2fa", "two-factor"], "5.17 Authentication Information"),
     (["pam", "privileged access", "pim", "idam"], "5.15 Access Control"),
     (["access control policy", "access control"], "5.15 Access Control"),
-    (["authentication", "auth", "how is the auth"], "5.15 Access Control"),
-    (["asset management policy", "asset management", "asset inventory", "inventory", "register"], "5.9 Inventory of Information and Other Associated Assets"),
+    # NOTE: control 5.17 is literally named "Authentication Information" — this must
+    # point there, not at 5.15 (physical/logical Access Control). Bare "auth" was
+    # removed: as a substring match it also fired on "authorization"/"author" and
+    # could out-rank the more specific "access control" entry above depending on
+    # list order, misrouting an Access Control row's evidence file into 5.17's
+    # (or vice versa) whenever both keywords co-occurred in a question.
+    (["authentication", "how is the auth"], "5.17 Authentication Information"),
+    # Bare "register" removed: as a substring it also matched "risk register",
+    # misrouting risk-assessment questions into Asset Inventory.
+    (["asset management policy", "asset management", "asset inventory"], "5.9 Inventory of Information and Other Associated Assets"),
     (["incident management policy", "incident response", "incident plan", "irp"], "5.24 Information Security Incident Management Planning and Preparation"),
     (["business continuity plan", "bcp", "disaster recovery", "dr plan"], "5.29 Information Security During Disruption"),
+    # Checked BEFORE the HR "screening" entry below so "vulnerability screening"
+    # resolves to 8.8 instead of being caught by the HR background-check keyword.
+    (["vulnerability", "patch", "scan"], "8.8 Management of Technical Vulnerabilities"),
     (["hr security policy", "people security policy", "screening"], "6.1 Screening"),
     (["physical security policy", "physical entry", "physical perimeter"], "7.1 Physical Security Perimeters"),
-    (["cpu", "memory", "disk", "utilization", "capacity", "cloudwatch", "monitoring"], "8.6 Capacity Management"),
+    # Checked BEFORE Capacity Management below: a bare "monitoring" mention should
+    # default to Monitoring Activities (8.16), not be swallowed by Capacity
+    # Management, which previously had no dedicated competing entry at all.
+    (["security monitoring", "log monitoring", "siem", "monitoring activities", "monitoring"], "8.16 Monitoring Activities"),
+    (["cpu", "memory", "disk", "utilization", "capacity", "cloudwatch"], "8.6 Capacity Management"),
     (["log archival", "log archived", "archiv", "retention", "records"], "5.33 Protection of Records"),
     (["backup", "recovery", "restore"], "8.13 Information Backup"),
     (["incident", "response", "breach"], "5.24 Information Security Incident Management Planning and Preparation"),
     (["encryption", "tls", "ssl", "cipher"], "8.24 Use of Cryptography"),
-    (["vulnerability", "patch", "scan"], "8.8 Management of Technical Vulnerabilities"),
     (["password", "credential", "secret"], "5.17 Authentication Information"),
     (["firewall", "network", "traffic"], "8.20 Networks Security"),
     (["gdpr", "pii", "personal data", "privacy"], "5.34 Privacy and Protection of Personally Identifiable Information (Pii)"),

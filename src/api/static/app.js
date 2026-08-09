@@ -1066,6 +1066,7 @@ async function processEvidenceFiles(files) {
                 formData.append("files", file);
                 formData.append("session_id", activeSessionId);
                 formData.append("is_auditor_uploaded", "true");
+                formData.append("username", currentUser ? currentUser.username : "");
 
                 fetch(`${API_BASE}/audit/upload`, {
                     method: "POST",
@@ -1632,6 +1633,7 @@ async function uploadFiles(files) {
     const body = new FormData();
     body.append("session_id", activeSessionId);
     body.append("is_auditor_uploaded", isAuditor ? "true" : "false");
+    body.append("username", currentUser ? currentUser.username : "");
 
     for (let i = 0; i < files.length; i++) {
         body.append("files", files[i]);
@@ -1775,7 +1777,8 @@ async function triggerAuditAnalysis() {
                 model_choice: model,
                 audit_mode: mode,
                 custom_evidence: customEvidenceMappings,
-                custom_documents: customControlDocuments
+                custom_documents: customControlDocuments,
+                username: currentUser ? currentUser.username : null
             })
         });
 
@@ -4530,6 +4533,7 @@ async function handleSidebarUpload(event) {
     const body = new FormData();
     body.append("session_id", activeSessionId);
     body.append("is_auditor_uploaded", "true");
+    body.append("username", currentUser ? currentUser.username : "");
 
     for (let i = 0; i < files.length; i++) {
         body.append("files", files[i]);
@@ -5635,6 +5639,13 @@ async function handleScopingExcelUpload(event) {
                 const chk = document.getElementById(`ctrl_chk_${sl}`);
                 if (chk) chk.checked = true;
             });
+
+            // Persist the row-level Excel data (per-row control + locked evidence file)
+            // so /audit/start actually receives it — without this, the audit falls back
+            // to deduping by unique control ID (losing rows that share a control) and
+            // running with no per-control file locking at all.
+            customEvidenceMappings = data.custom_evidence || null;
+            customControlDocuments = data.custom_documents || null;
 
             updateSelectedScopeCount();
             setScopingMode('Excel Scoping');

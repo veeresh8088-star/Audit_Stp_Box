@@ -89,6 +89,7 @@ class StartAuditRequest(BaseModel):
     audit_mode: str = "Deep"
     custom_evidence: Optional[dict] = None
     custom_documents: Optional[dict] = None
+    username: Optional[str] = None
 
 class UpdateFindingRequest(BaseModel):
     status: str
@@ -221,7 +222,14 @@ def api_get_sessions(username: Optional[str] = None):
 
 @router.get("/auditee-sessions")
 def api_get_auditee_sessions(username: Optional[str] = None):
-    """Returns only sessions strictly scoped to the requesting auditee."""
+    """Returns sessions scoped to the requesting user's role.
+
+    Auditee callers see their own submitted sessions (created_by == them, or
+    auditee_id assigned to them). Auditor/admin callers must see ONLY sessions
+    a real auditee actually submitted (auditee_id set) — never the caller's
+    own auditor-run sessions, which have no auditee attached and would
+    otherwise get mislabeled here as if the auditor were the auditee.
+    """
     if not username or not username.strip():
         return {"success": True, "sessions": []}
 
@@ -230,13 +238,15 @@ def api_get_auditee_sessions(username: Optional[str] = None):
         with force_master():
             user = db.query(User).filter(User.username == username).first()
             user_id = user.id if user else None
+            is_auditee_caller = bool(user and user.role and user.role.lower() == "auditee")
 
-            if user_id:
+            if is_auditee_caller and user_id:
                 query = db.query(AuditReport).filter(
                     (AuditReport.auditee_id == user_id) | (AuditReport.created_by == username)
                 )
             else:
-                query = db.query(AuditReport).filter(AuditReport.created_by == username)
+                # Auditor/admin view: only sessions a real auditee actually submitted.
+                query = db.query(AuditReport).filter(AuditReport.auditee_id.isnot(None))
 
             reports = query.order_by(AuditReport.created_at.desc()).all()
 
@@ -245,8 +255,15 @@ def api_get_auditee_sessions(username: Optional[str] = None):
                 auditee_username = None
                 if r.auditee_id:
                     u = db.query(User).filter(User.id == r.auditee_id).first()
-                    if u:
+                    # Only trust auditee_id if it still resolves to a real auditee-role
+                    # user. Stale rows (e.g. from a users-table reset that reused IDs)
+                    # can leave auditee_id pointing at an auditor account — never
+                    # surface that as if it were a genuine auditee submission.
+                    if u and u.role and u.role.lower() == "auditee":
                         auditee_username = u.username
+
+                if not auditee_username and not is_auditee_caller:
+                    continue  # Stale/invalid auditee_id — skip, not a real auditee session.
 
                 files_count = db.query(EvidenceFile).filter(
                     EvidenceFile.report_id == r.id,
@@ -257,7 +274,7 @@ def api_get_auditee_sessions(username: Optional[str] = None):
                     "id": r.id,
                     "session_id": r.session_id,
                     "session_title": r.session_title,
-                    "auditee_username": auditee_username or r.created_by or "Auditee Client",
+                    "auditee_username": auditee_username or (r.created_by if is_auditee_caller else "Auditee Client"),
                     "files_count": files_count,
                     "created_at": str(r.created_at)
                 })
@@ -305,7 +322,8 @@ async def api_upload_evidence(
     session_id: str = Form(...),
     is_auditor_uploaded: bool = Form(True),
     files: List[UploadFile] = File(...),
-    bg_tasks: BackgroundTasks = None
+    bg_tasks: BackgroundTasks = None,
+    username: Optional[str] = Form(None)
 ):
     """
     FIX: async def + await f.read() → Uvicorn event loop reads all 10 concurrent
@@ -323,7 +341,7 @@ async def api_upload_evidence(
     db = SessionLocal()
     try:
         with force_master():
-            report = get_or_create_audit_report(db, session_id)
+            report = get_or_create_audit_report(db, session_id, username=username)
             report_id = report.id
 
         uploaded_details = []
@@ -501,7 +519,7 @@ def api_start_audit(req: StartAuditRequest):
     db = SessionLocal()
     try:
         with force_master():
-            report = get_or_create_audit_report(db, req.session_id)
+            report = get_or_create_audit_report(db, req.session_id, username=req.username)
             report_id = report.id
             report_framework = report.framework or ""
 
@@ -820,8 +838,8 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
     try:
         from src.db.database import AdminAuditLog
         with force_master():
-            report = get_or_create_audit_report(db, session_id)
-                
+            report = get_or_create_audit_report(db, session_id, username=auditor_user)
+
             all_findings = db.query(Finding).filter(Finding.report_id == report.id).all()
             # Exclude INFO severity items so count matches the 258 actionable findings in UI
             findings = [f for f in all_findings if 'INFO' not in str(f.severity).upper() and 'INFO' not in str(f.status).upper()]
