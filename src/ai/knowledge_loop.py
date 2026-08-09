@@ -95,7 +95,7 @@ def format_loop_hints(feedbacks):
 
 
 def get_auditor_feedback_few_shot(control_ids):
-    """Retrieve up to 15 most recent auditor feedbacks matching the given control IDs,
+    """Retrieve up to 20 most recent auditor feedbacks matching the given control IDs,
     and format them as general compliance rules (knowledge) for the prompt.
     """
     if not control_ids:
@@ -109,7 +109,7 @@ def get_auditor_feedback_few_shot(control_ids):
                 session.query(AuditorFeedback)
                 .filter(AuditorFeedback.control_id.in_(control_ids))
                 .order_by(AuditorFeedback.created_at.desc())
-                .limit(15)
+                .limit(20)
                 .all()
             )
             if not feedbacks:

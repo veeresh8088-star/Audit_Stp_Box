@@ -474,35 +474,63 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     finding["chunk_id"] = None
     
     if evidence_clean == "NOT_FOUND":
-        # Smart NOT_FOUND: check if document contains operational keyword evidence related to this control.
-        if potential_evidence_exists(control_id, document_text):
-            print(f"[VALIDATOR DEBUG] [COMPLIANT] {control_id}: Operational evidence verified in document context. Marking as COMPLIANT per intent-based assessment.", flush=True)
-            finding["status"] = "COMPLIANT"
-            finding["policy_present"] = "Compliant"
-            finding["evidence_present"] = "Compliant"
-            finding["hallucination_check"] = "PASS"
-            finding["requires_human_review"] = False
-            finding["requires_review"] = False
-            finding["finding"] = f"Operational evidence (system resource monitoring, metric thresholds, and dashboard alerts) verified in document context for Control {control_id}."
-            finding["evidence_snippet"] = "Operational capacity monitoring evidence and system resource thresholds verified via document context."
-            finding["recommendation"] = "No action required. Continue periodic capacity monitoring and threshold review."
-            finding["reasoning"] = f"Document evidence demonstrates active resource capacity tracking and threshold monitoring for Control {control_id}."
-            finding["validator_note"] = "Operational evidence verified per ISO 27001 intent-based assessment."
-            finding["review_note"] = "Operational evidence verified in document context."
-            finding["severity"] = "P4 Low"
-            return finding
+        # NOT_FOUND must never be silently auto-approved. This used to check for a loose
+        # keyword match anywhere in the full combined document text (all uploaded files,
+        # unscoped) and, if found, stamp the finding COMPLIANT with hardcoded boilerplate
+        # text written for one specific control (8.6 Capacity Management) -- which then
+        # appeared verbatim on unrelated controls (e.g. 5.1 Policies for Information
+        # Security) any time the LLM itself found no real evidence to quote. A generic
+        # keyword match is not evidence the control is satisfied. Fail safe instead:
+        # always NON_COMPLIANT, flagged for human review; the keyword hit only changes
+        # the review note/severity, it never upgrades the status.
+        has_keyword_hit = potential_evidence_exists(control_id, document_text)
+        # Describe WHAT is missing, not just that review is needed -- pull the control's
+        # own expected-evidence description (set upstream in audit_graph.py) so the finding
+        # names the actual requirement instead of a generic "requires manual review" note.
+        expected_hints = expected_evidence_map.get(code) if expected_evidence_map else None
+        expected_text = str(expected_hints[0]).strip().rstrip(".") if expected_hints and expected_hints[0] else ""
+        print(
+            f"[VALIDATOR DEBUG] [NON_COMPLIANT] {control_id}: LLM returned NOT_FOUND evidence "
+            f"(keyword-level match in documents: {has_keyword_hit}). Setting NON_COMPLIANT for human review.",
+            flush=True
+        )
+        finding["status"] = "NON_COMPLIANT"
+        finding["hallucination_check"] = "NOT_FOUND"
+        finding["requires_human_review"] = True
+        finding["requires_review"] = True
+        finding["confidence"] = 1
+        if has_keyword_hit:
+            gap_text = (
+                f"The uploaded documents reference related terms, but do not contain {expected_text}."
+                if expected_text else
+                "The uploaded documents reference related terms, but no passage documenting this control's requirement could be found."
+            )
+            finding["validator_note"] = gap_text
+            finding["review_note"] = gap_text
+            finding["finding"] = gap_text
+            finding["severity"] = "P3 Medium"
+            finding["recommendation"] = (
+                f"Upload or point to the specific document containing {expected_text}, "
+                f"or add the missing passage to an existing document, for auditor review."
+                if expected_text else
+                f"Provide the specific document demonstrating compliance with {control_id} for auditor review."
+            )
         else:
-            print(f"[VALIDATOR DEBUG] [NON_COMPLIANT] {control_id}: LLM returned NOT_FOUND evidence and no keywords found (Out of Scope). Setting NON_COMPLIANT.", flush=True)
-            finding["status"] = "NON_COMPLIANT"
-            finding["hallucination_check"] = "NOT_FOUND"
-            finding["requires_human_review"] = True
-            finding["requires_review"] = True
-            finding["confidence"] = 1
-            finding["validator_note"] = "Heuristic-based Out of Scope (no keywords) mapped to NON_COMPLIANT"
-            finding["review_note"] = "Heuristic-based Out of Scope: No keywords or evidence found in the document. Mapped to NON_COMPLIANT per scoping rules."
-            finding["finding"] = f"Control requirements for {control_id} appear to be inapplicable to this policy document context."
+            gap_text = (
+                f"The uploaded documents contain no evidence of {expected_text}."
+                if expected_text else
+                f"The uploaded documents contain no evidence addressing {control_id}."
+            )
+            finding["validator_note"] = gap_text
+            finding["review_note"] = gap_text
+            finding["recommendation"] = (
+                f"Establish, document, and implement {expected_text} to satisfy this control."
+                if expected_text else
+                f"Establish, document, and implement procedures to satisfy {control_id}."
+            )
+            finding["finding"] = gap_text
             finding["severity"] = "N/A"
-            return finding
+        return finding
 
     # ── PHYSICAL VS LOGICAL IDENTITY GATING ──
     if code == "5.16" or "identity management" in control_id.lower():
@@ -970,6 +998,11 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
     reasoning_lower = str(finding.get("reasoning") or "").lower()
     quote = str(finding.get("evidence_quote") or "").strip()
     description_lower = str(finding.get("description") or "").lower()
+    # The LLM's "what's missing" explanation is written under gap_description/finding,
+    # not description/reasoning — must be scanned too, or an explicit stated gap
+    # (e.g. "Missing Requirements: a formal documented retention policy") is invisible
+    # to the negative-phrase check below and gets silently overridden.
+    gap_lower = str(finding.get("gap_description") or finding.get("finding") or "").lower()
     status_curr = str(finding.get("status") or "").strip().upper()
 
     if status_curr == "NON_COMPLIANT" and quote and quote.upper() != "NOT_FOUND":
@@ -1002,7 +1035,20 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
             "no overarching", "was not established", "was not found",
             "no approved", "not complied", "was not found"
         ]
-        is_negative_description = any(neg in description_lower for neg in _neg_description)
+        # "Missing Requirements:" is a fixed template label (see audit_chains.py) that
+        # appears even when nothing is actually missing (e.g. "Missing Requirements: None
+        # identified") — a plain substring match on the label alone would false-positive
+        # on compliant findings. Only treat it as negative when real content follows the
+        # label, not "none"/"n/a"/"nil".
+        _has_real_missing_requirement = bool(_re.search(
+            r'missing requirements?\s*:\s*(?!none\b|n/?a\b|nil\b|not applicable\b)\w',
+            gap_lower
+        ))
+        is_negative_description = (
+            any(neg in description_lower for neg in _neg_description) or
+            any(neg in gap_lower for neg in _neg_description) or
+            _has_real_missing_requirement
+        )
 
         # RULE 8 INTENT OVERRIDE: If description/reasoning explicitly states that the evidence
         # directly satisfies or meets the control objective, override negative policy phrases!
@@ -1035,7 +1081,7 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                 "access control", "authentication", "isms", "records", "retention"
             ])
 
-            if evidence_acknowledged or len(quote) >= 15:
+            if evidence_acknowledged:
                 cid = finding.get("control_id") or ""
                 print(f"[RULE 8 GUARDRAIL] Control {cid}: Evidence present in any form (quote: '{quote[:40]}...'). Upgrading from NON_COMPLIANT to COMPLIANT under Workspace Audit Rule 8.", flush=True)
                 finding["status"] = "COMPLIANT"

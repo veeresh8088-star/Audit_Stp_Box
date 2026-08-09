@@ -247,7 +247,23 @@ def save_document_chunks(filename, text):
         with force_master():
             # Delete existing chunks for this file to prevent duplicates
             session.query(DocumentChunk).filter(DocumentChunk.filename == filename).delete()
-            
+
+            # Purge this filename's cached embeddings too. The cache is keyed by
+            # (filename, chunk_index), not content -- if a file gets re-uploaded with
+            # revised content under the same name, stale (filename, index) keys would
+            # otherwise survive and get silently reused for the new chunk text, since
+            # the embedding step only computes a fresh vector when the key is missing.
+            stale_keys = [k for k in _chunk_embeddings_cache if k[0] == filename]
+            if stale_keys:
+                for k in stale_keys:
+                    del _chunk_embeddings_cache[k]
+                try:
+                    with open(CACHE_FILE, "wb") as f:
+                        pickle.dump(_chunk_embeddings_cache, f)
+                except Exception as e:
+                    print(f"[EMBEDDING CACHE] Warning: failed to persist cache after purge: {e}", flush=True)
+                print(f"[EMBEDDING CACHE] Purged {len(stale_keys)} stale embedding(s) for re-uploaded file '{filename}'.", flush=True)
+
             cached_chunks = _ingested_chunks_cache.get(filename)
             if cached_chunks:
                 chunks_saved = 0
@@ -454,7 +470,7 @@ def _cosine_similarity(v1, v2):
         return 0.0
     return dot_product / (norm_v1 * norm_v2)
 
-def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model, KEYWORD_SYNONYMS):
+def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, KEYWORD_SYNONYMS):
     """Production RAG retrieval engine.
     Phase 3: Multi-document evidence aggregation — searches ALL uploaded files simultaneously.
     Phase 4: Pipeline: keyword scoring -> exact dedup -> Jaccard near-dedup -> diversity -> rank.
@@ -752,6 +768,15 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
     total_available_chunks = len(db_chunks) if db_chunks else len(paragraphs)
 
     # Evidence Diversity Enforcement
+    # NOTE: only relevant when a control's search spans multiple files (Manual/AI
+    # scoping) -- Excel-locked scoping restricts file_names_list to one file per
+    # control upstream, so unique_src_files is never >1 there and this never fires.
+    # DIVERSITY_MIN_SCORE gates which files are worth force-including: 0.05 was too
+    # low (hybrid_score is roughly 0-1) and let near-zero-relevance chunks from
+    # completely unrelated files get injected into every control's context, diluting
+    # the limited token budget with noise. 0.15 still catches genuinely tangential
+    # matches while dropping near-random ones.
+    DIVERSITY_MIN_SCORE = 0.15
     if len(unique_src_files) > 1 and deduplicated:
         top_window = deduplicated[:max(configured_top_k, 5)]
         files_in_top = {item[3] for item in top_window}
@@ -760,7 +785,7 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
             best_for_file = None
             for candidate in scored_chunks:
                 already_in = any(candidate[1].strip() == d[1].strip() for d in deduplicated)
-                if candidate[3] == missing_fname and candidate[0] > 0.05 and not already_in:
+                if candidate[3] == missing_fname and candidate[0] > DIVERSITY_MIN_SCORE and not already_in:
                     best_for_file = candidate
                     break
             if best_for_file:
@@ -844,6 +869,6 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, ollama_model
             condensed_context += "\n\n".join(chunk_unique_text) + "\n\n"
 
     if not condensed_context.strip():
-        condensed_context = context[:4000 if "3b" in ollama_model.lower() else 6000]
+        condensed_context = context[:4000 if "3b" in llm_model.lower() else 6000]
 
     return condensed_context, actual_top_k, retrieved_chunk_metas

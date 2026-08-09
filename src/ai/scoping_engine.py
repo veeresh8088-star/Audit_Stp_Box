@@ -336,7 +336,7 @@ def cosine_similarity(v1, v2):
     return dot / (norm_a * norm_b)
 
 
-def detect_scope_and_controls(context, ollama_model=None):
+def detect_scope_and_controls(context, llm_model=None):
     """
     Zero-LLM deterministic + semantic scope detection.
     Combines:

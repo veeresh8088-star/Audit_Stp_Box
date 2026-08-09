@@ -31,7 +31,7 @@ class AuditState(TypedDict):
     # Document Context & Config
     document_text: str
     file_names_list: List[str]
-    ollama_model: str
+    llm_model: str
     summary_text: str
     
     # State tracking
@@ -132,7 +132,7 @@ def retrieve_node(state: AuditState) -> Dict[str, Any]:
             context=state["document_text"],
             controls_batch=controls_batch,
             file_names_list=locked_filenames,   # ← LOCKED: only these files
-            ollama_model=state["ollama_model"],
+            llm_model=state["llm_model"],
             KEYWORD_SYNONYMS=KEYWORD_SYNONYMS
         )
         # Safety guarantee: if locked files returned no context, fall back
@@ -150,7 +150,7 @@ def retrieve_node(state: AuditState) -> Dict[str, Any]:
             context=state["document_text"],
             controls_batch=controls_batch,
             file_names_list=state["file_names_list"],
-            ollama_model=state["ollama_model"],
+            llm_model=state["llm_model"],
             KEYWORD_SYNONYMS=KEYWORD_SYNONYMS
         )
 
@@ -204,7 +204,7 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
     feedback_block = _get_auditor_feedback_few_shot([state["control_id"]])
     feedback_section = f"\nAUDITOR KNOWLEDGE LOOP GUIDELINES:\n{feedback_block}\n" if feedback_block else ""
     
-    generator_chain = get_generator_chain(state["ollama_model"])
+    generator_chain = get_generator_chain(state["llm_model"])
 
     # ── Phase 2: Judge-only chain for Excel scoping mode ────────────────────
     locked_filenames = state.get("locked_filenames") or []
@@ -212,7 +212,7 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
     use_excel_judge_mode = bool(locked_filenames)
     if use_excel_judge_mode:
         from src.ai.audit_chains import get_excel_scoping_chain
-        generator_chain = get_excel_scoping_chain(state["ollama_model"])
+        generator_chain = get_excel_scoping_chain(state["llm_model"])
         print(
             f"[GENERATE NODE] Two-Phase judge mode for control {state['control_id']} "
             f"(locked: {locked_filenames})",
@@ -469,7 +469,7 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
     _update_progress(state, "Correcting validation gaps", 0.85)
     print(f"[LANGGRAPH REFLECTION] Initiating correction pass for control {state['control_id']}. Iteration: {state['retry_count'] + 1}", flush=True)
     
-    reflection_chain = get_reflection_chain(state["ollama_model"])
+    reflection_chain = get_reflection_chain(state["llm_model"])
     draft = state["draft_finding"] or {}
     
     try:
@@ -601,7 +601,7 @@ def _log_execution_event(state: AuditState, final_finding: Dict[str, Any]) -> No
 
         meta = {
             "control_id":              state.get("control_id", ""),
-            "model":                   state.get("ollama_model", ""),
+            "model":                   state.get("llm_model", ""),
             "backend":                 _os.environ.get("LLM_BACKEND", "ollama"),
             "audit_mode":              state.get("audit_mode", "Normal"),
             "retry_count":             state.get("retry_count", 0),

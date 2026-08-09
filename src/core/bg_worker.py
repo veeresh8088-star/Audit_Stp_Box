@@ -67,8 +67,13 @@ TOPIC_CONTROL_MAP = {
     "rbac": ["5.15", "5.18"], "access rights": ["5.18", "5.15"],
     "access control": ["5.15", "5.18", "8.3"], "access management": ["5.15", "5.18"],
     # Monitoring & Logging
-    "monitoring": ["8.16", "7.4", "5.22"], "cloudwatch": ["8.16", "7.4"],
-    "aws cloudwatch": ["8.16", "7.4", "5.23"], "cloud monitoring": ["8.16", "5.23", "5.22", "7.4"],
+    # NOTE: 7.4 (Physical Security Monitoring / CCTV) and 5.22 (Monitoring of SUPPLIER
+    # Services specifically) were previously attached to every "monitoring" keyword here
+    # just because their control names contain the word "monitoring" -- neither has
+    # anything to do with system/cloud/log monitoring. Removed; 8.16 (Monitoring
+    # Activities) is the correct general-purpose match for this keyword family.
+    "monitoring": ["8.16"], "cloudwatch": ["8.16"],
+    "aws cloudwatch": ["8.16", "5.23"], "cloud monitoring": ["8.16", "5.23"],
     "siem": ["8.16", "8.15"], "alerting": ["8.16", "5.25"],
     "logging": ["8.15", "8.16", "5.28"], "log management": ["8.15", "5.28"],
     "log archival": ["8.15", "5.28"], "log archive": ["8.15", "5.28"],
@@ -132,8 +137,8 @@ def log_dev_latency(message: str):
     except Exception:
         pass
 
-def _resolve_ollama_model(model_choice):
-    """Map UI model name to Ollama model identifier."""
+def _resolve_llm_model(model_choice):
+    """Map UI model name to LLM model identifier."""
     MODEL_MAP = {
         "Gemma 4 (e4b)": "gemma4:e4b",
         "Gemma 4 (2b)": "gemma-2-2b-it",
@@ -265,7 +270,7 @@ def get_num_ctx(model_name: str) -> int:
         return 4096
     return 4096
 
-def _generate_context_summary(context, ollama_model):
+def _generate_context_summary(context, llm_model):
     """Generates a brief document scope summary using the configured LLM backend.
     Routes through query_llm() so it correctly uses llama.cpp or Ollama.
     Hard timeout of 15s — skips gracefully if LLM is unresponsive."""
@@ -301,8 +306,8 @@ Output:"""
         # Use query_llm which correctly routes to llama.cpp or Ollama
         summary = query_llm(
             prompt=summary_prompt,
-            model=ollama_model,
-            num_ctx=get_num_ctx(ollama_model),
+            model=llm_model,
+            num_ctx=get_num_ctx(llm_model),
             temperature=0.0,
             timeout=15     # Hard 15s cap — skip gracefully if model is cold
         )
@@ -450,7 +455,7 @@ def get_global_resumable_checkpoint():
 
 def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None):
     os.environ["RAG_RERANK_MODE"] = "quick" if "quick" in str(audit_mode).lower() else "deep"
-    ollama_model = _resolve_ollama_model(model_choice)
+    llm_model = _resolve_llm_model(model_choice)
     controls = _build_controls_for_audit(selected_sls, custom_evidence)
     scanned_files_str = ", ".join(file_names_list) if file_names_list else "None"
 
@@ -509,7 +514,7 @@ Return format: ["topic1", "topic2", ...]"""
 
             try:
                 response = query_llm(
-                    prompt, model=ollama_model, num_ctx=4096, temperature=0.0, timeout=120,
+                    prompt, model=llm_model, num_ctx=4096, temperature=0.0, timeout=120,
                     stop=["<end_of_turn>", "<eos>", "<|im_end|>", "</s>"]
                 )
                 if not response:
@@ -647,7 +652,7 @@ Return format: ["topic1", "topic2", ...]"""
     log_dev_latency(msg)
 
     # Generate context summary
-    summary_text = _generate_context_summary(context, ollama_model)
+    summary_text = _generate_context_summary(context, llm_model)
 
     # ── Universal Pre-Ingest for Top 6 RAG Vector Retrieval across ALL Scoping Modes (Manual, AI Auto-Scoping, Excel) ──
     if file_registry:
@@ -831,7 +836,7 @@ Return format: ["topic1", "topic2", ...]"""
             # Context & Config
             "document_text": control_context,
             "file_names_list": control_file_names,
-            "ollama_model": ollama_model,
+            "llm_model": llm_model,
             "summary_text": summary_text,
 
             # State tracking

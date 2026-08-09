@@ -28,10 +28,19 @@ def parse_tool_file(filename: str, content: str) -> Tuple[List[Finding], Any]:
     for p in ALL_PARSERS:
         if p.can_parse(filename, content):
             res = p.parse(filename, content)
-            if isinstance(res, tuple):
-                return res
-            return res, None
-            
+            findings, extra = res if isinstance(res, tuple) else (res, None)
+            # Safety net: a matched-but-empty result is silently indistinguishable
+            # from "genuinely clean scan" unless it's logged. Never let a recognized
+            # file produce a misleadingly clean "0 findings" without a visible trace.
+            if not findings:
+                print(
+                    f"[VAPT PARSER WARNING] '{p.__class__.__name__}' recognized '{filename}' "
+                    f"but extracted 0 findings. If this file genuinely contains vulnerabilities, "
+                    f"the parser may not support this export's exact format/columns and needs review.",
+                    flush=True
+                )
+            return findings, extra
+
     # Default fallback to NessusParser (handles general HTML/XML)
     return NessusParser().parse(filename, content)
 
