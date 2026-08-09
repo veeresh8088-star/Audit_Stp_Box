@@ -9,6 +9,26 @@ from src.core.retrieval import _ingested_chunks_cache
 
 _OCR_READER = None
 
+class _DocTRReaderAdapter:
+    """Wraps doctr's ocr_predictor to expose the same .readtext(img, detail=0) -> List[str]
+    interface EasyOCR provided, so existing call sites don't need to change. DocTR gives
+    structured (block/line/word + position) output with real layout awareness; this adapter
+    collapses that back to EasyOCR's line-level string granularity without losing accuracy."""
+    def __init__(self, predictor):
+        self._predictor = predictor
+
+    def readtext(self, img_np, detail=0):
+        result = self._predictor([img_np])
+        exported = result.export()
+        lines_out = []
+        for page in exported.get("pages", []):
+            for block in page.get("blocks", []):
+                for line in block.get("lines", []):
+                    words = [w.get("value", "") for w in line.get("words", []) if w.get("value")]
+                    if words:
+                        lines_out.append(" ".join(words))
+        return lines_out
+
 def get_ocr_reader():
     global _OCR_READER
     if _OCR_READER is not None:
@@ -17,14 +37,15 @@ def get_ocr_reader():
         import warnings
         warnings.filterwarnings("ignore", message=".*pin_memory.*")
         warnings.filterwarnings("ignore", category=UserWarning, module="torch")
-        import easyocr
-        _OCR_READER = easyocr.Reader(['en'], gpu=False, verbose=False)
+        from doctr.models import ocr_predictor
+        predictor = ocr_predictor(pretrained=True)
+        _OCR_READER = _DocTRReaderAdapter(predictor)
         return _OCR_READER
     except Exception:
         return None
 
 def _preprocess_image_for_ocr(img_np):
-    """Option 2: OpenCV pre-processing before EasyOCR.
+    """Option 2: OpenCV pre-processing before OCR.
 
     Pipeline (+~50ms per image):
       1. Ensure 3-channel RGB (handles RGBA / palette images)
@@ -64,7 +85,7 @@ def _preprocess_image_for_ocr(img_np):
         # 4. Fast non-local means denoising (h=10 → mild, keeps text sharp)
         denoised = cv2.fastNlMeansDenoising(enhanced, h=10)
 
-        # Return as 3-channel for EasyOCR compatibility
+        # Return as 3-channel for OCR reader compatibility
         return cv2.cvtColor(denoised, cv2.COLOR_GRAY2BGR)
     except Exception:
         # OpenCV not available or processing failed — return original unchanged

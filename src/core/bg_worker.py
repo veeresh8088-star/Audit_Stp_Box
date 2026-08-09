@@ -227,6 +227,10 @@ def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
                     "recommendation": f"Establish, document, and implement procedures to satisfy {ctrl_id} ({q_text}).",
                     "evidence_location": primary_file,
                     "evidence_source_file": primary_file,
+                    # Full file list for THIS row (not just the first one) — used by the
+                    # scoping block below to lock retrieval to every file actually listed
+                    # against this row, not only file[0], when a single row names multiple.
+                    "evidence_source_files_all": files_str,
                 })
             return controls
 
@@ -713,7 +717,20 @@ Return format: ["topic1", "topic2", ...]"""
 
         target_doc_name = None
         docs_source = custom_docs if custom_docs is not None else {}
-        if docs_source:
+
+        # ── Row-level file identity (Excel scoping) ───────────────────────────
+        # _build_controls_for_audit() already resolves the exact matched file for
+        # THIS specific checklist row (evidence_source_file). Prefer that over a
+        # lookup in custom_docs, which is keyed by control ID/label and therefore
+        # MERGES files from every row that happens to share the same ISO control
+        # (e.g. a "PAM access" row and a separate "Authentication method" row
+        # both resolving to 5.15 Access Control). Using the merged blob here
+        # would make both rows cite both files instead of keeping each row's
+        # evidence scoped to only the file listed against it on the sheet.
+        row_specific_file = c.get("evidence_source_files_all") or c.get("evidence_source_file")
+        if row_specific_file:
+            target_doc_name = row_specific_file
+        elif docs_source:
             target_doc_name = _match_control_key(c["control"], docs_source)
 
         if target_doc_name:
@@ -740,13 +757,32 @@ Return format: ["topic1", "topic2", ...]"""
                 if not is_any_mapped:
                     policy_doc_files.append(fname)
 
-            # ── Step B: Match the specific evidence file for THIS control.
-            norm_target = _norm_fn(target_doc_name)
+            # ── Step B: Match the specific evidence file(s) for THIS control.
+            # target_doc_name may list several comma-joined file refs (a multi-file
+            # row, or the legacy control-ID-keyed merge). Match each ref on its own
+            # instead of substring-matching the whole joined blob at once — joining
+            # first and searching second lets one filename's normalized form land
+            # as a literal prefix of a DIFFERENT file's normalized form (e.g.
+            # "..._AUA_DB" is a prefix of "..._AUA_D_B_0_32" once separators are
+            # stripped), which pulled in the wrong file. Per-ref matching also
+            # tries an EXACT normalized match before falling back to substring
+            # containment, which avoids that same prefix collision.
+            target_refs = [r.strip() for r in str(target_doc_name).split(",") if r.strip()]
             matched_files = []
-            for fname in file_names_list:
-                norm_fname = _norm_fn(fname)
-                if norm_target and norm_fname and (norm_target in norm_fname or norm_fname in norm_target):
-                    matched_files.append(fname)
+            for ref in target_refs:
+                norm_ref = _norm_fn(ref)
+                if not norm_ref:
+                    continue
+                exact_hit = next((fname for fname in file_names_list if _norm_fn(fname) == norm_ref), None)
+                if exact_hit:
+                    if exact_hit not in matched_files:
+                        matched_files.append(exact_hit)
+                    continue
+                for fname in file_names_list:
+                    norm_fname = _norm_fn(fname)
+                    if norm_fname and (norm_ref in norm_fname or norm_fname in norm_ref):
+                        if fname not in matched_files:
+                            matched_files.append(fname)
 
             reg_source = file_registry if file_registry is not None else {}
 
