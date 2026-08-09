@@ -7,7 +7,16 @@ echo   AISecurityAudit: Unified Single-Click Launcher
 echo ==================================================
 
 echo.
-echo [1/5] Stopping any existing backend server instances...
+echo [1/6] Installing/updating Python dependencies...
+python -m pip install -r requirements.txt --disable-pip-version-check -q
+if errorlevel 1 (
+    echo [!] Dependency install failed or skipped ^(no internet / offline run^) -- continuing with existing packages.
+) else (
+    echo [v] Python dependencies up to date.
+)
+
+echo.
+echo [2/6] Stopping any existing backend server instances...
 taskkill /F /IM ollama* /T >nul 2>&1
 taskkill /F /IM llama-server* /T >nul 2>&1
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11434 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
@@ -53,15 +62,15 @@ set /a LLM_SLOTS=%PHYSICAL_CORES% / 2
 if %LLM_SLOTS% LSS 4 set LLM_SLOTS=4
 
 echo.
-echo [2/5] Starting llama.cpp LLM Server (%PHYSICAL_CORES% Physical Cores --^> %LLM_SLOTS% Parallel Slots for %LLM_SLOTS% Concurrent Members, --cont-batching)...
+echo [3/6] Starting llama.cpp LLM Server (%PHYSICAL_CORES% Physical Cores --^> %LLM_SLOTS% Parallel Slots for %LLM_SLOTS% Concurrent Members, --cont-batching)...
 start "Llama LLM Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11434 -m "%~dp0google_gemma-4-E4B-it-Q4_K_M.gguf" -c 0 -np %LLM_SLOTS% -t %LLM_THREADS% -b 2048 -ub 512 --mlock --flash-attn on --cont-batching
 
 echo.
-echo [3/5] Starting llama.cpp Embedding Server (Port 11435 with %EMBED_THREADS% threads, --mlock locked RAM)...
+echo [4/6] Starting llama.cpp Embedding Server (Port 11435 with %EMBED_THREADS% threads, --mlock locked RAM)...
 start "Llama Embedding Server" /d "%~dp0" /min "%LLAMA_SERVER_EXE%" --port 11435 -m "%~dp0nomic-embed-text-v1.5.f16.gguf" -t %EMBED_THREADS% --mlock --embedding
 
 echo.
-echo [4/5] Starting Database ^& Live Telemetry (SQLite / PostgreSQL ^& Redis Port 6380)...
+echo [5/6] Starting Database ^& Live Telemetry (SQLite / PostgreSQL ^& Redis Port 6380)...
 if exist "%~dp0tools\redis\redis-server.exe" (
     start "Windows Redis Server" /d "%~dp0tools\redis" /min "%~dp0tools\redis\redis-server.exe" --port 6380
 )
@@ -72,7 +81,7 @@ echo Waiting 12 seconds for models to load in RAM...
 timeout /t 12 >nul
 
 echo.
-echo [5/5] Launching AISecurityAudit HTTPS Server ^& Dashboard...
+echo [6/6] Launching AISecurityAudit HTTPS Server ^& Dashboard...
 set LLM_BACKEND=llama.cpp
 set EMBEDDING_HOST=http://127.0.0.1:11435
 set OLLAMA_KEEP_ALIVE=24h

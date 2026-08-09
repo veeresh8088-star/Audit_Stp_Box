@@ -9,6 +9,8 @@ psycopg2-binary
 pywhatkit
 anthropic
 openpyxl
+xlrd>=2.0.1
+olefile>=0.46
 python-docx
 python-pptx
 fpdf2

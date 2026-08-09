@@ -228,6 +228,45 @@ def chunk_paragraphs(paragraphs_data, target=1000, overlap=200):
         idx += 1
     return chunks
 
+def _extract_ole_text_heuristic(stream_bytes: bytes, min_run: int = 4) -> str:
+    """
+    Best-effort text extraction from a legacy OLE binary stream (Word 97-2003 .doc /
+    PowerPoint 97-2003 .ppt). These formats interleave text with binary formatting
+    records; a fully correct parse requires implementing the format spec. This scans
+    for contiguous runs of UTF-16LE-encoded printable characters (how these formats
+    predominantly store text), falling back to single-byte ASCII runs if that yields
+    too little -- recovering readable content without a structural parse.
+    """
+    def _runs(data, step, is_utf16):
+        parts = []
+        current = []
+        i = 0
+        n = len(data)
+        limit = n - 1 if is_utf16 else n
+        while i < limit:
+            if is_utf16:
+                lo, hi = data[i], data[i + 1]
+                ch = lo if (hi == 0 and (32 <= lo <= 126 or lo in (9, 10, 13))) else None
+            else:
+                b = data[i]
+                ch = b if (32 <= b <= 126 or b in (9, 10, 13)) else None
+            if ch is not None:
+                current.append(chr(ch))
+            else:
+                if len(current) >= min_run:
+                    parts.append("".join(current))
+                current = []
+            i += step
+        if len(current) >= min_run:
+            parts.append("".join(current))
+        return parts
+
+    utf16_text = " ".join(_runs(stream_bytes, 2, True))
+    if len(utf16_text) >= 40:
+        return utf16_text
+    return " ".join(_runs(stream_bytes, 1, False))
+
+
 def extract_text(f):
     name_lower = f.name.lower()
 
@@ -494,14 +533,17 @@ def extract_text(f):
 
     elif name_lower.endswith(".csv"):
         try:
+            if hasattr(f, "seek"):
+                f.seek(0)
+            raw_csv_bytes = f.read()
+            raw_csv_text = raw_csv_bytes.decode("utf-8", errors="ignore")
+
             import pandas as pd
-            df = pd.read_csv(f)
+            df = pd.read_csv(io.StringIO(raw_csv_text))
             df_filled = df.fillna("")
             total_rows = len(df_filled)
             csv_chunks = []
-            if total_rows == 0:
-                csv_text = "[Empty CSV]"
-            else:
+            if total_rows > 0:
                 ROWS_PER_CHUNK = 15
                 ROW_OVERLAP = 3
                 csv_fname = getattr(f, "name", "unknown.csv")
@@ -529,13 +571,14 @@ def extract_text(f):
                     if next_start <= start_row:
                         next_start = end_row
                     start_row = next_start
-                csv_text = df_filled.to_string(index=False)
             _ingested_chunks_cache[f.name] = csv_chunks
-            return csv_text
+            # Return the raw CSV text (not the pandas-reformatted table) so tools that
+            # parse CSV directly (e.g. QualysParser's csv.DictReader) get real delimiters.
+            return raw_csv_text if raw_csv_text.strip() else "[Empty CSV]"
         except Exception as e:
             return f"[Error parsing CSV file {f.name}: {e}]"
 
-    elif name_lower.endswith((".pptx", ".ppt")):
+    elif name_lower.endswith(".pptx"):
         try:
             from pptx import Presentation
             prs = Presentation(f)
@@ -610,16 +653,19 @@ def extract_text(f):
         except Exception as e:
             return f"[Error parsing PowerPoint file {f.name}: {e}]"
 
-    elif name_lower.endswith(".txt"):
+    elif name_lower.endswith((".txt", ".nessus", ".xml", ".json", ".gnmap", ".nmap", ".log")):
+        # Native VAPT scanner export formats (Nessus .nessus, Nmap -oX/.gnmap, Burp/Qualys .xml,
+        # Trivy .json) are plain text and must never fall through to the .docx parser below.
         try:
             txt_content = f.read().decode("utf-8", errors="ignore")
             txt_fname = getattr(f, "name", "unknown.txt")
+            txt_ext = os.path.splitext(txt_fname.lower())[1].lstrip(".") or "txt"
             txt_chunks = []
             chunks = chunk_text_by_chars(txt_content, target=1000, overlap=200)
             for chunk_content in chunks:
                 txt_chunks.append((chunk_content, {
                     "source_file": txt_fname,
-                    "source_type": "txt",
+                    "source_type": txt_ext,
                     "chunk_id": ""
                 }))
             _ingested_chunks_cache[f.name] = txt_chunks
@@ -675,6 +721,69 @@ def extract_text(f):
             return "\n\n".join([txt for txt, _ in paragraphs_data])
         except Exception as e:
             return f"[Error parsing HTML file {f.name}: {e}]"
+
+    elif name_lower.endswith(".doc"):
+        # Legacy Word 97-2003 binary format (OLE Compound File) -- python-docx can't
+        # open these at all. Best-effort text extraction via the WordDocument stream.
+        try:
+            import olefile
+            if hasattr(f, "seek"):
+                f.seek(0)
+            file_bytes = f.read()
+            if not olefile.isOleFile(io.BytesIO(file_bytes)):
+                return f"[Error parsing file {f.name}: not a valid legacy .doc (OLE) file]"
+            ole = olefile.OleFileIO(io.BytesIO(file_bytes))
+            try:
+                if not ole.exists("WordDocument"):
+                    return f"[Error parsing file {f.name}: no WordDocument stream found]"
+                stream_bytes = ole.openstream("WordDocument").read()
+            finally:
+                ole.close()
+            doc_text = _extract_ole_text_heuristic(stream_bytes)
+            doc_fname = getattr(f, "name", "unknown.doc")
+            doc_chunks = []
+            for chunk_content in chunk_text_by_chars(doc_text, target=1000, overlap=200):
+                doc_chunks.append((chunk_content, {
+                    "source_file": doc_fname,
+                    "source_type": "doc",
+                    "chunk_id": ""
+                }))
+            _ingested_chunks_cache[f.name] = doc_chunks
+            return "[Best-effort extraction from legacy .doc format -- formatting/tables not preserved]\n" + doc_text
+        except Exception as e:
+            return f"[Error parsing legacy Word file {f.name}: {e}]"
+
+    elif name_lower.endswith(".ppt"):
+        # Legacy PowerPoint 97-2003 binary format (OLE Compound File) -- python-pptx
+        # can't open these at all. Best-effort text extraction via the
+        # "PowerPoint Document" stream.
+        try:
+            import olefile
+            if hasattr(f, "seek"):
+                f.seek(0)
+            file_bytes = f.read()
+            if not olefile.isOleFile(io.BytesIO(file_bytes)):
+                return f"[Error parsing file {f.name}: not a valid legacy .ppt (OLE) file]"
+            ole = olefile.OleFileIO(io.BytesIO(file_bytes))
+            try:
+                if not ole.exists("PowerPoint Document"):
+                    return f"[Error parsing file {f.name}: no PowerPoint Document stream found]"
+                stream_bytes = ole.openstream("PowerPoint Document").read()
+            finally:
+                ole.close()
+            ppt_text = _extract_ole_text_heuristic(stream_bytes)
+            ppt_fname = getattr(f, "name", "unknown.ppt")
+            ppt_chunks = []
+            for chunk_content in chunk_text_by_chars(ppt_text, target=1000, overlap=200):
+                ppt_chunks.append((chunk_content, {
+                    "source_file": ppt_fname,
+                    "source_type": "ppt",
+                    "chunk_id": ""
+                }))
+            _ingested_chunks_cache[f.name] = ppt_chunks
+            return "[Best-effort extraction from legacy .ppt format -- slide structure not preserved]\n" + ppt_text
+        except Exception as e:
+            return f"[Error parsing legacy PowerPoint file {f.name}: {e}]"
 
     else:
         try:

@@ -139,9 +139,6 @@ def api_create_session(
     finally:
         db.close()
 
-@router.get("/sessions")
-def api_get_sessions(role: Optional[str] = None, username: Optional[str] = None):
-    """Retrieves list of active compliance sessions strictly isolated to the logged-in user."""
 def _enforce_max_sessions_limit(db, username: str, max_sessions: int = 50):
     """
     Enforces a strict cap of `max_sessions` per user account.
@@ -1393,12 +1390,17 @@ def api_export_docx(session_id: str, saved_only: bool = False, auditor_logo_path
                     resolved_list.append(f.control_id)
                     
             fw_name = (report.framework or "Audit_Report").replace(" ", "_").replace("/", "_")
+            is_vapt = (
+                "VAPT" in (report.framework or "").upper() or
+                any("VAPT" in str(f.get("control_id") or f.get("control") or "").upper() for f in findings_mapped)
+            )
             docx_bytes = export_docx_report(
                 session_title=report.framework or "Audit Report",
                 findings=findings_mapped,
                 resolved_list=resolved_list,
                 status=report.status or "Draft",
-                comments="Lead auditor generated report"
+                comments="Lead auditor generated report",
+                audit_type=("vapt" if is_vapt else None)
             )
             
             import io

@@ -148,9 +148,6 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     logo_path = effective_custom_logo if (effective_custom_logo and os.path.exists(effective_custom_logo)) else (shield_logo_path if os.path.exists(shield_logo_path) else os.path.join(assets_dir, "tuv_sud_logo.png"))
     bg_path   = os.path.join(assets_dir, "cover_matrix_bg.png")
     chart_path= os.path.join(assets_dir, "chart_risk_severity.png")
-    poc_cbc   = os.path.join(assets_dir, "poc_nmap_cbc.png")
-    poc_lk13  = os.path.join(assets_dir, "poc_lucky13.png")
-    poc_hsts  = os.path.join(assets_dir, "poc_hsts.png")
 
     s_title_lower = session_title.lower()
     if "combined" in s_title_lower or ("web" in s_title_lower and "internal" in s_title_lower):
@@ -710,12 +707,13 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         h.cell("CVSS Score", style=hdr_blue)
         h.cell("Severity", style=hdr_blue)
 
-        default_findings = [
-            {"title": "SSL Cipher Block Chaining Cipher Suites Supported", "score": "2.3", "sev": "LOW"},
-            {"title": "HSTS missing from HTTP server", "score": "2.3", "sev": "LOW"}
-        ]
-        
-        list_to_show = active_findings if active_findings else default_findings
+        list_to_show = active_findings
+        if not list_to_show:
+            r = table.row()
+            r.cell("-")
+            r.cell("No vulnerabilities were identified during this assessment.")
+            r.cell("-")
+            r.cell("-")
         for idx, f in enumerate(list_to_show, 1):
             title = f.get("title", "") or f.get("finding", "") or f.get("control", "") or f"Vulnerability {idx}"
             sev_str = str(f.get("severity", f.get("sev", "LOW"))).split()[-1].upper()
@@ -784,61 +782,29 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     pdf.cell(0, 5.5, "3.3 Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1.5)
 
-    default_findings_detail = [
-        {
-            "control": "SSL Cipher Block Chaining Cipher Suites Supported",
-            "control_id": "172.201.152.88, 13.69.211.177, 20.160.135.87, 443, 4.180.98.53, 13.74.56.242",
-            "finding": "The remote host supports the use of SSL ciphers that operate in Cipher Block Chaining (CBC) mode. These cipher suites offer additional security over Electronic Codebook (ECB) mode, but have potential to leak information if used improperly which can be vulnerable to LUCKY 13 attack.",
-            "status": "Detected",
-            "severity_score": "2.3",
-            "severity": "LOW",
-            "metrics_text": "2.3 LOW\nExploitability Metrics: AV: Network, AC: High, AT: None, PR: None, UI: None\nSystem Impact Metrics: VC: Low, VI: None, VA: High, SC: None, SI: None, SA: None",
-            "evidence_quote": "Nmap ssl-enum-ciphers console scan output verified CBC ciphers enabled on port 443.\nPotentially Vulnerable to LUCKY13.",
-            "recommendation": "Disable CBC-Based Cipher Suites: Remove all TLS cipher suites using CBC mode (TLS_RSA_WITH_AES_128_CBC_SHA).\nUse GCM or ChaCha20 Cipher Suites (TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256).\nPrioritize Secure TLS Versions (TLS 1.2 and TLS 1.3 only).",
-            "references": "https://www.openssl.org/docs/manmaster/man1/ciphers.html\nhttp://www.nessus.org/u?cc4a822a\nhttps://www.openssl.org/~bodo/tls-cbc.txt",
-            "poc_image": poc_cbc,
-            "extra_image": poc_lk13
-        },
-        {
-            "control": "HSTS missing from HTTP",
-            "control_id": "172.201.152.88, 20.160.135.87, 13.69.211.177, 13.69.213.189, 13.69.210.3",
-            "finding": "The web application does not include the Strict-Transport-Security (HSTS) header in its HTTP response. HSTS forces browsers to only interact with the site over secure HTTPS connections.",
-            "status": "Detected",
-            "severity_score": "2.3",
-            "severity": "LOW",
-            "metrics_text": "2.3 LOW\nExploitability Metrics: AV: Network, AC: Low, AT: None, PR: None, UI: Required\nSystem Impact Metrics: VC: Low, VI: None, VA: None, SC: None, SI: None, SA: None",
-            "evidence_quote": "curl -I -k https://172.201.152.88 verified missing Strict-Transport-Security response header.",
-            "recommendation": "1. Enable HTTP Strict Transport Security (HSTS): Add Strict-Transport-Security: max-age=31536000; includeSubDomains; preload\n2. Force HTTPS Redirects: Ensure all HTTP requests are redirected to HTTPS using 301/302 status codes.",
-            "references": "https://owasp.org/www-project-secure-headers/#strict-transport-security\nhttps://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security",
-            "poc_image": poc_hsts,
-            "extra_image": None
-        }
-    ]
-
     # ── ALL findings: Burp Suite (web pentest) first, then Nessus network findings ──
-    if active_findings:
-        def _sev_order(f):
-            s = str(f.get("severity", "LOW")).upper()
-            if "CRITICAL" in s: return 0
-            if "HIGH" in s: return 1
-            if "MEDIUM" in s: return 2
-            return 3
+    def _sev_order(f):
+        s = str(f.get("severity", "LOW")).upper()
+        if "CRITICAL" in s: return 0
+        if "HIGH" in s: return 1
+        if "MEDIUM" in s: return 2
+        return 3
 
-        # Burp Suite web pentest findings first, then all Nessus/network findings
-        burp_findings    = [f for f in active_findings if "burp" in str(f.get("source_tool", "")).lower()]
-        network_findings = [f for f in active_findings if "burp" not in str(f.get("source_tool", "")).lower()]
+    # Burp Suite web pentest findings first, then all Nessus/network findings
+    burp_findings    = [f for f in active_findings if "burp" in str(f.get("source_tool", "")).lower()]
+    network_findings = [f for f in active_findings if "burp" not in str(f.get("source_tool", "")).lower()]
 
-        burp_sorted    = sorted(burp_findings,    key=_sev_order)
-        network_sorted = sorted(network_findings, key=_sev_order)
+    burp_sorted    = sorted(burp_findings,    key=_sev_order)
+    network_sorted = sorted(network_findings, key=_sev_order)
 
-        # NO CAP — every single vulnerability gets a full detail card
-        detail_findings  = burp_sorted + network_sorted
-        summary_findings = []
-    else:
-        detail_findings  = default_findings_detail
-        summary_findings = []
+    # NO CAP — every single vulnerability gets a full detail card
+    list_to_render = burp_sorted + network_sorted
 
-    list_to_render = detail_findings
+    if not list_to_render:
+        pdf.set_font("Helvetica", "", 9.5)
+        pdf.set_text_color(*BODY_TEXT)
+        pdf.multi_cell(0, 5, "No vulnerabilities were identified during this assessment.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(2)
 
     for idx, f in enumerate(list_to_render, 1):
         # Start new page if less than 75mm remains for a clean spacious presentation
@@ -1932,19 +1898,27 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
     return buf.read()
 
 
-def export_docx_report(session_title, findings, resolved_list, status, comments="", custom_logo=None):
-    st_std = ""
+def export_docx_report(session_title, findings, resolved_list, status, comments="", custom_logo=None, audit_type=None):
+    """
+    audit_type: explicit "vapt" / "iso" from the caller (derived from AuditReport.framework,
+    the authoritative field set when the audit session was created). When omitted, falls back
+    to inferring from session_title / finding control_id text — kept only for callers that
+    haven't been updated to pass it explicitly.
+    """
+    if audit_type is not None:
+        is_vapt = str(audit_type).strip().lower() == "vapt"
+    else:
+        st_std = ""
+        title_u = str(session_title or "").upper()
+        state_u = str(st_std or "").upper()
+        combined_u = f"{title_u} {state_u}"
 
-    title_u = str(session_title or "").upper()
-    state_u = str(st_std or "").upper()
-    combined_u = f"{title_u} {state_u}"
-
-    is_vapt = ("VAPT" in combined_u or "VULNERABILITY ASSESSMENT" in combined_u or "PENETRATION" in combined_u) and ("ISO 27001" not in combined_u)
-    if not is_vapt and findings:
-        for f in findings:
-            if "VAPT" in str(f.get("control_id") or f.get("control") or "").upper():
-                is_vapt = True
-                break
+        is_vapt = ("VAPT" in combined_u or "VULNERABILITY ASSESSMENT" in combined_u or "PENETRATION" in combined_u) and ("ISO 27001" not in combined_u)
+        if not is_vapt and findings:
+            for f in findings:
+                if "VAPT" in str(f.get("control_id") or f.get("control") or "").upper():
+                    is_vapt = True
+                    break
 
     if is_vapt:
         return _export_vapt_docx(session_title, findings, resolved_list, status, comments)
@@ -2411,20 +2385,28 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     return buf.read()
 
 
-def export_pdf_report(session_title, findings, resolved_list, status, comments=""):
-    st_std = ""
+def export_pdf_report(session_title, findings, resolved_list, status, comments="", audit_type=None):
+    """
+    audit_type: explicit "vapt" / "iso" from the caller (derived from AuditReport.framework,
+    the authoritative field set when the audit session was created). When omitted, falls back
+    to inferring from session_title / finding control_id text — kept only for callers that
+    haven't been updated to pass it explicitly.
+    """
+    if audit_type is not None:
+        is_vapt = str(audit_type).strip().lower() == "vapt"
+    else:
+        st_std = ""
+        title_u = str(session_title or "").upper()
+        state_u = str(st_std or "").upper()
+        combined_u = f"{title_u} {state_u}"
 
-    title_u = str(session_title or "").upper()
-    state_u = str(st_std or "").upper()
-    combined_u = f"{title_u} {state_u}"
-
-    is_vapt = "VAPT" in combined_u or "VULNERABILITY ASSESSMENT" in combined_u or "PENETRATION" in combined_u
-    if not is_vapt and findings:
-        for f in findings:
-            ctrl = str(f.get("control_id") or f.get("control") or f.get("category") or "").upper()
-            if "VAPT" in ctrl:
-                is_vapt = True
-                break
+        is_vapt = "VAPT" in combined_u or "VULNERABILITY ASSESSMENT" in combined_u or "PENETRATION" in combined_u
+        if not is_vapt and findings:
+            for f in findings:
+                ctrl = str(f.get("control_id") or f.get("control") or f.get("category") or "").upper()
+                if "VAPT" in ctrl:
+                    is_vapt = True
+                    break
 
     if is_vapt:
         return _export_vapt_pdf(session_title, findings, resolved_list, status, comments)
