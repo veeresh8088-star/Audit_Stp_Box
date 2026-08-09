@@ -1333,6 +1333,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
 def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=None):
     all_findings = []
     resolved_ctrls = set()
+    _seen_dedup_keys = set()
     try:
         from src.core.parsers import parse_tool_file, map_finding_to_control
 
@@ -1359,6 +1360,17 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
             combined_tool_findings = actionable + (info or [])
 
             for f in combined_tool_findings:
+                # Skip exact-duplicate findings (same CVE, or same tool+plugin_id, or
+                # same tool+normalized title — see Finding.dedup_key()) before they're
+                # ever written to the report. dedup_key() already existed but was never
+                # wired into this aggregation loop, so re-scans and overlapping uploaded
+                # files produced literal duplicate rows.
+                if hasattr(f, "dedup_key"):
+                    _key = f.dedup_key()
+                    if _key in _seen_dedup_keys:
+                        continue
+                    _seen_dedup_keys.add(_key)
+
                 c_id = map_finding_to_control(f)
                 f_dict = f.to_dict() if hasattr(f, "to_dict") else dict(f)
                 f_dict["control_id"] = c_id
