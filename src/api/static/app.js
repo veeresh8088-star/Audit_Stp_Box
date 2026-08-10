@@ -601,7 +601,7 @@ async function switchRecentSession(sessionId, sessionTitle) {
     // ── Reset UI: Scan run button ─────────────────────────────────────────────────
     const runBtn = document.getElementById("run-analysis-btn");
     const stopBtn = document.getElementById("stop-analysis-btn");
-    if (runBtn) { runBtn.disabled = false; runBtn.style.opacity = "1"; }
+    if (runBtn) { runBtn.disabled = false; runBtn.style.opacity = "1"; runBtn.innerText = "▶ Step 3: Run RAG Scan"; }
     if (stopBtn) stopBtn.style.display = "none";
 
     // ── Reset UI: Controls checkboxes, search & scoping ──────────────────────────

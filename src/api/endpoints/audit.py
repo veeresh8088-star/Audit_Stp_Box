@@ -663,6 +663,24 @@ def api_get_status(session_id: str):
             "findings_count": len(result.get("findings", []))
         }
         
+    db = SessionLocal()
+    try:
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if report:
+                findings_cnt = db.query(Finding).filter(Finding.report_id == report.id).count()
+                if findings_cnt > 0 or report.status in ("Pending Review", "Completed"):
+                    return {
+                        "status": "completed",
+                        "progress": {"text": "Scan completed successfully", "percent": 100},
+                        "checkpoint": checkpoint_data,
+                        "findings_count": findings_cnt
+                    }
+    except Exception:
+        pass
+    finally:
+        db.close()
+
     return {"status": "idle", "checkpoint": checkpoint_data}
 
 
