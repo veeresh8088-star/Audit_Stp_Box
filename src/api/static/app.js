@@ -1835,6 +1835,19 @@ async function pollAuditProgress() {
             if (progressBar) progressBar.style.width = `${pct}%`;
             if (progressPercent) progressPercent.innerText = `${pct}%`;
             if (progressStatus) progressStatus.innerText = `${txt} (${pct}%)`;
+
+            // ── Resource pressure banner — only toast on a STATE CHANGE, not every
+            // 1s poll tick, so it doesn't spam. CRITICAL is more visible/sticky
+            // than WARNING since it means the audit is about to pause itself.
+            const resStatus = data.resource_status || (p.resource_status) || "OK";
+            if (resStatus !== window._lastResourceStatus) {
+                if (resStatus === "CRITICAL") {
+                    showToastBanner(`🛑 ${data.resource_message || p.text || "System resources critically low — audit is pausing to avoid a crash."}`);
+                } else if (resStatus === "WARNING") {
+                    showToastBanner(`⚠️ ${data.resource_message || "System resources are getting tight."}`);
+                }
+                window._lastResourceStatus = resStatus;
+            }
         } else if (data.status === "completed") {
             clearInterval(progressInterval);
             progressInterval = null;

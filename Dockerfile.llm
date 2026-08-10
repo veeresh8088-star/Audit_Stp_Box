@@ -1,0 +1,21 @@
+# LLM server image -- extends llama.cpp's official pre-built server image
+# (no build-from-source, per the earlier decision) and bakes in both model
+# weights this app uses (completion + embedding), so this single image needs
+# nothing mounted or downloaded separately. One image, two docker-compose
+# services (LLM_MODE=completion / LLM_MODE=embedding) -- see
+# docker/llm-entrypoint.sh.
+#
+# NOTE: verify the base image tag against the current llama.cpp GHCR release
+# before first build (ghcr.io/ggml-org/llama.cpp:server) -- tags occasionally
+# change upstream and this wasn't verified against a live registry pull.
+
+FROM ghcr.io/ggml-org/llama.cpp:server
+
+COPY google_gemma-4-E4B-it-Q4_K_M.gguf /models/google_gemma-4-E4B-it-Q4_K_M.gguf
+COPY nomic-embed-text-v1.5.f16.gguf /models/nomic-embed-text-v1.5.f16.gguf
+COPY docker/llm-entrypoint.sh /llm-entrypoint.sh
+RUN chmod +x /llm-entrypoint.sh
+
+EXPOSE 11434
+
+ENTRYPOINT ["/llm-entrypoint.sh"]
