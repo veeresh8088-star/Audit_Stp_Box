@@ -59,7 +59,7 @@ if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 :: Physical Cores / 2 (e.g. 10 Physical Cores -> 5 Slots) keeps each slot's context
 :: large enough for a full audit document + multi-evidence findings without truncating.
 if "%LLM_SLOTS%"=="" (
-    set /a LLM_SLOTS=%PHYSICAL_CORES% / 2
+    set /a LLM_SLOTS=%PHYSICAL_CORES%
     if !LLM_SLOTS! LSS 4 set LLM_SLOTS=4
 )
 

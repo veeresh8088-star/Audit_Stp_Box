@@ -23,4 +23,4 @@ _bg_stop_flags: dict = {}
 # Per-auditor session tracking: auditor_id -> set of active session_ids
 # Limits how many concurrent audits one auditor can run simultaneously
 _auditor_sessions: dict = defaultdict(set)  # {auditor_id: {session_id, ...}}
-MAX_AUDITS_PER_AUDITOR = int(__import__('os').environ.get("MAX_AUDITS_PER_AUDITOR", "3"))
+MAX_AUDITS_PER_AUDITOR = int(__import__('os').environ.get("MAX_AUDITS_PER_AUDITOR", "100"))
