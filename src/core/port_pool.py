@@ -41,18 +41,16 @@ class LLMPortPoolManager:
             embed_host = os.environ.get("EMBEDDING_HOST", "11435")
             self.ports = ["http://127.0.0.1:11434"]
 
-        # Per-port concurrency limit: how many requests llama-server can actually run
-        # in parallel on that port (its -np value), NOT a 1-at-a-time mutex. Using a
-        # plain Lock here previously serialized every single LLM call system-wide —
-        # the server's parallel slots went completely unused. Mirrors the same
-        # MAX_CONCURRENT_AUDITS env var / default formula bg_worker.py's audit-level
-        # semaphore uses, so both stay in sync with however many slots run_all.bat
-        # actually configured.
-        _default_slots = max(4, (os.cpu_count() or 8) // 2)
-        _slots_per_port = int(os.environ.get("MAX_CONCURRENT_AUDITS", _default_slots))
+        # Per-port concurrency limit: caps how many HTTP requests we send to
+        # llama-server at once. The server handles its own internal queuing via
+        # its -np slots (set in run_all.bat from CPU core count). We use a
+        # generous limit here — llama-server queues excess requests internally.
+        # The resource guard's check_memory_pressure() is the real crash
+        # protector, not this semaphore.
+        _slots_per_port = int(os.environ.get("MAX_LLM_CONNECTIONS", "32"))
         self.port_locks = {port: threading.Semaphore(_slots_per_port) for port in self.ports}
         print(f"[PORT POOL INITIALIZED] Configured {len(self.ports)} LLM worker ports: {self.ports} "
-              f"({_slots_per_port} concurrent slots per port)", flush=True)
+              f"({_slots_per_port} max concurrent connections per port)", flush=True)
 
     @contextmanager
     def acquire_control_slot(self, session_id=None, timeout=None):

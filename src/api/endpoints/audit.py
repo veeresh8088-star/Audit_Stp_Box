@@ -490,6 +490,16 @@ def api_start_audit(req: StartAuditRequest):
     bg_key = req.session_id
     print(f"🚀 [API] /audit/start received for session {req.session_id} with {len(req.selected_sls)} controls (mode: {req.audit_mode})", flush=True)
 
+    # ── Resource Guard: refuse new audits when system memory is critically low ──
+    # Checked before any locks/state are touched so a refused request leaves no
+    # partial state behind. WARNING-level pressure is allowed through (the UI
+    # surfaces it); CRITICAL is a hard refuse to avoid pushing the OS toward an
+    # OOM kill that could take down Postgres/Redis along with this audit.
+    from src.core.resource_guard import check_memory_pressure
+    _mem = check_memory_pressure()
+    if _mem["status"] == "CRITICAL":
+        raise HTTPException(status_code=503, detail=_mem["reason"] + " Please wait for an active audit to finish before starting a new one.")
+
     # Extract auditor identity from session_id (format: auditor-<username>-<timestamp>)
     # Fall back to first 16 chars if format differs
     auditor_id = req.session_id.split("-")[0] if "-" in req.session_id else req.session_id[:16]
@@ -622,10 +632,16 @@ def api_get_status(session_id: str):
         }
         
     if is_running:
+        # Live resource check on every poll — so the UI can show a WARNING banner
+        # as pressure builds, not only once a control loop hits CRITICAL and stops.
+        from src.core.resource_guard import check_memory_pressure
+        _mem = check_memory_pressure()
         return {
             "status": "running",
             "progress": progress,
-            "checkpoint": checkpoint_data
+            "checkpoint": checkpoint_data,
+            "resource_status": _mem["status"],
+            "resource_message": _mem["reason"],
         }
     
     if result:

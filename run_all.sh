@@ -17,13 +17,13 @@ elif [ -f "./llama-server" ]; then
 fi
 
 echo ""
-echo "[2/5] Starting llama.cpp LLM Server (Port 11434, --mlock locked RAM, 16k context)..."
+echo "[2/5] Starting llama.cpp LLM Server (Port 11434, 16k context)..."
 CPU_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 8)
-nohup "$LLAMA_SERVER_EXE" --port 11434 -m "./google_gemma-4-E4B-it-Q4_K_M.gguf" -c 16384 -t $CPU_CORES -b 2048 -ub 512 --mlock --flash-attn on > /dev/null 2>&1 &
+nohup "$LLAMA_SERVER_EXE" --port 11434 -m "./google_gemma-4-E4B-it-Q4_K_M.gguf" -c 16384 -t $CPU_CORES -b 2048 -ub 512 --flash-attn on > /dev/null 2>&1 &
 
 echo ""
-echo "[3/5] Starting llama.cpp Embedding Server (Port 11435, --mlock locked RAM)..."
-nohup "$LLAMA_SERVER_EXE" --port 11435 -m "./nomic-embed-text-v1.5.f16.gguf" -t 2 --mlock --embedding > /dev/null 2>&1 &
+echo "[3/5] Starting llama.cpp Embedding Server (Port 11435)..."
+nohup "$LLAMA_SERVER_EXE" --port 11435 -m "./nomic-embed-text-v1.5.f16.gguf" -t 2 --embedding > /dev/null 2>&1 &
 
 echo ""
 echo "[4/5] Starting Docker Database Service (ShaktiDB)..."

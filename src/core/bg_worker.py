@@ -216,20 +216,26 @@ def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
             controls = []
             for item in excel_items:
                 ctrl_id = item.get("control_id", "UNKNOWN")
-                q_text = item.get("question") or item.get("control_label") or ctrl_id
+                # control_label is the official ISO name resolved by excel_scoping_parser
+                # (e.g. "5.15 Access Control"), not the raw checklist question. Without it,
+                # "control" ends up as just "5.15 — <question text>", and the UI's header
+                # renderer strips everything after " — " assuming what's left is a real
+                # name — leaving a bare "5.15" with no control name shown at all.
+                ctrl_full_label = item.get("control_label") or ctrl_id
+                q_text = item.get("question") or ctrl_full_label
                 files = item.get("files") or item.get("raw_file_refs") or []
                 files_str = ", ".join(files) if isinstance(files, list) else str(files)
                 primary_file = files[0] if (files and isinstance(files, list) and len(files) > 0) else files_str
 
                 controls.append({
-                    "control": f"{ctrl_id} — {q_text}",
-                    "control_id": ctrl_id,
-                    "label": f"{ctrl_id} {q_text}",
+                    "control": f"{ctrl_full_label} — {q_text}",
+                    "control_id": ctrl_full_label,
+                    "label": f"{ctrl_full_label} — {q_text}",
                     "expected": item.get("expected_evidence") or q_text,
                     "prompt_hint": item.get("prompt_hint") or f"Evaluate evidence for: {q_text}",
                     "severity": item.get("severity", "MEDIUM"),
                     "standard": "ISO 27001",
-                    "recommendation": f"Establish, document, and implement procedures to satisfy {ctrl_id} ({q_text}).",
+                    "recommendation": f"Establish, document, and implement procedures to satisfy {ctrl_full_label}.",
                     "evidence_location": primary_file,
                     "evidence_source_file": primary_file,
                     # Full file list for THIS row (not just the first one) — used by the
@@ -670,6 +676,26 @@ Return format: ["topic1", "topic2", ...]"""
             break
         # ────────────────────────────────────────────────────────────────
 
+        # ── RESOURCE GUARD: stop gracefully (not crash) if RAM gets critical ──
+        # Checked every control, not just at audit start — a long-running audit
+        # can outlive the memory conditions it started under (other processes,
+        # other concurrent audits). Already-completed controls stay checkpointed;
+        # the rest can be resumed later via the existing resume-checkpoint path.
+        from src.core.resource_guard import check_memory_pressure
+        _mem = check_memory_pressure()
+        if _mem["status"] == "CRITICAL":
+            print(f"[RESOURCE GUARD] CRITICAL memory pressure at control {idx + 1}/{total}: {_mem['reason']} Stopping audit gracefully.", flush=True)
+            if bg_key:
+                with _bg_lock:
+                    _bg_store["progress"][bg_key] = {
+                        "text": f"Paused: system resources critically low ({_mem['available_gb']}GB RAM available). "
+                                f"Completed {idx}/{total} controls — resume once resources free up.",
+                        "percent": int((idx / total) * 100),
+                        "resource_status": "CRITICAL",
+                    }
+            break
+        # ────────────────────────────────────────────────────────────────
+
         # ── PER-CONTROL RESUME: skip controls already saved in checkpoint ─
         _ctrl_id_str = c.get("control", "")
         if _ctrl_id_str in _already_done_set:
@@ -1090,21 +1116,17 @@ Return format: ["topic1", "topic2", ...]"""
 
     return resolved_list, findings_list, all_results
 
-# 2x CPU cores = all 15+ auditors run simultaneously with NO queue.
-# Tradeoff: each auditor runs at ~50% token speed, but ZERO waiting.
-# Override via env var MAX_CONCURRENT_AUDITS=N if you prefer fewer slots.
-_default_concurrency = str(max(16, (os.cpu_count() or 8) * 2))
-_audit_semaphore = threading.Semaphore(int(os.environ.get("MAX_CONCURRENT_AUDITS", _default_concurrency)))
+# No concurrency queue — audits run freely without waiting in line.
+# The resource guard's check_memory_pressure() (called in /audit/start before
+# this thread is even spawned) is the only gate: it refuses new audits when
+# RAM is genuinely critically low (< 8% available), preventing OOM crashes.
+# Without --mlock, the OS manages memory like a normal app (swap to disk when
+# tight), so queuing is unnecessary — worst case is slower, never a crash.
 
 def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None):
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)
     _sid = session_id or bg_key
-    acquired_slot = False
     try:
-        if not _audit_semaphore.acquire(timeout=5.0):
-            print(f"[_run_ollama_bg WARNING] Concurrency slot busy for {bg_key}; waiting for a slot to free up...", flush=True)
-            _audit_semaphore.acquire()
-        acquired_slot = True
 
 
         # ── Pre-flight: verify LLM server is reachable (3s timeout) ──────────
@@ -1323,8 +1345,6 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             _bg_results[bg_key] = {"error": f"Error contacting {BACKEND_NAME}: {str(e)}"}
         _checkpoint_finish(_sid, "failed")
     finally:
-        if acquired_slot:
-            _audit_semaphore.release()
         with _bg_lock:
             _bg_running.discard(bg_key)
             _bg_store["progress"].pop(bg_key, None)
