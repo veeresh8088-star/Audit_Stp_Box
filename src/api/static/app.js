@@ -337,7 +337,8 @@ function setupTabs(role) {
     if (role === "auditee") {
         tabs = [
             { id: "tab-upload-evidence", label: "Upload Evidence" },
-            { id: "tab-submitted-reports", label: "Submitted" }
+            { id: "tab-submitted-reports", label: "Auditor Submitted Report" },
+            { id: "tab-auditee-history", label: "My Document History" }
         ];
     } else if (role === "admin") {
         // Admin Role - includes System & Auditor Warning Logs
@@ -392,7 +393,9 @@ function switchTab(tabId, tabBtn) {
         else if (tabId === "tab-audit-records") wsTitle.innerText = "Audit Records & Compliance Gaps Workspace";
         else if (tabId === "tab-auditee-docs") wsTitle.innerText = "Auditee Evidence Documents";
         else if (tabId === "tab-audit-report") wsTitle.innerText = "Audit Report & Delivery Center";
-        else if (tabId === "tab-submitted-reports") wsTitle.innerText = "Submitted Audit Reports";
+        else if (tabId === "tab-upload-evidence") wsTitle.innerText = "Auditee Evidence Upload & Auditor Assignment";
+        else if (tabId === "tab-submitted-reports") wsTitle.innerText = "Auditor Submitted Final Reports";
+        else if (tabId === "tab-auditee-history") wsTitle.innerText = "My Document Submission History";
         else if (tabId === "tab-manage-controls") wsTitle.innerText = "Manage Framework Controls";
         else if (tabId === "tab-admin-logs") wsTitle.innerText = "System Event & Developer Logs";
     }
@@ -400,6 +403,8 @@ function switchTab(tabId, tabBtn) {
     // Perform tab-specific loading
     if (tabId === "tab-scan-workspace") {
         loadEvidenceFileList();
+    } else if (tabId === "tab-upload-evidence") {
+        loadRegisteredAuditors();
     } else if (tabId === "tab-audit-records") {
         loadFindings();
     } else if (tabId === "tab-audit-report") {
@@ -412,6 +417,8 @@ function switchTab(tabId, tabBtn) {
         loadCustomControlsTable();
     } else if (tabId === "tab-submitted-reports") {
         loadSubmittedReports();
+    } else if (tabId === "tab-auditee-history") {
+        loadAuditeeDocumentHistory();
     } else if (tabId === "tab-auditee-docs") {
         loadAuditeeSessionsList();
     } else if (tabId === "tab-ai-chat") {
@@ -5883,5 +5890,206 @@ async function submitResetPasswordTOTP() {
     } catch (err) {
         console.error("Password reset error:", err);
         alert("Error resetting password.");
+    }
+}
+
+// ── AUDITEE AUDITOR ASSIGNMENT, DOCUMENT HISTORY & UNDO DELETE ────────────────
+let _undoToastTimer = null;
+function showUndoToast(message, onUndoCallback) {
+    const existing = document.getElementById("undo-toast-banner");
+    if (existing) existing.remove();
+    if (_undoToastTimer) clearTimeout(_undoToastTimer);
+
+    const banner = document.createElement("div");
+    banner.id = "undo-toast-banner";
+    banner.style.cssText = "position: fixed; bottom: 24px; right: 24px; z-index: 10000; background: #1e293b; color: #fff; border: 1px solid #3b82f6; border-radius: 12px; padding: 12px 18px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 14px; font-size: 0.88rem;";
+    
+    banner.innerHTML = `
+        <span>🗑️ ${message}</span>
+        <button type="button" id="undo-toast-btn" style="background: #2563eb; color: #fff; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.82rem; transition: all 0.2s;">↩️ Undo Delete</button>
+        <button type="button" onclick="this.parentElement.remove()" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 1rem; padding: 0 4px;">✕</button>
+    `;
+
+    document.body.appendChild(banner);
+
+    document.getElementById("undo-toast-btn").onclick = () => {
+        banner.remove();
+        if (onUndoCallback) onUndoCallback();
+        showToast("Restored successfully!", "success");
+    };
+
+    _undoToastTimer = setTimeout(() => {
+        if (banner.parentElement) banner.remove();
+    }, 8000);
+}
+
+async function loadRegisteredAuditors() {
+    const selector = document.getElementById("target-auditor-selector");
+    if (!selector) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/audit/users/auditors`);
+        const data = await res.json();
+        if (!res.ok || !data.success) return;
+
+        selector.innerHTML = `<option value="">-- Select Target Auditor --</option>`;
+        (data.auditors || []).forEach(a => {
+            const opt = document.createElement("option");
+            opt.value = a.username;
+            opt.innerText = `👤 ${a.username} (${a.role.toUpperCase()})`;
+            selector.appendChild(opt);
+        });
+
+        // Pre-select if active session has an assigned auditor
+        if (activeSessionId) {
+            const sessRes = await fetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
+            const sessData = await sessRes.json();
+            if (sessData.files && sessData.files.length > 0 && sessData.files[0].assigned_auditor) {
+                selector.value = sessData.files[0].assigned_auditor;
+            }
+        }
+    } catch (err) {
+        console.error("Error loading registered auditors:", err);
+    }
+}
+
+async function assignTargetAuditorToActiveSession() {
+    const selector = document.getElementById("target-auditor-selector");
+    if (!selector || !activeSessionId) return;
+
+    const assignedAuditor = selector.value;
+    if (!assignedAuditor) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/audit/assign-auditor`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: activeSessionId,
+                assigned_auditor_username: assignedAuditor
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Assigned audit session to Auditor '${assignedAuditor}' ✅`, "success");
+            loadAuditeeDocumentHistory();
+        }
+    } catch (err) {
+        console.error("Error assigning target auditor:", err);
+    }
+}
+
+async function loadAuditeeDocumentHistory() {
+    const container = document.getElementById("auditee-history-table-container");
+    if (!container) return;
+
+    try {
+        const username = currentUser ? currentUser.username : "";
+        const res = await fetch(`${API_BASE}/audit/auditee/document-history?username=${encodeURIComponent(username)}`);
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            container.innerHTML = `<div class="empty-state">Unable to load document history.</div>`;
+            return;
+        }
+
+        const history = data.history || [];
+        if (history.length === 0) {
+            container.innerHTML = `<div class="empty-state" style="padding: 30px; text-align: center; color: var(--text-muted);">No submitted document history found. Upload evidence files to see history log.</div>`;
+            return;
+        }
+
+        let html = `
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
+                    <thead>
+                        <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase;">
+                            <th style="padding: 10px 12px;">Document Name</th>
+                            <th style="padding: 10px 12px;">Size</th>
+                            <th style="padding: 10px 12px;">Submitted Timestamp</th>
+                            <th style="padding: 10px 12px;">Assigned Auditor</th>
+                            <th style="padding: 10px 12px;">Status</th>
+                            <th style="padding: 10px 12px; text-align: right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+
+        history.forEach(item => {
+            const isDel = item.is_deleted;
+            const rowBg = isDel ? "rgba(239, 68, 68, 0.06)" : "transparent";
+            const fileIcon = item.filename.endsWith(".pdf") ? "📄" : item.filename.endsWith(".zip") ? "📦" : "📝";
+            const auditorBadge = `<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 700;">👤 ${item.assigned_auditor}</span>`;
+            const statusBadge = isDel 
+                ? `<span style="color: #ef4444; font-weight: 700; background: rgba(239, 68, 68, 0.12); padding: 2px 8px; border-radius: 4px;">Deleted (Soft)</span>`
+                : `<span style="color: #10b981; font-weight: 700; background: rgba(16, 185, 129, 0.12); padding: 2px 8px; border-radius: 4px;">${item.status}</span>`;
+            
+            const actionBtn = isDel
+                ? `<button type="button" onclick="undoDeleteEvidenceFile('${item.session_id}', ${item.id}, '${item.filename}')" style="background: #2563eb; color: #fff; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.78rem; font-weight: 700;">↩️ Undo Delete</button>`
+                : `<button type="button" onclick="deleteServerEvidenceFile('${item.session_id}', ${item.id}, '${item.filename}')" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.78rem;">🗑️ Delete</button>`;
+
+            html += `
+                <tr style="border-bottom: 1px solid var(--border-color); background: ${rowBg}; opacity: ${isDel ? 0.7 : 1};">
+                    <td style="padding: 10px 12px; font-weight: 600; text-decoration: ${isDel ? 'line-through' : 'none'};">${fileIcon} ${item.filename}</td>
+                    <td style="padding: 10px 12px; color: var(--text-muted);">${item.size_str}</td>
+                    <td style="padding: 10px 12px; color: var(--text-muted);">${item.uploaded_at}</td>
+                    <td style="padding: 10px 12px;">${auditorBadge}</td>
+                    <td style="padding: 10px 12px;">${statusBadge}</td>
+                    <td style="padding: 10px 12px; text-align: right;">${actionBtn}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+        container.innerHTML = html;
+    } catch (err) {
+        console.error("Error loading document history:", err);
+    }
+}
+
+async function deleteServerEvidenceFile(sessionId, fileId, filename) {
+    try {
+        const res = await fetch(`${API_BASE}/audit/evidence/delete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: sessionId,
+                file_id: fileId,
+                filename: filename
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showUndoToast(`Evidence file '${filename}' deleted`, () => undoDeleteEvidenceFile(sessionId, fileId, filename));
+            loadAuditeeDocumentHistory();
+            if (activeSessionId === sessionId) loadEvidenceFileList();
+        }
+    } catch (err) {
+        console.error("Error deleting evidence file:", err);
+    }
+}
+
+async function undoDeleteEvidenceFile(sessionId, fileId, filename) {
+    try {
+        const res = await fetch(`${API_BASE}/audit/evidence/undo-delete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: sessionId,
+                file_id: fileId,
+                filename: filename
+            })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Restored file '${filename}' ✅`, "success");
+            loadAuditeeDocumentHistory();
+            if (activeSessionId === sessionId) loadEvidenceFileList();
+        }
+    } catch (err) {
+        console.error("Error undoing evidence deletion:", err);
     }
 }

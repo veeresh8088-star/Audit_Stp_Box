@@ -109,6 +109,20 @@ class ChatSendRequest(BaseModel):
     model_choice: str
     username: Optional[str] = None  # logged-in user sending this message
 
+class AssignAuditorRequest(BaseModel):
+    session_id: str
+    assigned_auditor_username: str
+
+class DeleteEvidenceRequest(BaseModel):
+    session_id: str
+    file_id: Optional[int] = None
+    filename: Optional[str] = None
+
+class UndoDeleteEvidenceRequest(BaseModel):
+    session_id: str
+    file_id: Optional[int] = None
+    filename: Optional[str] = None
+
 # --- Endpoints ---
 
 @router.post("/sessions")
@@ -452,9 +466,91 @@ async def api_upload_evidence(
     finally:
         db.close()
 
+@router.get("/users/auditors")
+def api_get_registered_auditors():
+    """Returns list of real registered users with auditor or admin role."""
+    db = SessionLocal()
+    try:
+        with force_master():
+            auditors = db.query(User).filter(User.role.in_(["auditor", "admin", "AUDITOR", "ADMIN"])).all()
+            res = []
+            for a in auditors:
+                res.append({
+                    "id": a.id,
+                    "username": a.username,
+                    "role": a.role
+                })
+            return {"success": True, "auditors": res}
+    finally:
+        db.close()
+
+@router.post("/assign-auditor")
+def api_assign_auditor(req: AssignAuditorRequest):
+    """Assigns an audit session and its files to a specific real Auditor user."""
+    db = SessionLocal()
+    try:
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Audit session not found")
+            auditor = db.query(User).filter(User.username == req.assigned_auditor_username).first()
+            report.assigned_auditor_username = req.assigned_auditor_username
+            if auditor:
+                report.assigned_auditor_id = auditor.id
+            db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id).update(
+                {EvidenceFile.assigned_auditor_username: req.assigned_auditor_username},
+                synchronize_session=False
+            )
+            db.commit()
+            return {"success": True, "assigned_auditor_username": req.assigned_auditor_username}
+    finally:
+        db.close()
+
+@router.get("/auditee/document-history")
+def api_get_auditee_document_history(username: Optional[str] = None):
+    """Returns all evidence files uploaded by the auditee across sessions."""
+    db = SessionLocal()
+    try:
+        with force_master():
+            query = db.query(EvidenceFile, AuditReport).join(
+                AuditReport, EvidenceFile.report_id == AuditReport.id
+            )
+            if username:
+                query = query.filter(
+                    (AuditReport.created_by == username) | (AuditReport.auditee_id == db.query(User.id).filter(User.username == username).scalar_subquery())
+                )
+            rows = query.order_by(EvidenceFile.uploaded_at.desc()).all()
+            history = []
+            for f, r in rows:
+                size_str = "0 KB"
+                if f.file_path and os.path.exists(f.file_path):
+                    sz = os.path.getsize(f.file_path)
+                    if sz > 1024 * 1024:
+                        size_str = f"{sz / (1024 * 1024):.1f} MB"
+                    elif sz > 1024:
+                        size_str = f"{sz / 1024:.1f} KB"
+                    else:
+                        size_str = f"{sz} B"
+                assigned_auditor = f.assigned_auditor_username or r.assigned_auditor_username or "Unassigned"
+                history.append({
+                    "id": f.id,
+                    "filename": f.filename,
+                    "size_str": size_str,
+                    "uploaded_at": str(f.uploaded_at),
+                    "session_id": r.session_id,
+                    "session_title": r.session_title,
+                    "assigned_auditor": assigned_auditor,
+                    "status": f.status or "Submitted",
+                    "is_deleted": bool(f.is_deleted),
+                    "is_auditor": bool(f.is_auditor_uploaded)
+                })
+            return {"success": True, "history": history}
+    finally:
+        db.close()
+
 @router.get("/evidence")
 def api_get_session_evidence(session_id: str):
-    """Returns list of uploaded evidence files for the given session ID."""
+    """Returns list of active (non-deleted) uploaded evidence files for the given session ID."""
     db = SessionLocal()
     try:
         with force_master():
@@ -462,7 +558,10 @@ def api_get_session_evidence(session_id: str):
             if not report:
                 return {"success": True, "files": []}
             
-            files = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id).order_by(EvidenceFile.uploaded_at.desc()).all()
+            files = db.query(EvidenceFile).filter(
+                EvidenceFile.report_id == report.id,
+                (EvidenceFile.is_deleted == False) | (EvidenceFile.is_deleted.is_(None))
+            ).order_by(EvidenceFile.uploaded_at.desc()).all()
             result = []
             for f in files:
                 size_str = "0 KB"
@@ -479,9 +578,56 @@ def api_get_session_evidence(session_id: str):
                     "filename": f.filename,
                     "size_str": size_str,
                     "is_auditor": bool(f.is_auditor_uploaded),
+                    "assigned_auditor": f.assigned_auditor_username or report.assigned_auditor_username,
                     "created_at": str(f.uploaded_at)
                 })
             return {"success": True, "files": result}
+    finally:
+        db.close()
+
+@router.post("/evidence/delete")
+def api_delete_evidence_file(req: DeleteEvidenceRequest):
+    """Soft deletes an evidence file for 1-click Undo capability."""
+    db = SessionLocal()
+    try:
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found")
+            q = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id)
+            if req.file_id:
+                q = q.filter(EvidenceFile.id == req.file_id)
+            elif req.filename:
+                q = q.filter(EvidenceFile.filename == req.filename)
+            file_rec = q.first()
+            if not file_rec:
+                raise HTTPException(status_code=404, detail="File not found")
+            file_rec.is_deleted = True
+            db.commit()
+            return {"success": True, "message": f"File '{file_rec.filename}' deleted", "file_id": file_rec.id, "filename": file_rec.filename}
+    finally:
+        db.close()
+
+@router.post("/evidence/undo-delete")
+def api_undo_delete_evidence_file(req: UndoDeleteEvidenceRequest):
+    """Restores a soft-deleted evidence file."""
+    db = SessionLocal()
+    try:
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found")
+            q = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id)
+            if req.file_id:
+                q = q.filter(EvidenceFile.id == req.file_id)
+            elif req.filename:
+                q = q.filter(EvidenceFile.filename == req.filename)
+            file_rec = q.first()
+            if not file_rec:
+                raise HTTPException(status_code=404, detail="File not found")
+            file_rec.is_deleted = False
+            db.commit()
+            return {"success": True, "message": f"File '{file_rec.filename}' restored", "file_id": file_rec.id, "filename": file_rec.filename}
     finally:
         db.close()
 

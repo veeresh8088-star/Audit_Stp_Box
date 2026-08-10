@@ -34,6 +34,8 @@ class AuditReport(Base):
     reviewed_at            = Column(DateTime, nullable=True)
     requires_scoping_review = Column(Boolean, default=False)
     scoping_note           = Column(Text, nullable=True)
+    assigned_auditor_id     = Column(Integer, nullable=True)
+    assigned_auditor_username = Column(String(100), nullable=True, index=True)
 
 class EvidenceFile(Base):
     __tablename__ = "evidence_files"
@@ -44,6 +46,8 @@ class EvidenceFile(Base):
     uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     status      = Column(String(50), default="Pending")
     is_auditor_uploaded = Column(Boolean, default=False, server_default="false")
+    assigned_auditor_username = Column(String(100), nullable=True, index=True)
+    is_deleted  = Column(Boolean, default=False, server_default="false")
 
 class Finding(Base):
     __tablename__ = "findings"
