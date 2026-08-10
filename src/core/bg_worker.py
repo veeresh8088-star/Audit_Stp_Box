@@ -327,7 +327,7 @@ def _checkpoint_create(session_id, bg_key, ai_model, selected_sls, file_names, c
         db = SessionLocal()
         try:
             db.query(AuditCheckpoint).filter(
-                AuditCheckpoint.status.in_(["in_progress", "failed"])
+                AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
             ).update({AuditCheckpoint.status: "discarded"}, synchronize_session=False)
 
             db.query(AuditCheckpoint).filter(
@@ -423,7 +423,7 @@ def _checkpoint_finish(session_id, status="completed"):
         try:
             chk = db.query(AuditCheckpoint).filter(
                 AuditCheckpoint.session_id == session_id,
-                AuditCheckpoint.status.in_(["in_progress", "failed"])
+                AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
             ).first()
             if chk:
                 chk.status = status
@@ -439,7 +439,7 @@ def get_resumable_checkpoint(session_id):
     try:
         return db.query(AuditCheckpoint).filter(
             AuditCheckpoint.session_id == session_id,
-            AuditCheckpoint.status.in_(["in_progress", "failed"])
+            AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
         ).order_by(AuditCheckpoint.created_at.desc()).first()
     except Exception as e:
         print(f"[checkpoint] Failed to get checkpoint: {e}", flush=True)
@@ -451,7 +451,7 @@ def get_global_resumable_checkpoint():
     db = SessionLocal()
     try:
         return db.query(AuditCheckpoint).filter(
-            AuditCheckpoint.status.in_(["in_progress", "failed"])
+            AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
         ).order_by(AuditCheckpoint.created_at.desc()).first()
     except Exception as e:
         print(f"[checkpoint] Failed to get global checkpoint: {e}", flush=True)
@@ -669,6 +669,8 @@ Return format: ["topic1", "topic2", ...]"""
                 except Exception as _e_ingest:
                     print(f"[RAG INGEST WARNING] Pre-ingest for '{fname}' failed: {_e_ingest}", flush=True)
 
+    was_resource_paused = False
+
     for idx, c in enumerate(controls):
         # ── STOP FLAG CHECK ─────────────────────────────────────────────
         if _bg_stop_flags.get(bg_key):
@@ -685,6 +687,7 @@ Return format: ["topic1", "topic2", ...]"""
         _mem = check_memory_pressure()
         if _mem["status"] == "CRITICAL":
             print(f"[RESOURCE GUARD] CRITICAL memory pressure at control {idx + 1}/{total}: {_mem['reason']} Stopping audit gracefully.", flush=True)
+            was_resource_paused = True
             if bg_key:
                 with _bg_lock:
                     _bg_store["progress"][bg_key] = {
@@ -1108,13 +1111,13 @@ Return format: ["topic1", "topic2", ...]"""
     except Exception as _bm_err:
         print(f"[BENCHMARK ERROR] Failed to record token metrics: {_bm_err}", flush=True)
 
-    # ── Redis: mark session as done ──────────────────────────────────────────
+    # ── Redis: mark session as done / paused ─────────────────────────────────
     try:
-        _rm.session_done(session_id=checkpoint_session_id or bg_key or _sid, status="done")
+        _rm.session_done(session_id=checkpoint_session_id or bg_key or _sid, status="paused" if was_resource_paused else "done")
     except Exception:
         pass
 
-    return resolved_list, findings_list, all_results
+    return resolved_list, findings_list, all_results, was_resource_paused
 
 # No concurrency queue — audits run freely without waiting in line.
 # The resource guard's check_memory_pressure() (called in /audit/start before
@@ -1241,12 +1244,17 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 "percent": 0
             }
 
-        resolved_combined, findings_combined, all_results_combined = generate_ollama_findings(
+        res = generate_ollama_findings(
             context_str, file_names_list, selected_sls_copy, ai_model, bg_key=bg_key,
             checkpoint_session_id=_sid, audit_mode=audit_mode,
             custom_docs=custom_docs, custom_evidence=custom_evidence, file_registry=file_registry,
             already_done_ids=already_done_ids or []
         )
+        if len(res) == 4:
+            resolved_combined, findings_combined, all_results_combined, is_resource_paused = res
+        else:
+            resolved_combined, findings_combined, all_results_combined = res
+            is_resource_paused = False
 
         resolved_mapping = {}
         for ctrl in resolved_combined:
@@ -1337,7 +1345,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         except Exception as e:
             print(f"[PIPELINE] Failed to save findings and complete files update: {e}", flush=True)
             
-        _checkpoint_finish(_sid, "completed")
+        _checkpoint_finish(_sid, "paused" if is_resource_paused else "completed")
     except Exception as e:
         print(f"[_run_ollama_bg] Exception raised in background thread: {str(e)}", flush=True)
         log_system_event("AUDIT_EXCEPTION", "CRITICAL", f"Background audit thread exception: {str(e)}", session_id=_sid)

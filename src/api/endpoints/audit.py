@@ -1912,7 +1912,7 @@ def api_get_interrupted_checkpoints(username: Optional[str] = Query(None)):
 
         with force_master():
             # Query AuditCheckpoint for incomplete scans
-            query = db.query(AuditCheckpoint).filter(AuditCheckpoint.status.in_(["in_progress", "interrupted"]))
+            query = db.query(AuditCheckpoint).filter(AuditCheckpoint.status.in_(["in_progress", "interrupted", "paused", "failed"]))
             checkpoints = query.order_by(AuditCheckpoint.updated_at.desc()).all()
 
             results = []

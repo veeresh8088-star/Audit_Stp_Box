@@ -41,7 +41,7 @@ detect_total_mem_gb() {
 
 if [ "$LLM_MODE" = "embedding" ]; then
     echo "[LLM ENTRYPOINT] Starting embedding server (nomic-embed-text) on port 11435."
-    exec llama-server \
+    exec /app/llama-server \
         --host 0.0.0.0 --port 11435 \
         -m /models/nomic-embed-text-v1.5.f16.gguf \
         -t "${EMBED_THREADS:-4}" \
@@ -70,7 +70,7 @@ else
     echo "[LLM ENTRYPOINT] Detected ${TOTAL_GB}GB available -> auto-sized to $SLOTS concurrent slot(s)."
 fi
 
-exec llama-server \
+exec /app/llama-server \
     --host 0.0.0.0 --port 11434 \
     -m /models/google_gemma-4-E4B-it-Q4_K_M.gguf \
     -c 0 -np "$SLOTS" \
