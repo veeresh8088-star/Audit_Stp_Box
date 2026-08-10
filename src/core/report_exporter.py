@@ -110,7 +110,7 @@ def severity_sort_key(item):
         rank = 5
     return (rank, cid)
 
-def _export_vapt_pdf(session_title, findings, resolved_list, status, comments="", custom_logo=None):
+def _export_vapt_pdf(session_title, findings, resolved_list, status, comments="", custom_logo=None, metadata=None):
     from fpdf import FPDF
     from fpdf.enums import XPos, YPos
     from fpdf.fonts import FontFace
@@ -130,15 +130,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         val = val.encode("latin-1", "replace").decode("latin-1")
         return val
 
-    auditor_lead = "Mr. Vikas Dubey"
-    auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
-    auditor_reviewer = "Ms. Prianka Singla"
-    auditor_approver = "Mr. Atul Srivastava"
-    report_doc_id = "3153142723"
-    target_client = "NOCPL"
-    submitted_to = "Ashish Jaiswal"
-    designation = "Head of India Channel Sales"
-    email = "ashish.jaiswal1@motorolasolutions.com"
+    meta = metadata or {}
+    auditor_lead = meta.get("brand_auditor") or "Mr. Vikas Dubey"
+    auditor_firm = meta.get("brand_firm") or "TÜV SÜD South Asia Pvt. Ltd."
+    auditor_reviewer = meta.get("brand_reviewer") or "Ms. Prianka Singla"
+    auditor_approver = meta.get("brand_approver") or "Mr. Atul Srivastava"
+    report_doc_id = meta.get("brand_docid") or "3153142723"
+    target_client = meta.get("brand_client") or "NOCPL"
+    submitted_to = meta.get("brand_client") or "Ashish Jaiswal"
+    designation = "Head of Information Security"
+    email = "security@company.com"
     testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
 
     assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "assets"))
@@ -1098,7 +1099,7 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
     return bytes(pdf_bytes)
 
 
-def _export_vapt_docx(session_title, findings, resolved_list, status, comments="", custom_logo=None):
+def _export_vapt_docx(session_title, findings, resolved_list, status, comments="", custom_logo=None, metadata=None):
     from docx import Document
     from docx.shared import Pt, RGBColor, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -1138,13 +1139,19 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
             tcBorders.append(border)
         tcPr.append(tcBorders)
 
-    auditor_lead = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
-    auditor_firm = "TÜV SÜD South Asia Pvt. Ltd."
-    auditor_reviewer = "Ms. Prianka Singla"
-    auditor_approver = "Mr. Atul Srivastava"
-    report_doc_id = "3153142723"
-    target_client = "NOCPL"
-    logo_path = None
+    meta = metadata or {}
+    auditor_lead = meta.get("brand_auditor") or "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
+    auditor_firm = meta.get("brand_firm") or "TÜV SÜD South Asia Pvt. Ltd."
+    auditor_reviewer = meta.get("brand_reviewer") or "Ms. Prianka Singla"
+    auditor_approver = meta.get("brand_approver") or "Mr. Atul Srivastava"
+    report_doc_id = meta.get("brand_docid") or "3153142723"
+    target_client = meta.get("brand_client") or "NOCPL"
+    
+    assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "assets"))
+    custom_logo_file = os.path.join(assets_dir, "custom_company_logo.png")
+    effective_custom_logo = custom_logo if (custom_logo and os.path.exists(custom_logo)) else (custom_logo_file if os.path.exists(custom_logo_file) else None)
+    shield_logo_path = os.path.join(assets_dir, "shield_logo.png")
+    logo_path = effective_custom_logo if (effective_custom_logo and os.path.exists(effective_custom_logo)) else (shield_logo_path if os.path.exists(shield_logo_path) else None)
     testing_dates = f"20-June-2026 to {datetime.now().strftime('%d-%B-%Y')}"
 
 
@@ -1599,7 +1606,7 @@ from fpdf.enums import XPos, YPos
 from src.core.pii_redactor import redact_pii
 
 
-def _export_iso_template_docx(session_title, findings, resolved_list, status, comments=""):
+def _export_iso_template_docx(session_title, findings, resolved_list, status, comments="", custom_logo=None, metadata=None):
     """
     Generates an ISO audit DOCX report using `VAPT/Sample report.docx` as the master template.
     Replaces metadata tables and rebuilds Table 6 (Observations) with live audit findings.
@@ -1616,14 +1623,15 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
     today = datetime.now().strftime("%d.%m.%Y")
 
-    # ── Report branding defaults ────────────────────────────────────────────
-    auditor_lead     = "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
-    auditor_firm     = "Digital Age Strategies Pvt Ltd"
-    auditor_reviewer = "Mr. Subhash Rao"
-    auditor_approver = "Mr. Dinesh S Shastry"
-    report_doc_id    = "DigAge:0001:2025-26"
-    target_client    = "Client Organization"
-    submitted_to     = "Audit Committee"
+    # ── Report branding metadata ────────────────────────────────────────────
+    meta = metadata or {}
+    auditor_lead     = meta.get("brand_auditor") or "Mr. Subhash Rao & Mr. Mahaveer Rajannavar"
+    auditor_firm     = meta.get("brand_firm") or "Digital Age Strategies Pvt Ltd"
+    auditor_reviewer = meta.get("brand_reviewer") or "Mr. Subhash Rao"
+    auditor_approver = meta.get("brand_approver") or "Mr. Dinesh S Shastry"
+    report_doc_id    = meta.get("brand_docid") or "DigAge:0001:2025-26"
+    target_client    = meta.get("brand_client") or "Client Organization"
+    submitted_to     = meta.get("brand_client") or "Audit Committee"
     designation      = "IS Audit Lead"
     testing_dates    = today
 
@@ -1898,7 +1906,7 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
     return buf.read()
 
 
-def export_docx_report(session_title, findings, resolved_list, status, comments="", custom_logo=None, audit_type=None):
+def export_docx_report(session_title, findings, resolved_list, status, comments="", custom_logo=None, audit_type=None, metadata=None):
     """
     audit_type: explicit "vapt" / "iso" from the caller (derived from AuditReport.framework,
     the authoritative field set when the audit session was created). When omitted, falls back
@@ -1921,10 +1929,10 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
                     break
 
     if is_vapt:
-        return _export_vapt_docx(session_title, findings, resolved_list, status, comments)
+        return _export_vapt_docx(session_title, findings, resolved_list, status, comments, custom_logo=custom_logo, metadata=metadata)
 
     # ── ISO: Use Sample report.docx template ──────────────────────────────────
-    template_result = _export_iso_template_docx(session_title, findings, resolved_list, status, comments)
+    template_result = _export_iso_template_docx(session_title, findings, resolved_list, status, comments, custom_logo=custom_logo, metadata=metadata)
     if template_result is not None:
         return template_result
 
@@ -1982,11 +1990,16 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         run.font.color.rgb = _rgb(15, 23, 42)
 
     # ── COVER PAGE ─────────────────────────────────────────────────────────────
-    logo_path = None
+    assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+    custom_logo_file = os.path.join(assets_dir, "custom_company_logo.png")
+    effective_custom_logo = custom_logo if (custom_logo and os.path.exists(custom_logo)) else (custom_logo_file if os.path.exists(custom_logo_file) else None)
+    shield_logo_path = os.path.join(assets_dir, "shield_logo.png")
+    logo_path = effective_custom_logo if (effective_custom_logo and os.path.exists(effective_custom_logo)) else (shield_logo_path if os.path.exists(shield_logo_path) else None)
+
     if logo_path and os.path.exists(logo_path):
         logo_p = doc.add_paragraph()
         logo_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        logo_p.paragraph_format.space_before = Pt(40)
+        logo_p.paragraph_format.space_before = Pt(30)
         run_logo = logo_p.add_run()
         run_logo.add_picture(logo_path, width=Cm(4))
     
@@ -2385,7 +2398,7 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
     return buf.read()
 
 
-def export_pdf_report(session_title, findings, resolved_list, status, comments="", audit_type=None):
+def export_pdf_report(session_title, findings, resolved_list, status, comments="", audit_type=None, custom_logo=None, metadata=None):
     """
     audit_type: explicit "vapt" / "iso" from the caller (derived from AuditReport.framework,
     the authoritative field set when the audit session was created). When omitted, falls back
@@ -2409,7 +2422,7 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
                     break
 
     if is_vapt:
-        return _export_vapt_pdf(session_title, findings, resolved_list, status, comments)
+        return _export_vapt_pdf(session_title, findings, resolved_list, status, comments, custom_logo=custom_logo, metadata=metadata)
     from fpdf.fonts import FontFace
 
     findings = sorted(findings or [], key=severity_sort_key)
@@ -2456,7 +2469,12 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
 
     # ── COVER PAGE ─────────────────────────────────────────────────────────────
     pdf.add_page()
-    logo_path = None
+    assets_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets")
+    custom_logo_file = os.path.join(assets_dir, "custom_company_logo.png")
+    effective_custom_logo = custom_logo if (custom_logo and os.path.exists(custom_logo)) else (custom_logo_file if os.path.exists(custom_logo_file) else None)
+    shield_logo_path = os.path.join(assets_dir, "shield_logo.png")
+    logo_path = effective_custom_logo if (effective_custom_logo and os.path.exists(effective_custom_logo)) else (shield_logo_path if os.path.exists(shield_logo_path) else None)
+
     if logo_path and os.path.exists(logo_path):
         pdf.image(logo_path, x=85, y=15, w=40)
         pdf.ln(35)

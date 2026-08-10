@@ -1534,7 +1534,17 @@ def api_reset_company_logo():
 
 
 @router.get("/export/docx")
-def api_export_docx(session_id: str, saved_only: bool = False, auditor_logo_path: Optional[str] = None):
+def api_export_docx(
+    session_id: str, 
+    saved_only: bool = False, 
+    auditor_logo_path: Optional[str] = None,
+    brand_firm: Optional[str] = None,
+    brand_auditor: Optional[str] = None,
+    brand_reviewer: Optional[str] = None,
+    brand_approver: Optional[str] = None,
+    brand_docid: Optional[str] = None,
+    brand_client: Optional[str] = None
+):
     """Exports findings report as DOCX using custom layout templates."""
     db = SessionLocal()
     try:
@@ -1592,13 +1602,24 @@ def api_export_docx(session_id: str, saved_only: bool = False, auditor_logo_path
                 "VAPT" in (report.framework or "").upper() or
                 any("VAPT" in str(f.get("control_id") or f.get("control") or "").upper() for f in findings_mapped)
             )
+
+            meta_dict = {
+                "brand_firm": brand_firm,
+                "brand_auditor": brand_auditor,
+                "brand_reviewer": brand_reviewer,
+                "brand_approver": brand_approver,
+                "brand_docid": brand_docid,
+                "brand_client": brand_client,
+            }
+
             docx_bytes = export_docx_report(
                 session_title=report.framework or "Audit Report",
                 findings=findings_mapped,
                 resolved_list=resolved_list,
                 status=report.status or "Draft",
                 comments="Lead auditor generated report",
-                audit_type=("vapt" if is_vapt else None)
+                audit_type=("vapt" if is_vapt else None),
+                metadata=meta_dict
             )
             
             import io
@@ -1752,7 +1773,17 @@ Provide a clear, helpful, professional, and directly relevant answer as an exper
         db.close()
 
 @router.get("/export/pdf")
-def api_export_pdf(session_id: str, saved_only: bool = False, auditor_logo_path: Optional[str] = None):
+def api_export_pdf(
+    session_id: str, 
+    saved_only: bool = False, 
+    auditor_logo_path: Optional[str] = None,
+    brand_firm: Optional[str] = None,
+    brand_auditor: Optional[str] = None,
+    brand_reviewer: Optional[str] = None,
+    brand_approver: Optional[str] = None,
+    brand_docid: Optional[str] = None,
+    brand_client: Optional[str] = None
+):
     """Exports findings report as PDF using custom layout templates."""
     db = SessionLocal()
     try:
@@ -1822,6 +1853,16 @@ def api_export_pdf(session_id: str, saved_only: bool = False, auditor_logo_path:
                 any("VAPT" in str(f.control_id or "").upper() or "VAPT" in str(getattr(f, "category", "") or "").upper() for f in db_findings)
             )
             fw_name = (report.framework or "Audit_Report").replace(" ", "_").replace("/", "_")
+
+            meta_dict = {
+                "brand_firm": brand_firm,
+                "brand_auditor": brand_auditor,
+                "brand_reviewer": brand_reviewer,
+                "brand_approver": brand_approver,
+                "brand_docid": brand_docid,
+                "brand_client": brand_client,
+            }
+
             if is_vapt:
                 from src.core.report_exporter import _export_vapt_pdf
                 pdf_bytes = _export_vapt_pdf(
@@ -1829,7 +1870,8 @@ def api_export_pdf(session_id: str, saved_only: bool = False, auditor_logo_path:
                     findings=findings_mapped,
                     resolved_list=resolved_list,
                     status=report.status or "Completed",
-                    comments="Lead auditor generated report"
+                    comments="Lead auditor generated report",
+                    metadata=meta_dict
                 )
             else:
                 from src.core.report_exporter import export_pdf_report
@@ -1838,7 +1880,8 @@ def api_export_pdf(session_id: str, saved_only: bool = False, auditor_logo_path:
                     findings=findings_mapped,
                     resolved_list=resolved_list,
                     status=report.status or "Draft",
-                    comments="Lead auditor generated report"
+                    comments="Lead auditor generated report",
+                    metadata=meta_dict
                 )
             
             return StreamingResponse(
