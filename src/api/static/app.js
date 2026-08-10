@@ -475,6 +475,11 @@ async function loadRecentSessions() {
             if (badgeCount) badgeCount.innerText = "(0)";
             container.innerHTML = `<div style="font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 6px;">No recent sessions found.</div>`;
         }
+
+        // Real-Time Tab Synchronization Trigger
+        if (activeTab === "tab-auditee-history") loadAuditeeDocumentHistory();
+        if (activeTab === "tab-auditee-docs") loadAuditeeSessionsList();
+        if (currentUser && currentUser.role !== "auditee") loadSidebarAuditeeFiles();
     } catch (err) {
         window._recentSessionsCache = [];
         const badgeCount = document.getElementById("recent-sessions-count-badge");
@@ -593,7 +598,7 @@ async function switchRecentSession(sessionId, sessionTitle) {
     if (wsTitle) wsTitle.innerText = activeSessionTitle || "ISO 27001 Local Compliance Audit";
 
     // ── Reset UI: KPI counters ───────────────────────────────────────────────────
-    ["count-compliant","count-noncompliant","count-p1","count-p2","count-p3","count-p4"].forEach(id => {
+    ["count-compliant", "count-noncompliant", "count-p1", "count-p2", "count-p3", "count-p4"].forEach(id => {
         const el = document.getElementById(id); if (el) el.innerText = "0";
     });
 
@@ -636,7 +641,7 @@ async function switchRecentSession(sessionId, sessionTitle) {
     // ── Reset UI: Status filter ───────────────────────────────────────────────────
     document.querySelectorAll(".filter-btn").forEach(btn => btn.classList.remove("active"));
     const allBtn = document.querySelector(".filter-btn[data-status='All']") ||
-                   document.querySelector(".filter-btn[data-filter='All']");
+        document.querySelector(".filter-btn[data-filter='All']");
     if (allBtn) allBtn.classList.add("active");
 
     const statusSelect = document.getElementById("status-filter");
@@ -816,7 +821,7 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         if (container) container.innerHTML = `<div class="empty-state">No audit findings generated yet. Upload evidence documents and click Run Audit.</div>`;
 
         // ── Reset UI: KPI counters ───────────────────────────────────────────────────
-        ["count-compliant","count-noncompliant","count-p1","count-p2","count-p3","count-p4"].forEach(id => {
+        ["count-compliant", "count-noncompliant", "count-p1", "count-p2", "count-p3", "count-p4"].forEach(id => {
             const el = document.getElementById(id); if (el) el.innerText = "0";
         });
 
@@ -860,7 +865,7 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         // ── Reset UI: Status/severity filter buttons ──────────────────────────────────
         document.querySelectorAll(".filter-btn").forEach(btn => btn.classList.remove("active"));
         const allBtn = document.querySelector(".filter-btn[data-status='All']") ||
-                       document.querySelector(".filter-btn[data-filter='All']");
+            document.querySelector(".filter-btn[data-filter='All']");
         if (allBtn) allBtn.classList.add("active");
 
         // ── Reset UI: Workflow filter ─────────────────────────────────────────────────
@@ -2989,11 +2994,11 @@ function formatEvidenceSnippet(snip) {
 
     if (isCloudWatchOrMetrics) {
         let bullets = [];
-        
+
         // Extract EC2 instances cleanly
         const ec2Matches = Array.from(snip.matchAll(/i-[0-9a-f]{17}/gi)).map(m => m[0]);
         const uniqueEc2 = Array.from(new Set(ec2Matches));
-        
+
         // Extract App/Instance Labels
         const appMatches = Array.from(snip.matchAll(/(App\d+|Web\d+|numedist[a-z0-9]+)/gi)).map(m => m[0]);
         const uniqueApps = Array.from(new Set(appMatches));
@@ -3250,8 +3255,8 @@ function renderFindingsList() {
             }
         } else {
             // Resolve source doc — skip fake/generic values the LLM hallucinates
-            const _fakeSrc = new Set(["document context","document text","n/a","na","none",
-                "policy document","uploaded document","evidence document","context","evidence","document"]);
+            const _fakeSrc = new Set(["document context", "document text", "n/a", "na", "none",
+                "policy document", "uploaded document", "evidence document", "context", "evidence", "document"]);
             const _pick = (v) => v && v.trim() && !_fakeSrc.has(v.trim().toLowerCase()) ? v.trim() : null;
             const singleDocName =
                 _pick(f.evidence_location) ||
@@ -4278,23 +4283,57 @@ async function loadAuditeeEvidenceDocs() {
 
     const sessId = selector.value;
     if (!sessId) {
-        container.innerHTML = `<div class="empty-state">Select an auditee account above to inspect submitted evidence documents.</div>`;
+        container.innerHTML = `<div class="empty-state" style="padding: 24px; text-align: center; color: var(--text-muted);">Select an auditee report above to inspect submitted evidence documents and report delivery status.</div>`;
         return;
     }
 
-    container.innerHTML = `<div class="empty-state">Loading evidence documents...</div>`;
+    container.innerHTML = `<div class="empty-state" style="padding: 24px; text-align: center; color: var(--text-muted);">Loading evidence documents...</div>`;
 
     try {
+        const selectedOpt = selector.options[selector.selectedIndex];
+        const optText = selectedOpt ? selectedOpt.innerText : "";
+        const auditeeName = optText.split(" — ")[0] || "Auditee Client";
+
         const response = await fetch(`${API_BASE}/audit/evidence?session_id=${sessId}`);
         const data = await response.json();
 
         const files = (data.success && data.files) ? data.files : [];
+        container.innerHTML = "";
+
+        // 1. Top Report Delivery Banner Card
+        const bannerCard = document.createElement("div");
+        bannerCard.style.cssText = "background: var(--bg-card, #ffffff); border: 1px solid var(--border-color, #cbd5e1); border-radius: 14px; padding: 16px 20px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; box-shadow: 0 4px 12px rgba(0,0,0,0.05);";
+        bannerCard.innerHTML = `
+            <div>
+                <div style="font-size: 1rem; font-weight: 700; color: var(--text-color, #0f172a); display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <span>👤 Auditee Client Account:</span>
+                    <span style="color: #2563eb; background: rgba(37, 99, 235, 0.1); padding: 4px 12px; border-radius: 8px; border: 1px solid rgba(37, 99, 235, 0.2); font-weight: 800;">${auditeeName}</span>
+                </div>
+                <div style="font-size: 0.82rem; color: var(--text-muted, #475569); margin-top: 6px;">
+                    📍 Session ID: <code style="color: var(--text-color, #0f172a); font-weight: 600;">${sessId}</code> • Report Recipient: <b style="color: #059669;">${auditeeName}</b>
+                </div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <span style="background: rgba(16, 185, 129, 0.12); color: #059669; border: 1px solid rgba(16, 185, 129, 0.3); padding: 6px 14px; border-radius: 8px; font-weight: 700; font-size: 0.82rem;">
+                    🟢 Final Report Sent to ${auditeeName}
+                </span>
+                <button type="button" class="btn-primary" onclick="exportWordReport('${sessId}')" style="padding: 7px 14px; font-size: 0.82rem; font-weight: 700;">
+                    📥 Download Final Report (.docx)
+                </button>
+            </div>
+        `;
+        container.appendChild(bannerCard);
+
         if (files.length === 0) {
-            container.innerHTML = `<div class="empty-state">No uploaded evidence documents found for this auditee session.</div>`;
+            const emptyDiv = document.createElement("div");
+            emptyDiv.className = "empty-state";
+            emptyDiv.style.cssText = "padding: 24px; text-align: center; color: var(--text-muted);";
+            emptyDiv.innerText = `No uploaded evidence documents found for Auditee '${auditeeName}'.`;
+            container.appendChild(emptyDiv);
             return;
         }
 
-        container.innerHTML = "";
+        // 2. Render Document Cards with High-Contrast Text for Light & Dark Mode
         files.forEach((f, idx) => {
             const fn = f.filename;
             const ext = fn.split('.').pop().toLowerCase();
@@ -4305,21 +4344,29 @@ async function loadAuditeeEvidenceDocs() {
             else if (["doc", "docx"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "DOC"; }
             else if (["xls", "xlsx", "csv"].includes(ext)) { fileClass = "file-type-xls"; fileIconText = "XLS"; }
 
+            const assignedAuditor = f.assigned_auditor || (currentUser ? currentUser.username : "Auditor");
+
             const card = document.createElement("div");
             card.className = "modern-file-card";
-            card.style.cssText = "display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 12px; margin-bottom: 10px;";
+            card.style.cssText = "display: flex; align-items: center; gap: 14px; padding: 14px 18px; background: var(--bg-card, #ffffff); border: 1px solid var(--border-color, #cbd5e1); border-radius: 12px; margin-bottom: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.03);";
             card.innerHTML = `
-                <div class="file-icon-badge ${fileClass}" style="width: 36px; height: 36px; font-weight: 800;">${fileIconText}</div>
+                <div class="file-icon-badge ${fileClass}" style="width: 40px; height: 40px; font-weight: 800; font-size: 0.85rem; display: flex; align-items: center; justify-content: center; border-radius: 8px;">${fileIconText}</div>
                 <div class="file-details" style="flex: 1; min-width: 0;">
-                    <div class="file-title" style="font-weight: 600; font-size: 0.9rem; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; color: #f8fafc;" title="${fn}">${fn}</div>
-                    <div class="file-meta" style="font-size: 0.75rem; color: #94a3b8; margin-top: 2px;">📍 Path: <code style="color: #60a5fa;">${f.filepath || f.path || fn}</code> • ${f.size_str || 'Submitted Evidence'}</div>
+                    <div class="file-title" style="font-weight: 700; font-size: 0.92rem; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; color: var(--text-color, #0f172a);" title="${fn}">📄 ${fn}</div>
+                    <div class="file-meta" style="font-size: 0.78rem; color: var(--text-muted, #475569); margin-top: 4px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <span>📤 Submitted By Auditee: <b style="color: #2563eb;">${auditeeName}</b></span>
+                        <span>📥 Sent To Auditor: <b style="color: #059669;">${assignedAuditor}</b></span>
+                        <span>Size: <b>${f.size_str || 'Submitted Document'}</b></span>
+                    </div>
                 </div>
-                <span class="badge-pill" style="color: #34d399; background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.3); font-size: 0.72rem; padding: 4px 10px; border-radius: 6px; font-weight: 600;">✓ AUDITEE EVIDENCE</span>
+                <span class="badge-pill" style="color: #059669; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.76rem; padding: 5px 12px; border-radius: 8px; font-weight: 700; white-space: nowrap;">
+                    ✓ AUDITEE DOCUMENT SUBMITTED
+                </span>
             `;
             container.appendChild(card);
         });
     } catch (err) {
-        container.innerHTML = `<div class="error-msg">Error loading documents: ${err.message}</div>`;
+        container.innerHTML = `<div class="error-msg" style="padding: 16px; color: #ef4444;">Error loading documents: ${err.message}</div>`;
     }
 }
 
@@ -4352,7 +4399,7 @@ async function loadSidebarAuditeeFiles() {
                 const auditeeName = s.auditee_username || "Auditee Account";
                 const dateStr = s.created_at ? new Date(s.created_at).toLocaleDateString() : "";
                 const fileStr = s.files_count > 0 ? ` (${s.files_count} file(s))` : "";
-                opt.innerText = `👤 ${auditeeName} — ${s.session_title || 'Audit Session'} (${dateStr})${fileStr}`;
+                opt.innerText = `👤 Auditee: ${auditeeName} — ${s.session_title || 'Audit Session'} (${dateStr})${fileStr}`;
                 sessionSelect.appendChild(opt);
             });
             if (currentVal) sessionSelect.value = currentVal;
@@ -4394,12 +4441,12 @@ async function loadSidebarAuditeeFiles() {
             const sizeStr = f.size_str || "";
 
             const row = document.createElement("div");
-            row.style.cssText = "display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: rgba(30,41,59,0.5); border: 1px solid rgba(148,163,184,0.15); border-radius: 8px; cursor: pointer;";
+            row.style.cssText = "display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg-card, rgba(30,41,59,0.5)); border: 1px solid var(--border-color, rgba(148,163,184,0.15)); border-radius: 8px; cursor: pointer; margin-bottom: 4px;";
             row.innerHTML = `
                 <input type="checkbox" class="sidebar-auditee-doc-cb" value="${fn}" data-session="${sessId}"
                     id="sauditee_${idx}" checked style="width:15px;height:15px;cursor:pointer;flex-shrink:0;">
                 <span style="font-size:1rem;flex-shrink:0;">${icon}</span>
-                <label for="sauditee_${idx}" style="flex:1;min-width:0;font-size:0.73rem;font-weight:600;color:var(--text-main);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" title="${fn}">${fn}</label>
+                <label for="sauditee_${idx}" style="flex:1;min-width:0;font-size:0.75rem;font-weight:600;color:var(--text-color, #0f172a);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;" title="${fn}">${fn}</label>
                 <span style="font-size:0.65rem;color:var(--text-muted);white-space:nowrap;">${sizeStr}</span>
             `;
             fileList.appendChild(row);
@@ -5903,7 +5950,7 @@ function showUndoToast(message, onUndoCallback) {
     const banner = document.createElement("div");
     banner.id = "undo-toast-banner";
     banner.style.cssText = "position: fixed; bottom: 24px; right: 24px; z-index: 10000; background: #1e293b; color: #fff; border: 1px solid #3b82f6; border-radius: 12px; padding: 12px 18px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 14px; font-size: 0.88rem;";
-    
+
     banner.innerHTML = `
         <span>🗑️ ${message}</span>
         <button type="button" id="undo-toast-btn" style="background: #2563eb; color: #fff; border: none; padding: 6px 14px; border-radius: 6px; font-weight: 700; cursor: pointer; font-size: 0.82rem; transition: all 0.2s;">↩️ Undo Delete</button>
@@ -6019,10 +6066,10 @@ async function loadAuditeeDocumentHistory() {
             const rowBg = isDel ? "rgba(239, 68, 68, 0.06)" : "transparent";
             const fileIcon = item.filename.endsWith(".pdf") ? "📄" : item.filename.endsWith(".zip") ? "📦" : "📝";
             const auditorBadge = `<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 700;">👤 ${item.assigned_auditor}</span>`;
-            const statusBadge = isDel 
+            const statusBadge = isDel
                 ? `<span style="color: #ef4444; font-weight: 700; background: rgba(239, 68, 68, 0.12); padding: 2px 8px; border-radius: 4px;">Deleted (Soft)</span>`
                 : `<span style="color: #10b981; font-weight: 700; background: rgba(16, 185, 129, 0.12); padding: 2px 8px; border-radius: 4px;">${item.status}</span>`;
-            
+
             const actionBtn = isDel
                 ? `<button type="button" onclick="undoDeleteEvidenceFile('${item.session_id}', ${item.id}, '${item.filename}')" style="background: #2563eb; color: #fff; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.78rem; font-weight: 700;">↩️ Undo Delete</button>`
                 : `<button type="button" onclick="deleteServerEvidenceFile('${item.session_id}', ${item.id}, '${item.filename}')" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.78rem;">🗑️ Delete</button>`;
