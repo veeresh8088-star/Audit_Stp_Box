@@ -644,8 +644,29 @@ async function switchRecentSession(sessionId, sessionTitle) {
     await loadFindings();
     renderFilteredRecentSessionsList();
     checkCrashResilienceCheckpoint();
+    checkActiveSessionStatusOnSwitch();
 
     showToast(`📂 Switched to audit session: "${activeSessionTitle}"`, "info");
+}
+
+async function checkActiveSessionStatusOnSwitch() {
+    if (!activeSessionId) return;
+    try {
+        const response = await authFetch(`${API_BASE}/audit/status/${encodeURIComponent(activeSessionId)}`);
+        const data = await response.json();
+        if (data.status === "running") {
+            const btn = document.getElementById("run-analysis-btn");
+            const stopBtn = document.getElementById("stop-analysis-btn");
+            if (btn) btn.disabled = true;
+            if (stopBtn) stopBtn.style.display = "inline-flex";
+            window._currentPollSessionId = activeSessionId;
+            if (progressInterval) clearInterval(progressInterval);
+            progressInterval = setInterval(pollAuditProgress, 1000);
+            pollAuditProgress();
+        }
+    } catch (e) {
+        console.warn("[checkActiveSessionStatusOnSwitch] Failed:", e);
+    }
 }
 
 
