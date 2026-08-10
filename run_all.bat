@@ -58,8 +58,10 @@ if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 :: so more slots = more concurrent audits but less context room per slot. Formula:
 :: Physical Cores / 2 (e.g. 10 Physical Cores -> 5 Slots) keeps each slot's context
 :: large enough for a full audit document + multi-evidence findings without truncating.
-set /a LLM_SLOTS=%PHYSICAL_CORES% / 2
-if %LLM_SLOTS% LSS 4 set LLM_SLOTS=4
+if "%LLM_SLOTS%"=="" (
+    set /a LLM_SLOTS=%PHYSICAL_CORES% / 2
+    if !LLM_SLOTS! LSS 4 set LLM_SLOTS=4
+)
 
 echo.
 echo [3/6] Starting llama.cpp LLM Server (%PHYSICAL_CORES% Physical Cores --^> %LLM_SLOTS% Parallel Slots for %LLM_SLOTS% Concurrent Members, --cont-batching)...
