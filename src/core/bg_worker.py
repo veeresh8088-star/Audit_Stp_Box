@@ -326,7 +326,9 @@ def _checkpoint_create(session_id, bg_key, ai_model, selected_sls, file_names, c
     with force_master():
         db = SessionLocal()
         try:
+            # Only discard checkpoints for THIS session — other sessions' checkpoints stay intact
             db.query(AuditCheckpoint).filter(
+                AuditCheckpoint.session_id == session_id,
                 AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
             ).update({AuditCheckpoint.status: "discarded"}, synchronize_session=False)
 
@@ -364,7 +366,7 @@ def _checkpoint_update(session_id, completed_batches, all_results_so_far):
         try:
             chk = db.query(AuditCheckpoint).filter(
                 AuditCheckpoint.session_id == session_id,
-                AuditCheckpoint.status == "in_progress"
+                AuditCheckpoint.status.in_(["in_progress", "paused"])
             ).first()
             if chk:
                 chk.completed_batches = completed_batches
@@ -391,7 +393,7 @@ def _checkpoint_update_per_control(session_id, control_id, all_results_so_far):
         try:
             chk = db.query(AuditCheckpoint).filter(
                 AuditCheckpoint.session_id == session_id,
-                AuditCheckpoint.status == "in_progress"
+                AuditCheckpoint.status.in_(["in_progress", "paused"])
             ).first()
             if chk:
                 # Parse existing completed IDs and add new one
