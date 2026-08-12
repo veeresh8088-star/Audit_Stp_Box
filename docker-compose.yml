@@ -62,7 +62,7 @@
     build:
       context: .
       dockerfile: Dockerfile.app
-    image: aicyberauditbox-app:1.7
+    image: aicyberauditbox-app:1.8
     container_name: aicyberauditbox_app
     # Shares shakthidb's network namespace so "localhost:15234" inside this
     # container genuinely reaches Postgres, matching database.py's hardcoded

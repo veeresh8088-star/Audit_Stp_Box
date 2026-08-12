@@ -61,7 +61,7 @@ services:
     restart: always
 
   app:
-    image: aicyberauditbox-app:1.7
+    image: aicyberauditbox-app:1.8
     container_name: aicyberauditbox_app
 
     network_mode: "service:shakthidb"
