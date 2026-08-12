@@ -1,18 +1,17 @@
-AICyberAuditBox Enterprise v1.6 - Customer Deployment Guide
+AICyberAuditBox Enterprise v1.7 - Customer Deployment Guide
 ================================================================
 
 1. Copy both files into a single deployment folder:
-   - aicyberauditbox_bundle_v1.6.tar
+   - aicyberauditbox_bundle_v1.7.tar
    - docker-compose.customer.yml
 
 2. Open a terminal in that folder and run:
-   docker load -i aicyberauditbox_bundle_v1.6.tar
+   docker load -i aicyberauditbox_bundle_v1.7.tar
    docker compose -f docker-compose.customer.yml up -d
 
-
-
-3. Model Loading & Health Check:
-   - Wait ~10-14 minutes on first start while the local LLM model weights load into RAM.
+3. Model Loading & Container Initialization:
+   - Allow ~10-15 seconds for application preflight to connect to ShaktiDB and initialize Uvicorn.
+   - Wait ~10-14 minutes on first start while local LLM model weights load into RAM.
    - Run health check:
      docker compose -f docker-compose.customer.yml ps
      (Status will display "unhealthy" or "starting" during model load, then switch to "healthy" once ready. This is normal behavior.)
@@ -21,6 +20,7 @@ AICyberAuditBox Enterprise v1.6 - Customer Deployment Guide
    - Open browser: http://localhost:8000/
    - Login with your auditor credentials.
    - 100% Air-Gapped Offline Operation: Zero internet connection required!
+
 
 5. Useful Container Management Commands:
    - Stop Services:
