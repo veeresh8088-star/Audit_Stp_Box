@@ -1,4 +1,4 @@
-﻿# Customer deployment compose file.
+# Customer deployment compose file.
 #
 # Unlike docker-compose.yml (the dev version, which builds images from
 # source), this one only references pre-built images -- no `build:` section
@@ -61,8 +61,9 @@ services:
     restart: always
 
   app:
-    image: aicyberauditbox-app:1.4
+    image: aicyberauditbox-app:1.6
     container_name: aicyberauditbox_app
+
     network_mode: "service:shakthidb"
     depends_on:
       shakthidb:
