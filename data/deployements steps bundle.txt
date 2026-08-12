@@ -1,13 +1,14 @@
-AICyberAuditBox Enterprise v1.4 - Customer Deployment Guide
+AICyberAuditBox Enterprise v1.5 - Customer Deployment Guide
 ================================================================
 
 1. Copy both files into a single deployment folder:
-   - aicyberauditbox_bundle_v1.4.tar
+   - aicyberauditbox_bundle_v1.5.tar
    - docker-compose.customer.yml
 
 2. Open a terminal in that folder and run:
-   docker load -i aicyberauditbox_bundle_v1.4.tar
+   docker load -i aicyberauditbox_bundle_v1.5.tar
    docker compose -f docker-compose.customer.yml up -d
+
 
 3. Model Loading & Health Check:
    - Wait ~10-14 minutes on first start while the local LLM model weights load into RAM.

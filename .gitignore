@@ -25,3 +25,4 @@ data/
 *.dll
 *.exe
 *.pem
+.tmp-*

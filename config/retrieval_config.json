@@ -1,9 +1,9 @@
 {
-    "pdf": 10,
-    "docx": 10,
-    "txt": 10,
-    "xlsx": 10,
-    "csv": 10,
-    "pptx": 10,
-    "image": 10
+    "pdf": 12,
+    "docx": 12,
+    "txt": 12,
+    "xlsx": 12,
+    "csv": 12,
+    "pptx": 12,
+    "image": 12
 }

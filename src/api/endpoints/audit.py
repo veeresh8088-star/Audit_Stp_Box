@@ -787,12 +787,17 @@ def api_start_audit(req: StartAuditRequest):
 @router.post("/stop/{session_id}")
 def api_stop_audit(session_id: str):
     """Signal the background audit thread to stop and unblock session execution."""
+    bg_key = f"bg_{session_id}"
     _bg_stop_flags[session_id] = True
+    _bg_stop_flags[bg_key] = True
     with _bg_lock:
         _bg_running.discard(session_id)
+        _bg_running.discard(bg_key)
         _bg_store["progress"].pop(session_id, None)
+        _bg_store["progress"].pop(bg_key, None)
     log_system_event("AUDIT_STOPPED", "WARNING", "Audit manually stopped by user", session_id=session_id)
     return {"success": True, "message": "Scan stopped successfully."}
+
 
 @router.get("/status/{session_id}")
 def api_get_status(session_id: str):
@@ -1734,7 +1739,8 @@ Provide a clear, helpful, professional, and directly relevant answer as an exper
         assistant_reply = ""
         try:
             from src.core.llm_client import query_llm
-            assistant_reply = query_llm(prompt_with_context, model=req.model_choice or "Gemma 4 (e4b)", timeout=15)
+            assistant_reply = query_llm(prompt_with_context, model=req.model_choice or "Gemma 4 (e4b)", timeout=90)
+
         except Exception:
             try:
                 from src.ai.audit_chains import run_ad_hoc_chat

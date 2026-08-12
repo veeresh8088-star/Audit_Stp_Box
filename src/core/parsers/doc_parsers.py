@@ -102,11 +102,12 @@ DEFAULT_TOP_K = {
     "pdf": 12,
     "docx": 12,
     "txt": 12,
-    "xlsx": 8,
-    "csv": 8,
-    "pptx": 10,
-    "image": 8
+    "xlsx": 12,
+    "csv": 12,
+    "pptx": 12,
+    "image": 12
 }
+
 
 def load_top_k_config():
     import json, os

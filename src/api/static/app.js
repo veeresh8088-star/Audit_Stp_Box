@@ -468,8 +468,17 @@ async function loadRecentSessions() {
                 return true;
             });
 
-            renderFilteredRecentSessionsList();
+            // Restore Last Visited Session if not active or on initial startup
+            if ((!activeSessionId || activeSessionId === "") && window._recentSessionsCache.length > 0) {
+                const lastSid = localStorage.getItem("last_active_session_id");
+                const foundLast = lastSid ? window._recentSessionsCache.find(s => s.session_id === lastSid) : null;
+                const targetSession = foundLast || window._recentSessionsCache[0];
+                switchRecentSession(targetSession.session_id, targetSession.session_title);
+            } else {
+                renderFilteredRecentSessionsList();
+            }
         } else {
+
             window._recentSessionsCache = [];
             const badgeCount = document.getElementById("recent-sessions-count-badge");
             if (badgeCount) badgeCount.innerText = "(0)";
@@ -523,7 +532,8 @@ function renderFilteredRecentSessionsList() {
     toRender.forEach(s => {
         const btn = document.createElement("button");
         btn.className = "recent-session-item";
-        if (activeSessionId === s.session_id) btn.classList.add("active-session");
+        const isActive = (activeSessionId === s.session_id);
+        if (isActive) btn.classList.add("active-session");
 
         btn.onclick = () => switchRecentSession(s.session_id, s.session_title);
 
@@ -535,13 +545,17 @@ function renderFilteredRecentSessionsList() {
         const shortTitle = s.session_title || `Audit Session (${s.session_id.slice(0, 6)})`;
         const dateStr = s.created_at ? s.created_at.slice(0, 10) : "";
 
-        btn.style.cssText = "display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 9px 11px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; color: var(--text-main); font-size: 0.78rem; text-align: left; cursor: pointer; margin-bottom: 6px; transition: all 0.15s ease;";
-        btn.onmouseover = () => { btn.style.background = "rgba(37, 99, 235, 0.1)"; btn.style.borderColor = "rgba(37, 99, 235, 0.4)"; };
-        btn.onmouseout = () => { btn.style.background = "var(--bg-card)"; btn.style.borderColor = "var(--border-color)"; };
+        const bg = isActive ? "rgba(37, 99, 235, 0.16)" : "var(--bg-card)";
+        const border = isActive ? "1px solid #3b82f6" : "1px solid var(--border-color)";
+        const boxShadow = isActive ? "0 0 10px rgba(59, 130, 246, 0.35)" : "none";
+
+        btn.style.cssText = `display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 9px 11px; background: ${bg}; border: ${border}; box-shadow: ${boxShadow}; border-radius: 10px; color: var(--text-main); font-size: 0.78rem; text-align: left; cursor: pointer; margin-bottom: 6px; transition: all 0.15s ease;`;
+        btn.onmouseover = () => { if (!isActive) { btn.style.background = "rgba(37, 99, 235, 0.1)"; btn.style.borderColor = "rgba(37, 99, 235, 0.4)"; } };
+        btn.onmouseout = () => { if (!isActive) { btn.style.background = "var(--bg-card)"; btn.style.borderColor = "var(--border-color)"; } };
 
         btn.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px;">
-                <span style="font-weight: 700; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;" title="${shortTitle}">${shortTitle}</span>
+                <span style="font-weight: 700; color: ${isActive ? '#60a5fa' : 'var(--text-main)'}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;" title="${shortTitle}">${shortTitle}</span>
                 ${statusPill}
             </div>
             <div style="font-size: 0.7rem; color: var(--text-muted); display: flex; justify-content: space-between; width: 100%;">
@@ -551,6 +565,7 @@ function renderFilteredRecentSessionsList() {
         `;
         container.appendChild(btn);
     });
+
 
     if (showMoreBtn) {
         if (filtered.length > 10 && !query) {
@@ -576,6 +591,12 @@ function toggleShowAllRecentSessions() {
 async function switchRecentSession(sessionId, sessionTitle) {
     activeSessionId = sessionId;
     if (sessionTitle) activeSessionTitle = sessionTitle;
+
+    try {
+        localStorage.setItem("last_active_session_id", activeSessionId);
+        if (activeSessionTitle) localStorage.setItem("last_active_session_title", activeSessionTitle);
+    } catch (e) {}
+
 
     // ── Stop any running audit & polling from the previous session ──────────────
     if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
@@ -715,6 +736,37 @@ async function resumeAuditFromCheckpoint() {
     }
 }
 
+async function discardCheckpointAndReset() {
+    const banner = document.getElementById("crash-resilience-banner");
+    if (banner) banner.style.display = "none";
+    if (!activeSessionId) return;
+
+    try {
+        await fetch(`${API_BASE}/audit/discard-checkpoint`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ session_id: activeSessionId })
+        });
+        showToast("🗑️ Audit checkpoint discarded. Workspace reset for fresh scan.", "info");
+
+        // Reset progress bar & buttons
+        const progressBar = document.getElementById("pipeline-progress-fill");
+        const progressPct = document.getElementById("pipeline-progress-percent");
+        const progressStatus = document.getElementById("pipeline-status-text");
+        if (progressBar) progressBar.style.width = "0%";
+        if (progressPct) progressPct.innerText = "0%";
+        if (progressStatus) progressStatus.innerText = "Ready to scan";
+
+        const runBtn = document.getElementById("run-analysis-btn");
+        const stopBtn = document.getElementById("stop-analysis-btn");
+        if (runBtn) { runBtn.disabled = false; runBtn.style.opacity = "1"; runBtn.innerText = "▶ Step 3: Run RAG Scan"; }
+        if (stopBtn) stopBtn.style.display = "none";
+    } catch (err) {
+        showToast(`Discard failed: ${err.message}`, "error");
+    }
+}
+
+
 // ── SESSION MANAGEMENT ──
 
 function _autoFillSessionTitle() {
@@ -743,19 +795,23 @@ function openNewSessionModal() {
 function closeNewSessionModal() {
     const modal = document.getElementById("new-session-modal");
     if (modal) modal.style.display = "none";
-    // If no active session yet (user cancelled on first login), create a default-named session silently
-    if (!activeSessionId || activeSessionId === "") {
-        startNewAuditSession(true);
+}
+
+async function handleNewSessionSubmit(e) {
+    e.preventDefault();
+    if (window._isCreatingSession) return;
+    window._isCreatingSession = true;
+
+    try {
+        const input = document.getElementById("new-session-title-input");
+        const title = input ? input.value.trim() : "";
+        closeNewSessionModal();
+        await startNewAuditSession(true, title);
+    } finally {
+        window._isCreatingSession = false;
     }
 }
 
-function handleNewSessionSubmit(e) {
-    e.preventDefault();
-    const input = document.getElementById("new-session-title-input");
-    const title = input ? input.value.trim() : "";
-    closeNewSessionModal();
-    startNewAuditSession(false, title);
-}
 
 async function startNewAuditSession(skipPrompt = false, customTitle = null) {
     if (!currentUser) return;
@@ -921,13 +977,19 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
 }
 
 async function loadOrCreateSession(user) {
-    // Check for interrupted sessions first
-    await checkInterruptedAuditSessions();
-    // If no interrupted session was resumed, show the naming modal immediately on first login
-    if (!currentInterruptedSession) {
-        openNewSessionModal();
+    const lastSid = localStorage.getItem("last_active_session_id");
+    const lastTitle = localStorage.getItem("last_active_session_title");
+    if (lastSid) {
+        activeSessionId = lastSid;
+        if (lastTitle) activeSessionTitle = lastTitle;
+        const badgeEl = document.getElementById("active-session-badge");
+        const titleEl = document.getElementById("workspace-title");
+        if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
+        if (titleEl) titleEl.innerText = activeSessionTitle;
     }
+    await checkInterruptedAuditSessions();
 }
+
 
 let currentInterruptedSession = null;
 
@@ -943,19 +1005,9 @@ async function checkInterruptedAuditSessions() {
 
         if (data.success && data.interrupted_sessions && data.interrupted_sessions.length > 0) {
             currentInterruptedSession = data.interrupted_sessions[0];
-            const modal = document.getElementById("interrupted-session-modal");
-            const titleEl = document.getElementById("interrupted-session-title");
-            const progEl = document.getElementById("interrupted-progress-text");
-            const timeEl = document.getElementById("interrupted-time-text");
-
-            if (modal && titleEl && progEl && timeEl) {
-                titleEl.innerText = currentInterruptedSession.session_title || currentInterruptedSession.session_id;
-                const comp = currentInterruptedSession.completed_controls || currentInterruptedSession.completed_batches || 0;
-                progEl.innerText = `${comp} / ${currentInterruptedSession.total_controls} Controls`;
-                timeEl.innerText = currentInterruptedSession.updated_at || "Recently";
-                modal.style.display = "flex";
-            }
+            checkCrashResilienceCheckpoint();
         }
+
     } catch (e) {
         console.warn("[Interrupted Checkpoint] Check error:", e);
     }
@@ -1572,6 +1624,53 @@ function selectAllCheckboxes(checked) {
     updateSelectedScopeCount();
 }
 
+function syncControlsScopeFromFindings(findings) {
+    const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
+    if (!checkboxes || checkboxes.length === 0) return;
+
+    if (!findings || findings.length === 0) {
+        selectAllCheckboxes(true);
+        return;
+    }
+
+    const evaluatedSls = new Set();
+    const ctrlIdSet = new Set();
+
+    findings.forEach(f => {
+        if (f.sl_no) evaluatedSls.add(parseInt(f.sl_no));
+        if (f.control_id) {
+            const rawCid = String(f.control_id).trim().toLowerCase();
+            ctrlIdSet.add(rawCid);
+            const m = rawCid.match(/^(\d+\.\d+)/);
+            if (m) ctrlIdSet.add(m[1]);
+        }
+    });
+
+    let matchedCount = 0;
+    checkboxes.forEach(cb => {
+        const slVal = parseInt(cb.value);
+        let isMatch = evaluatedSls.has(slVal);
+
+        if (!isMatch && ctrlIdSet.size > 0) {
+            const label = document.querySelector(`label[for='${cb.id}']`);
+            if (label) {
+                const labelText = label.innerText.toLowerCase();
+                isMatch = Array.from(ctrlIdSet).some(cid => cid && labelText.includes(cid));
+            }
+        }
+
+        cb.checked = isMatch;
+        if (isMatch) matchedCount++;
+    });
+
+    if (matchedCount === 0 && findings.length > 0) {
+        checkboxes.forEach(cb => cb.checked = true);
+    }
+
+    updateSelectedScopeCount();
+}
+
+
 // ── EVIDENCE FILE UPLOAD ──
 
 function setupFileDropZone() {
@@ -1782,13 +1881,18 @@ async function loadEvidenceFileList() {
     }
 
     if (!activeSessionId) return;
+    const requestSessionId = activeSessionId;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
+        const response = await fetch(`${API_BASE}/audit/evidence?session_id=${encodeURIComponent(requestSessionId)}`);
         const data = await response.json();
+
+        // Session guard: if active session changed while request was in-flight, ignore response
+        if (activeSessionId !== requestSessionId) return;
 
         const files = (data.success && data.files) ? data.files : [];
         if (countBadge) countBadge.innerText = `${files.length} files`;
+
 
         registries.forEach(registry => {
             registry.innerHTML = "";
@@ -1835,7 +1939,21 @@ async function triggerAuditAnalysis() {
     if (stopBtn) stopBtn.style.display = "block";
 
     const checkboxes = document.querySelectorAll("#controls-checkbox-container input[type='checkbox']");
-    const selectedSls = Array.from(checkboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
+    let selectedSls = Array.from(checkboxes).filter(cb => cb.checked).map(cb => parseInt(cb.value));
+
+    // STRICT SCOPING ENFORCEMENT: If Excel Scoping matrix is loaded, restrict audit ONLY to Excel controls
+    if (customEvidenceMappings && customEvidenceMappings.excel_items && customEvidenceMappings.excel_items.length > 0) {
+        const excelSLs = Array.from(new Set(customEvidenceMappings.excel_items.map(item => parseInt(item.sl_no)).filter(n => !isNaN(n))));
+        if (excelSLs.length > 0) {
+            selectedSls = excelSLs;
+            // Sync UI checkboxes to reflect exact Excel controls count
+            const matchedSet = new Set(excelSLs);
+            checkboxes.forEach(cb => {
+                cb.checked = matchedSet.has(parseInt(cb.value));
+            });
+            if (typeof updateSelectedScopeCount === "function") updateSelectedScopeCount();
+        }
+    }
 
     if (selectedSls.length === 0) {
         alert("⚠️ Please select at least one control to analyze.");
@@ -1844,6 +1962,7 @@ async function triggerAuditAnalysis() {
         if (stopBtn) stopBtn.style.display = "none";
         return;
     }
+
 
     const frameworkSelect = document.getElementById("framework-select");
     const isVaptFramework = frameworkSelect ? frameworkSelect.value.toUpperCase().includes("VAPT") : false;
@@ -1916,15 +2035,27 @@ async function pollAuditProgress() {
             const pct = typeof p.percent === "number" ? Math.min(100, Math.max(0, p.percent)) : 0;
             const txt = p.text || 'Scanning...';
 
-            if (txt && (txt.includes("Scanning") || txt.includes("evaluating"))) {
-                btn.innerText = `⏳ ${pct}% • ${txt}`;
+            if (window._isStoppingSession) {
+                if (btn) {
+                    btn.disabled = true;
+                    btn.innerText = `⏳ Stopping Scan (${pct}%)...`;
+                }
+                if (stopBtn) stopBtn.style.display = "none";
             } else {
-                btn.innerText = `⏳ Running Scan (${pct}%)...`;
+                if (btn) {
+                    if (txt && (txt.includes("Scanning") || txt.includes("evaluating"))) {
+                        btn.innerText = `⏳ ${pct}% • ${txt}`;
+                    } else {
+                        btn.innerText = `⏳ Running Scan (${pct}%)...`;
+                    }
+                }
+                if (stopBtn) stopBtn.style.display = "block";
             }
 
             if (progressBar) progressBar.style.width = `${pct}%`;
             if (progressPercent) progressPercent.innerText = `${pct}%`;
             if (progressStatus) progressStatus.innerText = `${txt} (${pct}%)`;
+
 
             // ── Resource pressure banner — only toast on a STATE CHANGE, not every
             // 1s poll tick, so it doesn't spam. CRITICAL is more visible/sticky
@@ -2022,42 +2153,51 @@ async function stopAuditAnalysis() {
     const btn = document.getElementById("run-analysis-btn");
     if (!activeSessionId) return;
 
-    if (stopBtn) {
-        stopBtn.disabled = true;
-        stopBtn.innerText = "⏳ Stopping...";
+    window._isStoppingSession = true;
+    if (stopBtn) stopBtn.style.display = "none";
+    if (btn) {
+        btn.disabled = true;
+        btn.innerText = "⏳ Stopping Scan...";
     }
 
     try {
         const res = await fetch(`${API_BASE}/audit/stop/${activeSessionId}`, { method: "POST" });
         const data = await res.json();
 
-        if (data.success) {
-            btn.innerText = "⏳ Stopping Scan...";
-            showToast("⛔ Stop signal sent — scan will stop after the current control.", "warning");
-        } else {
-            // No scan currently running -> reset UI state completely!
-            if (progressInterval) clearInterval(progressInterval);
-            btn.disabled = false;
-            btn.innerText = "▶ Step 3: Run RAG Scan";
+        showToast("⛔ Stop signal sent — ending scan gracefully.", "warning");
+
+        setTimeout(() => {
+            window._isStoppingSession = false;
+            if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+            if (btn) {
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                btn.innerText = "▶ Step 3: Run RAG Scan";
+            }
             if (stopBtn) {
                 stopBtn.style.display = "none";
                 stopBtn.disabled = false;
-                stopBtn.innerText = "⛔ Stop";
+                stopBtn.innerText = "STOP ANALYSIS";
             }
-            showToast(data.message || "No active scan running.", "info");
-        }
+            checkCrashResilienceCheckpoint();
+        }, 1200);
     } catch (err) {
-        if (progressInterval) clearInterval(progressInterval);
-        btn.disabled = false;
-        btn.innerText = "▶ Step 3: Run RAG Scan";
+        window._isStoppingSession = false;
+        if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+        if (btn) {
+            btn.disabled = false;
+            btn.innerText = "▶ Step 3: Run RAG Scan";
+        }
         if (stopBtn) {
             stopBtn.style.display = "none";
             stopBtn.disabled = false;
-            stopBtn.innerText = "⛔ Stop";
+            stopBtn.innerText = "STOP ANALYSIS";
         }
-        alert(`Failed to stop scan: ${err.message}`);
+        showToast(`Stop request error: ${err.message}`, "error");
     }
 }
+
+
 
 // ── AUDIT FINDINGS FEED & CRUD ──
 
@@ -2090,6 +2230,17 @@ async function loadFindings() {
                 }
                 renderFindingsList();
                 calculateSeverityStats();
+                syncControlsScopeFromFindings(findingsList);
+
+                // Update progress bar if findings exist for this session
+                if (findingsList.length > 0) {
+                    const progressBar = document.getElementById("pipeline-progress-fill");
+                    const progressPct = document.getElementById("pipeline-progress-percent");
+                    const progressStatus = document.getElementById("pipeline-status-text");
+                    if (progressBar) progressBar.style.width = "100%";
+                    if (progressPct) progressPct.innerText = "100%";
+                    if (progressStatus) progressStatus.innerText = `Completed (${findingsList.length} control evaluations recorded)`;
+                }
 
                 const isFinalized = (data.session_status && data.session_status.includes("Finalized")) ||
                     (data.session_title && data.session_title.includes("Finalized")) ||
@@ -2107,6 +2258,7 @@ async function loadFindings() {
                     if (bannerText) bannerText.innerHTML = `<b>Audit Evaluation Progress:</b> ${findingsList.length} control record(s) evaluated. Review records below and click <b>Save to Shakthi DB</b> to commit to audit ledger.`;
                 }
             } else {
+                syncControlsScopeFromFindings([]);
                 banner.style.background = "rgba(30, 41, 59, 0.6)";
                 banner.style.borderColor = "rgba(148, 163, 184, 0.25)";
                 banner.style.color = "#cbd5e1";
@@ -2114,6 +2266,7 @@ async function loadFindings() {
                 container.innerHTML = `<div class="empty-state">No control evaluations recorded for active session. Switch to <b>Scan workspace</b> tab to upload evidence documents and run AI audit evaluation.</div>`;
             }
         }
+
     } catch (err) {
         container.innerHTML = `<div class="error-msg">Failed to query findings: ${err.message}</div>`;
     }

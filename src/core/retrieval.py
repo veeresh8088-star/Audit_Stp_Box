@@ -207,14 +207,16 @@ def get_reranker(mode="quick"):
 
 # Configurable defaults for retrieval
 DEFAULT_TOP_K = {
-    "pdf": 6,
-    "docx": 6,
-    "txt": 6,
-    "xlsx": 6,
-    "csv": 6,
-    "pptx": 6,
-    "image": 6
+    "pdf": 12,
+    "docx": 12,
+    "txt": 12,
+    "xlsx": 12,
+    "csv": 12,
+    "pptx": 12,
+    "image": 12
 }
+
+
 
 def load_top_k_config():
     config_path = os.path.join("config", "retrieval_config.json")

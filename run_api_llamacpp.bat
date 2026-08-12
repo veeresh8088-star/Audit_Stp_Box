@@ -71,3 +71,5 @@ set OLLAMA_MAX_LOADED_MODELS=3
 
 start http://localhost:8000/
 python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+
+

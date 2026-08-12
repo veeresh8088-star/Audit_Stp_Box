@@ -470,19 +470,24 @@
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <span style="font-size: 1.3rem;">🛡️</span>
                             <div>
-                                <div style="font-size: 0.84rem; font-weight: 800; color: #fbbf24;">Crash Resilience
-                                    &amp; Audit Checkpoint Detected</div>
-                                <div style="font-size: 0.75rem; color: var(--text-muted);">Session scan interrupted.
-                                    Saved state: <b style="color: #fff;" id="checkpoint-status-label">Batch saved</b>
-                                </div>
+                                <div style="font-size: 0.84rem; font-weight: 800; color: #fbbf24;">Audit Scan Stopped / Checkpoint Saved</div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted);">Saved checkpoint: <b style="color: #fff;" id="checkpoint-status-label">Batch saved</b></div>
                             </div>
                         </div>
-                        <button type="button" class="btn-primary pulse-glowing-btn"
-                            onclick="resumeAuditFromCheckpoint()"
-                            style="padding: 7px 14px; font-weight: 800; font-size: 0.78rem; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); cursor: pointer; border-radius: 8px;">
-                            🔄 Resume Audit Scan
-                        </button>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <button type="button" class="btn-primary pulse-glowing-btn"
+                                onclick="resumeAuditFromCheckpoint()"
+                                style="padding: 7px 14px; font-weight: 800; font-size: 0.78rem; background: linear-gradient(135deg, #10b981 0%, #059669 100%); cursor: pointer; border: none; border-radius: 8px; color: #ffffff;">
+                                🔄 Resume Scan
+                            </button>
+                            <button type="button"
+                                onclick="discardCheckpointAndReset()"
+                                style="padding: 7px 12px; font-weight: 700; font-size: 0.78rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; cursor: pointer; border-radius: 8px;">
+                                🗑️ Discard &amp; Reset
+                            </button>
+                        </div>
                     </div>
+
                     <div
                         style="display: grid; grid-template-columns: 1fr 1.15fr; gap: 16px; height: 100%; align-items: stretch;">
 

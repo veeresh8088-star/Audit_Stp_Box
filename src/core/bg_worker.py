@@ -315,7 +315,10 @@ Output:"""
             model=llm_model,
             num_ctx=get_num_ctx(llm_model),
             temperature=0.0,
-            timeout=15     # Hard 15s cap — skip gracefully if model is cold
+            timeout=1800   # 1800s (30 mins) timeout for 3-pass LLM reasoning, OCR, and multi-user queueing
+
+
+
         )
         return summary if summary.strip() else "Document scope summary unavailable."
     except Exception as e:
@@ -522,7 +525,9 @@ Return format: ["topic1", "topic2", ...]"""
 
             try:
                 response = query_llm(
-                    prompt, model=llm_model, num_ctx=4096, temperature=0.0, timeout=120,
+                    prompt, model=llm_model, num_ctx=4096, temperature=0.0, timeout=1800,
+
+
                     stop=["<end_of_turn>", "<eos>", "<|im_end|>", "</s>"]
                 )
                 if not response:
@@ -675,10 +680,12 @@ Return format: ["topic1", "topic2", ...]"""
 
     for idx, c in enumerate(controls):
         # ── STOP FLAG CHECK ─────────────────────────────────────────────
-        if _bg_stop_flags.get(bg_key):
+        if _bg_stop_flags.get(bg_key) or (checkpoint_session_id and _bg_stop_flags.get(checkpoint_session_id)):
+
             print(f"[AUDIT STOPPED] User requested stop at control {idx + 1}/{total}. Exiting early.", flush=True)
             break
         # ────────────────────────────────────────────────────────────────
+
 
         # ── RESOURCE GUARD: stop gracefully (not crash) if RAM gets critical ──
         # Checked every control, not just at audit start — a long-running audit
@@ -1297,12 +1304,23 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                     EvidenceFile.filename.in_(file_names_list)
                 ).update({EvidenceFile.status: "Completed"}, synchronize_session=False)
                 
-                # 2. Retrieve report and insert findings
+                # 2. Retrieve report and insert findings (auto-create report if missing so findings are ALWAYS saved)
                 report = db_write.query(AuditReport).filter(AuditReport.session_id == _sid).first()
-                if report:
-                    # Clear existing findings for this report
-                    db_write.query(Finding).filter(Finding.report_id == report.id).delete()
-                    for f in all_results_combined:
+                if not report:
+                    report = AuditReport(
+                        session_id=_sid,
+                        session_title=f"Audit Scan {_sid[:14]}",
+                        framework="ISO/IEC 27001:2022",
+                        status="Pending Review"
+                    )
+                    db_write.add(report)
+                    db_write.flush()
+
+
+                # Clear existing findings for this report
+                db_write.query(Finding).filter(Finding.report_id == report.id).delete()
+                for f in all_results_combined:
+
                         f_desc = f.get("description") or f.get("finding") or f.get("gap_detected") or f.get("reasoning") or "Evaluated against ISO 27001 / VAPT compliance standards."
                         f_status = f.get("status", "Non-Compliant")
                         is_comp = (f_status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")

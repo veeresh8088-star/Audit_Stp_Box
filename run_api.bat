@@ -4,13 +4,11 @@ echo ==========================================
 echo    AISecurityAudit - Local Web Dashboard
 echo ==========================================
 
-:: 0. Kill any process already using port 8000 to avoid WinError 10048
+:: 0. Kill any non-Docker process already using port 8000 to avoid WinError 10048
 echo [0/3] Checking if port 8000 is already in use...
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8000 " ^| findstr "LISTENING" 2^>nul') do (
-    echo       Found existing process on port 8000 (PID: %%P) - Stopping it...
-    taskkill /PID %%P /F >nul 2>&1
-)
-echo [v] OK: Port 8000 is free.
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; if ($p -and $p.ProcessName -notlike '*docker*') { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }" >nul 2>&1
+echo [v] OK: Port 8000 checked safely without stopping Docker.
+
 echo.
 
 :: 1. Check local LLM backend
@@ -74,3 +72,5 @@ set CERTBOT_KEY=C:\Certbot\live\localauditshakti.centralindia.cloudapp.azure.com
 echo [HTTP] Starting standard HTTP server on port 8000...
 start http://localhost:8000/
 python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+
+

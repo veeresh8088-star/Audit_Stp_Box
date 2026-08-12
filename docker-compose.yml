@@ -8,12 +8,7 @@
       - POSTGRES_DB=shakthidb
     ports:
       - "15234:15234"
-      # 8000 is the APP's port, exposed here (not on the app service) because
-      # the app container uses network_mode: "service:shakthidb" below -- a
-      # container sharing another's network namespace can't declare its own
-      # port mappings; whichever service "owns" the shared namespace must
-      # expose them instead.
-      - "8000:8000"
+
     # Listens on 15234 *inside* the container too (not just the external host
     # mapping), because the app container shares this container's network
     # namespace (see the `app` service's network_mode below) so it can reach
@@ -67,7 +62,7 @@
     build:
       context: .
       dockerfile: Dockerfile.app
-    image: aicyberauditbox-app:1.4
+    image: aicyberauditbox-app:1.6
     container_name: aicyberauditbox_app
     # Shares shakthidb's network namespace so "localhost:15234" inside this
     # container genuinely reaches Postgres, matching database.py's hardcoded

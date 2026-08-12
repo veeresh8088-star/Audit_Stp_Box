@@ -42,22 +42,25 @@ foreach ($svc in $Services) {
     if ($LASTEXITCODE -ne 0) { Write-Error "Build failed for $svc"; exit 1 }
 
     foreach ($composeFile in @("docker-compose.yml", "docker-compose.customer.yml")) {
-        (Get-Content $composeFile) -replace "aicyberauditbox-${svc}:\S+", "aicyberauditbox-${svc}:${Version}" |
-            Set-Content $composeFile -Encoding utf8
+        if (Test-Path $composeFile) {
+            (Get-Content $composeFile) -replace "aicyberauditbox-${svc}:\S+", "aicyberauditbox-${svc}:${Version}" |
+                Set-Content $composeFile -Encoding utf8
+        }
     }
-    Write-Host "Bumped $svc to :$Version in both compose files." -ForegroundColor Green
+    Write-Host "Bumped $svc to :$Version in compose files." -ForegroundColor Green
 }
 
-# Pull the CURRENT effective tag for every built service from the customer
-# compose file (a mix of just-bumped and untouched-older tags is expected).
-$composeContent = Get-Content docker-compose.customer.yml -Raw
+# Pull the CURRENT effective tag for every built service from the compose file
+$targetCompose = if (Test-Path "docker-compose.customer.yml") { "docker-compose.customer.yml" } else { "docker-compose.yml" }
+$composeContent = Get-Content $targetCompose -Raw
 
 function Get-ImageRef([string]$svc) {
     if ($composeContent -match "aicyberauditbox-${svc}:\S+") {
         return $matches[0]
     }
-    Write-Error "Could not find image tag for $svc in docker-compose.customer.yml"
+    Write-Error "Could not find image tag for $svc in $targetCompose"
     exit 1
+
 }
 
 $images = @(

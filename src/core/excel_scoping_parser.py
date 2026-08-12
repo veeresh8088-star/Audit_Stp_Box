@@ -168,7 +168,8 @@ def _resolve_control_by_embedding(text: str, use_cases: List[Dict]) -> Optional[
                 resp = requests.post(
                     f"{ollama_url}/api/embeddings",
                     json={"model": embed_model, "prompt": t},
-                    timeout=15
+                    timeout=60
+
                 )
                 if resp.status_code == 200:
                     return np.array(resp.json().get("embedding", []), dtype=np.float32)

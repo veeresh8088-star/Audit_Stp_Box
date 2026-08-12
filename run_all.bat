@@ -16,14 +16,14 @@ if errorlevel 1 (
 )
 
 echo.
-echo [2/6] Stopping any existing backend server instances...
-taskkill /F /IM ollama* /T >nul 2>&1
+echo [2/6] Stopping any existing backend server instances (excluding Docker)...
+taskkill /F /IM python.exe /T >nul 2>&1
+taskkill /F /IM uvicorn.exe /T >nul 2>&1
 taskkill /F /IM llama-server* /T >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11434 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :11435 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :443 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>&1
-echo [v] Ports 8000 ^& 443 cleared.
+taskkill /F /IM ollama* /T >nul 2>&1
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000,11434,11435,443 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; if ($p -and $p.ProcessName -notlike '*docker*') { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }" >nul 2>&1
+echo [v] Ports 8000, 11434 ^& 11435 cleared safely without stopping Docker.
+
 
 :: Ensure SSL Certificate Exists
 if not exist cert.pem (
@@ -58,10 +58,9 @@ if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 :: so more slots = more concurrent audits but less context room per slot. Formula:
 :: Physical Cores / 2 (e.g. 10 Physical Cores -> 5 Slots) keeps each slot's context
 :: large enough for a full audit document + multi-evidence findings without truncating.
-if "%LLM_SLOTS%"=="" (
-    set /a LLM_SLOTS=%PHYSICAL_CORES%
-    if !LLM_SLOTS! LSS 4 set LLM_SLOTS=4
-)
+if "%LLM_SLOTS%"=="" set LLM_SLOTS=24
+
+
 
 echo.
 echo [3/6] Starting llama.cpp LLM Server (%PHYSICAL_CORES% Physical Cores --^> %LLM_SLOTS% Parallel Slots for %LLM_SLOTS% Concurrent Members, --cont-batching)...
@@ -76,14 +75,19 @@ echo [5/6] Starting Database ^& Live Telemetry (SQLite / PostgreSQL ^& Redis Por
 if exist "%~dp0tools\redis\redis-server.exe" (
     start "Windows Redis Server" /d "%~dp0tools\redis" /min "%~dp0tools\redis\redis-server.exe" --port 6380
 )
-docker-compose up -d > nul 2>&1
+docker ps > nul 2>&1
+if %errorlevel% equ 0 (
+    echo [v] Docker detected. Starting ShaktiDB PostgreSQL container...
+    docker-compose up -d shakthidb > nul 2>&1
+) else (
+    echo [i] Docker is offline/not running. Continuing with local SQLite fallback database.
+)
+
 
 echo.
 echo Waiting 12 seconds for models to load in RAM...
 timeout /t 12 >nul
 
-echo.
-echo [6/6] Launching AISecurityAudit HTTPS Server ^& Dashboard...
 set LLM_BACKEND=llama.cpp
 set EMBEDDING_HOST=http://127.0.0.1:11435
 set OLLAMA_KEEP_ALIVE=24h
@@ -94,6 +98,7 @@ set REDIS_URL=redis://127.0.0.1:6380/0
 set JWT_SECRET=3f955ad04cac120284051dc8bdaed7320dfeaba546860e8a3507dc8583a06ec9
 
 echo.
+echo [6/6] Launching AISecurityAudit Web Dashboard...
 echo ==================================================
 echo   AICyberAuditBox Local Web Dashboard Active
 echo   Local URL: http://localhost:8000/
@@ -102,3 +107,5 @@ echo ==================================================
 start http://localhost:8000/
 python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 pause
+
+
