@@ -1,0 +1,31 @@
+AICyberAuditBox Enterprise v1.4 - Customer Deployment Guide
+================================================================
+
+1. Copy both files into a single deployment folder:
+   - aicyberauditbox_bundle_v1.4.tar
+   - docker-compose.customer.yml
+
+2. Open a terminal in that folder and run:
+   docker load -i aicyberauditbox_bundle_v1.4.tar
+   docker compose -f docker-compose.customer.yml up -d
+
+3. Model Loading & Health Check:
+   - Wait ~10-14 minutes on first start while the local LLM model weights load into RAM.
+   - Run health check:
+     docker compose -f docker-compose.customer.yml ps
+     (Status will display "unhealthy" or "starting" during model load, then switch to "healthy" once ready. This is normal behavior.)
+
+4. Access the Web Interface:
+   - Open browser: http://localhost:8000/
+   - Login with your auditor credentials.
+   - 100% Air-Gapped Offline Operation: Zero internet connection required!
+
+5. Useful Container Management Commands:
+   - Stop Services:
+     docker compose -f docker-compose.customer.yml stop
+
+   - Restart Services:
+     docker compose -f docker-compose.customer.yml restart
+
+   - View Live Logs:
+     docker compose -f docker-compose.customer.yml logs -f app
