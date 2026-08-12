@@ -30,7 +30,7 @@ DB_HOST = os.environ.get("PGHOST", "localhost")
 DB_PORT = int(os.environ.get("PGPORT", "15234"))
 DB_USER = os.environ.get("PGUSER", "postgres")
 DB_PASSWORD = os.environ.get("PGPASSWORD", "ShakthiDB@2026")
-DB_NAME = os.environ.get("PGDATABASE", "postgres")
+DB_NAME = os.environ.get("PGDATABASE", "shakthidb")
 MAX_WAIT_SECONDS = int(os.environ.get("POSTGRES_WAIT_TIMEOUT", "60"))
 INTERVAL_SECONDS = 2
 
@@ -42,23 +42,26 @@ def main():
     last_err = None
 
     for attempt in range(1, attempts + 1):
-        try:
-            conn = psycopg2.connect(
-                host=DB_HOST, port=DB_PORT, user=DB_USER,
-                password=DB_PASSWORD, dbname=DB_NAME,
-                connect_timeout=3,
-            )
-            conn.close()
-            print(f"[PREFLIGHT] PostgreSQL/ShaktiDB is reachable at {DB_HOST}:{DB_PORT} "
-                  f"(attempt {attempt}/{attempts}). Starting application.", flush=True)
-            return 0
-        except Exception as e:
-            last_err = e
-            if attempt == 1:
-                print(f"[PREFLIGHT] PostgreSQL/ShaktiDB not ready yet at {DB_HOST}:{DB_PORT}, "
-                      f"retrying for up to {MAX_WAIT_SECONDS}s...", flush=True)
-            if attempt < attempts:
-                time.sleep(INTERVAL_SECONDS)
+        for target_db in [DB_NAME, "shakthidb", "postgres"]:
+            try:
+                conn = psycopg2.connect(
+                    host=DB_HOST, port=DB_PORT, user=DB_USER,
+                    password=DB_PASSWORD, dbname=target_db,
+                    connect_timeout=3,
+                )
+                conn.close()
+                print(f"[PREFLIGHT] PostgreSQL/ShaktiDB is reachable at {DB_HOST}:{DB_PORT} (db: {target_db}) "
+                      f"(attempt {attempt}/{attempts}). Starting application.", flush=True)
+                return 0
+            except Exception as e:
+                last_err = e
+
+        if attempt == 1:
+            print(f"[PREFLIGHT] PostgreSQL/ShaktiDB not ready yet at {DB_HOST}:{DB_PORT}, "
+                  f"retrying for up to {MAX_WAIT_SECONDS}s...", flush=True)
+        if attempt < attempts:
+            time.sleep(INTERVAL_SECONDS)
+
 
     print(f"[PREFLIGHT FATAL] PostgreSQL/ShaktiDB never became reachable at "
           f"{DB_HOST}:{DB_PORT} within {MAX_WAIT_SECONDS}s. Last error: {last_err}. "

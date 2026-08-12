@@ -1338,10 +1338,14 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                                 ev_loc = f"{src_files} ({ev_loc})"
 
 
+                        raw_cid = str(f.get("control_id") or "")
+                        raw_cname = str(f.get("control_label") or f.get("control") or raw_cid)
+
                         db_write.add(Finding(
                             report_id=report.id,
-                            control_id=f.get("control_id"),
-                            control_name=f.get("control_label") or f.get("control"),
+                            control_id=raw_cid[:98] if raw_cid else "ISO_CONTROL",
+                            control_name=raw_cname[:198] if raw_cname else "ISO Control",
+
                             severity="N/A" if is_comp else f.get("severity", "P3 Medium"),
                             description=f_desc,
                             gap_detected=f_desc,
