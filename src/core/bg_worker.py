@@ -1320,64 +1320,61 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 # Clear existing findings for this report
                 db_write.query(Finding).filter(Finding.report_id == report.id).delete()
                 for f in all_results_combined:
+                    f_desc = f.get("description") or f.get("finding") or f.get("gap_detected") or f.get("reasoning") or "Evaluated against ISO 27001 / VAPT compliance standards."
+                    f_status = f.get("status", "Non-Compliant")
+                    is_comp = (f_status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")
+                    f_recom = f.get("recommendation") or f.get("remediation") or (f"Maintain current documented policies and verification procedures for {f.get('control_id')}." if is_comp else f"Establish formal policy documentation, access controls, and logging evidence for {f.get('control_id')}.")
 
-                        f_desc = f.get("description") or f.get("finding") or f.get("gap_detected") or f.get("reasoning") or "Evaluated against ISO 27001 / VAPT compliance standards."
-                        f_status = f.get("status", "Non-Compliant")
-                        is_comp = (f_status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")
-                        f_recom = f.get("recommendation") or f.get("remediation") or (f"Maintain current documented policies and verification procedures for {f.get('control_id')}." if is_comp else f"Establish formal policy documentation, access controls, and logging evidence for {f.get('control_id')}.")
+                    ev_loc = f.get("evidence_location") or f.get("evidence_source_file") or f.get("source_file") or ""
+                    src_files = f.get("source_files") or ""
 
-                        ev_loc = f.get("evidence_location") or f.get("evidence_source_file") or f.get("source_file") or ""
-                        src_files = f.get("source_files") or ""
+                    if not ev_loc and src_files:
+                        ev_loc = src_files.split(",")[0].strip()
 
-                        if not ev_loc and src_files:
-                            ev_loc = src_files.split(",")[0].strip()
+                    # If evidence location is a child image file, include parent document name
+                    if ev_loc and src_files and ev_loc != src_files:
+                        if ev_loc.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff")) and src_files not in ev_loc:
+                            ev_loc = f"{src_files} ({ev_loc})"
 
-                        # If evidence location is a child image file, include parent document name
-                        if ev_loc and src_files and ev_loc != src_files:
-                            if ev_loc.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff")) and src_files not in ev_loc:
-                                ev_loc = f"{src_files} ({ev_loc})"
+                    raw_cid = str(f.get("control_id") or "")
+                    raw_cname = str(f.get("control_label") or f.get("control") or raw_cid)
 
-
-                        raw_cid = str(f.get("control_id") or "")
-                        raw_cname = str(f.get("control_label") or f.get("control") or raw_cid)
-
-                        db_write.add(Finding(
-                            report_id=report.id,
-                            control_id=raw_cid[:98] if raw_cid else "ISO_CONTROL",
-                            control_name=raw_cname[:198] if raw_cname else "ISO Control",
-
-                            severity="N/A" if is_comp else f.get("severity", "P3 Medium"),
-                            description=f_desc,
-                            gap_detected=f_desc,
-                            relevance_score=f.get("relevance_score", 0),
-                            evidence_found=f.get("evidence_found", ""),
-                            evidence_snippet=f.get("evidence_snippet", ""),
-                            evidence_location=ev_loc,
-                            evidence_source_file=ev_loc,
-                            recommendation=f_recom,
-                            reasoning=f.get("reasoning") or f_desc or "",
-                            status="COMPLIANT" if is_comp else f_status,
-                            policy_present=f.get("policy_present") or ("Compliant" if is_comp else "No"),
-                            evidence_present=f.get("evidence_present") or ("Compliant" if is_comp else "No"),
-                            source_files=f.get("source_files", "")
-                        ))
-
-                    
-                    # 3. Calculate score and update ComplianceScore
-                    db_write.query(ComplianceScore).filter(ComplianceScore.report_id == report.id).delete()
-                    in_scope = [f for f in all_results_combined if f.get("status")]
-                    compliant = [f for f in in_scope if (f.get("status") or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")]
-                    score_pct = int(len(compliant) / max(len(in_scope), 1) * 100) if in_scope else 0
-                    db_write.add(ComplianceScore(
+                    db_write.add(Finding(
                         report_id=report.id,
-                        framework=report.framework,
-                        score_percent=score_pct
+                        control_id=raw_cid[:98] if raw_cid else "ISO_CONTROL",
+                        control_name=raw_cname[:198] if raw_cname else "ISO Control",
+                        severity="N/A" if is_comp else f.get("severity", "P3 Medium"),
+                        description=f_desc,
+                        gap_detected=f_desc,
+                        relevance_score=f.get("relevance_score", 0),
+                        evidence_found=f.get("evidence_found", ""),
+                        evidence_snippet=f.get("evidence_snippet", ""),
+                        evidence_location=ev_loc,
+                        evidence_source_file=ev_loc,
+                        recommendation=f_recom,
+                        reasoning=f.get("reasoning") or f_desc or "",
+                        status="COMPLIANT" if is_comp else f_status,
+                        policy_present=f.get("policy_present") or ("Compliant" if is_comp else "No"),
+                        evidence_present=f.get("evidence_present") or ("Compliant" if is_comp else "No"),
+                        source_files=f.get("source_files", "")
                     ))
-                    
-                    report.status = "Pending Review"
-                    
-                db_write.commit()
-                db_write.close()
+
+                # 3. Calculate score and update ComplianceScore
+                db_write.query(ComplianceScore).filter(ComplianceScore.report_id == report.id).delete()
+                in_scope = [f for f in all_results_combined if f.get("status")]
+                compliant = [f for f in in_scope if (f.get("status") or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")]
+                score_pct = int(len(compliant) / max(len(in_scope), 1) * 100) if in_scope else 0
+                db_write.add(ComplianceScore(
+                    report_id=report.id,
+                    framework=report.framework,
+                    score_percent=score_pct
+                ))
+                
+                report.status = "Pending Review"
+                
+            db_write.commit()
+            db_write.close()
+
         except Exception as e:
             print(f"[PIPELINE] Failed to save findings and complete files update: {e}", flush=True)
             
