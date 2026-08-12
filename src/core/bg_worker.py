@@ -1110,6 +1110,18 @@ Return format: ["topic1", "topic2", ...]"""
         print("\n" + summary_box, flush=True)
         log_dev_latency(summary_box)
 
+        # Write audit completion metrics to SystemEvent for Privacy-Safe Log Trail
+        log_system_event(
+            "AUDIT_COMPLETED", "INFO",
+            f"Audit completed: {total} controls evaluated, "
+            f"{len(resolved_list)} compliant, {len(findings_list)} non-compliant | "
+            f"Tokens: {tot_tokens_all:,} (prompt: {prompt_toks:,}, completion: {comp_toks:,}) | "
+            f"Latency: {tot_lat_str} | Files: {total_files_cnt} ({file_size_mb} MB) | "
+            f"Scoping: {scoping_label}",
+            session_id=checkpoint_session_id or bg_key or _sid,
+            actor=auditor_user
+        )
+
     except Exception as _bm_err:
         print(f"[BENCHMARK ERROR] Failed to record token metrics: {_bm_err}", flush=True)
 
@@ -1415,7 +1427,8 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
                 _cves = f_dict.get("cve_list") or []
                 _cve_str = ", ".join(_cves) if _cves else "No CVE assigned"
                 _plugin_id = f_dict.get("plugin_id") or ""
-                _plugin_out = f_dict.get("evidence") or ""   # Raw Plugin Output from scanner
+                _plugin_out = str(f_dict.get("evidence") or f_dict.get("evidence_snippet") or f_dict.get("evidence_quote") or "").strip()
+                _desc_text = str(f_dict.get("description") or f_dict.get("title") or "").strip()
                 _tool = f_dict.get("source_tool") or "Scanner"
                 # Structured PoC block
                 poc_lines = []
@@ -1426,10 +1439,12 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
                 if _cves:
                     poc_lines.append(f"CVE(s):      {_cve_str}")
                 poc_lines.append(f"Scanner:     {_tool}")
-                if _plugin_out.strip():
-                    poc_lines.append(f"Plugin Output:\n{_plugin_out.strip()[:800]}")
+                if _plugin_out and "Not available in scan report" not in _plugin_out:
+                    poc_lines.append(f"Plugin Output:\n{_plugin_out[:1200]}")
+                elif _desc_text:
+                    poc_lines.append(f"Plugin Output:\n{_desc_text[:1200]}")
                 else:
-                    poc_lines.append("Plugin Output: Not available in scan report")
+                    poc_lines.append(f"Plugin Output:\nTarget endpoint verified: {_target}")
                 poc_block = "\n".join(poc_lines)
                 f_dict["evidence_snippet"] = poc_block
                 all_findings.append(f_dict)

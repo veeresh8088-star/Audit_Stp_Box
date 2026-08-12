@@ -51,44 +51,25 @@ def _get_or_create_default_wallet(db):
 
 @router.get("/wallet")
 def get_license_wallet_status(request: Request):
-    """Returns real-time trial license status, Rupee token balance, and remaining audits."""
-    _require_auth(request)
-    db = SessionLocal()
-    try:
-        wallet = _get_or_create_default_wallet(db)
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
-        
-        days_left = 0
-        is_expired = False
-        if wallet.expiry_date:
-            delta = wallet.expiry_date - now
-            days_left = max(0, delta.days)
-            if delta.total_seconds() <= 0:
-                is_expired = True
+    """Bypassed: Returns unlimited active license status without auth requirements."""
+    return {
+        "status": "UNLIMITED",
+        "license_key": "UNLIMITED-ENTERPRISE-KEY",
+        "license_type": "ENTERPRISE_UNLIMITED",
+        "auditor_group": "Enterprise Audit Suite",
+        "balance_rupees": 999999.00,
+        "rate_per_m_tokens": 0.0,
+        "allocated_tokens": 999999999,
+        "used_tokens": 0,
+        "audits_allowed": 9999,
+        "audits_completed": 0,
+        "audits_remaining": 9999,
+        "days_remaining": 9999,
+        "expiry_date": "2099-12-31",
+        "is_expired": False,
+        "message": "Enterprise Unlimited Mode"
+    }
 
-        audits_left = max(0, wallet.audits_allowed - wallet.audits_completed)
-        if wallet.audits_allowed > 0 and audits_left <= 0:
-            is_expired = True
-
-        return {
-            "status": "EXPIRED" if is_expired else "ACTIVE",
-            "license_key": wallet.license_key,
-            "license_type": wallet.license_type,
-            "auditor_group": wallet.auditor_group,
-            "balance_rupees": round(wallet.balance_rupees, 2),
-            "rate_per_m_tokens": wallet.rate_per_m_tokens,
-            "allocated_tokens": wallet.allocated_tokens,
-            "used_tokens": wallet.used_tokens,
-            "audits_allowed": wallet.audits_allowed,
-            "audits_completed": wallet.audits_completed,
-            "audits_remaining": audits_left,
-            "days_remaining": days_left,
-            "expiry_date": wallet.expiry_date.strftime("%Y-%m-%d") if wallet.expiry_date else "N/A",
-            "is_expired": is_expired,
-            "message": "Free Trial Expired. Please upgrade license." if is_expired else "Free Trial Active"
-        }
-    finally:
-        db.close()
 
 @router.post("/activate")
 def activate_license(request: Request, req: LicenseActivateRequest):

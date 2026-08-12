@@ -365,7 +365,7 @@
                 </div>
                 <div class="header-right" style="display: flex; align-items: center; gap: 12px;">
                     <button id="license-widget-btn" onclick="openLicenseModal()" class="btn-secondary"
-                        style="padding: 5px 12px; font-size: 0.78rem; display: flex; align-items: center; gap: 6px; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.4); color: #10b981; font-weight: 700; cursor: pointer; border-radius: 8px;"
+                        style="padding: 5px 12px; font-size: 0.78rem; display: none; align-items: center; gap: 6px; background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.4); color: #10b981; font-weight: 700; cursor: pointer; border-radius: 8px;"
                         title="View Trial License & Token Credit Status">
                         <span id="license-widget-text">Free Trial: 14 Days [₹500.00]</span>
                     </button>
@@ -502,6 +502,9 @@
                                     <button type="button" class="btn-secondary"
                                         onclick="document.getElementById('evidence-file-input').click()"
                                         style="padding: 4px 8px; font-size: 0.74rem;">+ Browse files</button>
+                                    <button type="button" class="btn-secondary"
+                                        onclick="document.getElementById('evidence-folder-input').click()"
+                                        style="padding: 4px 8px; font-size: 0.74rem; margin-left: 4px;">+ Browse folder</button>
                                 </div>
                             </div>
 
@@ -515,7 +518,10 @@
                                 <p style="margin: 3px 0 0 0; font-size: 0.74rem; color: var(--text-muted);">Supports PDF, DOCX, XLSX, CSV, PPTX, HTML, JSON, TXT, PNG, JPG, & ZIP folders</p>
                                 <input type="file" id="evidence-file-input" multiple style="display: none;"
                                     onchange="handleEvidenceUpload(event)">
+                                <input type="file" id="evidence-folder-input" webkitdirectory directory multiple style="display: none;"
+                                    onchange="handleEvidenceFolderUpload(event)">
                             </div>
+
 
                             <div class="submitted-files-card"
                                 style="border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; flex: 1; display: flex; flex-direction: column; min-height: 120px;">

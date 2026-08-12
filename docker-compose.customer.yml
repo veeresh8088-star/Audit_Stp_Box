@@ -1,6 +1,14 @@
-﻿services:
+﻿# Customer deployment compose file.
+#
+# Unlike docker-compose.yml (the dev version, which builds images from
+# source), this one only references pre-built images -- no `build:` section
+# anywhere. Pair this file with the exported image bundle
+# (aicyberauditbox_bundle_v1.0.tar): the customer loads that bundle first
+# (`docker load -i aicyberauditbox_bundle_v1.0.tar`), then runs this file.
+# No internet access, no separate installs, nothing to build.
+
+services:
   shakthidb:
-    build: .
     image: aicyberauditbox-shakthidb:1.0
     container_name: shakthidb_service
     environment:
@@ -14,11 +22,6 @@
       # port mappings; whichever service "owns" the shared namespace must
       # expose them instead.
       - "8000:8000"
-    # Listens on 15234 *inside* the container too (not just the external host
-    # mapping), because the app container shares this container's network
-    # namespace (see the `app` service's network_mode below) so it can reach
-    # Postgres at the exact "localhost:15234" the application code already
-    # has hardcoded, with zero changes to src/db/database.py.
     command: postgres -p 15234 -c shared_buffers=2GB -c work_mem=64MB -c max_connections=200
     volumes:
       - pgdata:/var/lib/postgresql
@@ -39,23 +42,17 @@
     restart: always
 
   llm:
-    build:
-      context: .
-      dockerfile: Dockerfile.llm
     image: aicyberauditbox-llm:1.0
     container_name: aicyberauditbox_llm
     environment:
       - LLM_MODE=completion
       - LLM_THREADS=${LLM_THREADS:-4}
       # Uncomment to override the auto-sized slot count instead of letting
-      # docker/llm-entrypoint.sh detect it from this container's RAM:
+      # the container detect it from its own available RAM:
       # - LLM_SLOTS_OVERRIDE=2
     restart: always
 
   llm-embed:
-    build:
-      context: .
-      dockerfile: Dockerfile.llm
     image: aicyberauditbox-llm-embed:1.0
     container_name: aicyberauditbox_llm_embed
     environment:
@@ -64,17 +61,8 @@
     restart: always
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile.app
     image: aicyberauditbox-app:1.3
     container_name: aicyberauditbox_app
-    # Shares shakthidb's network namespace so "localhost:15234" inside this
-    # container genuinely reaches Postgres, matching database.py's hardcoded
-    # connection string exactly -- no code changes to the app needed. Other
-    # services (redis, llm, llm-embed) are still reachable by their compose
-    # service name since this container inherits shakthidb's network
-    # attachments.
     network_mode: "service:shakthidb"
     depends_on:
       shakthidb:
@@ -90,10 +78,9 @@
       - LLM_HOSTS=llm:11434
       - EMBEDDING_HOST=http://llm-embed:11435
       - REDIS_URL=redis://redis:6379/0
-      # JWT_SECRET intentionally NOT set here -- docker/generate_secrets.sh
-      # auto-generates and persists a unique one to the app-data volume on
-      # first boot if this isn't provided. Set it explicitly here (or via a
-      # .env file) if you want to pin it yourself instead.
+      # JWT_SECRET auto-generates and persists to the app-data volume on
+      # first boot if not set here. Uncomment to pin one yourself instead:
+      # - JWT_SECRET=your-unique-secret-here
     volumes:
       - app_data:/app/data
     restart: always

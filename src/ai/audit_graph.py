@@ -263,6 +263,11 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
                 _update_progress(state, f"LLM analysing control... ({_elapsed}s)", _hb_phase)
         if t.is_alive():
             print(f"[LANGGRAPH TIMEOUT] Generator timed out after {_timeout}s for control {state.get('control_id','')}. Skipping.", flush=True)
+            try:
+                from src.core.bg_worker import log_system_event
+                log_system_event("LLM_TIMEOUT", "WARNING", f"Generator timed out after {_timeout}s for control '{state.get('control_id','')}'", session_id=state.get("bg_key", ""))
+            except Exception:
+                pass
             return {"draft_finding": None, "validation_error": f"LLM call timed out after {_timeout}s"}
         # ─────────────────────────────────────────────────────────────────────
         if "error" in result_holder:
@@ -510,6 +515,11 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
                 _update_progress(state, f"Self-correcting finding... ({_ref_elapsed}s)", _hb_ref_phase)
         if t.is_alive():
             print(f"[LANGGRAPH TIMEOUT] Reflection timed out after {_ref_timeout}s for control {state.get('control_id','')}. Accepting draft as-is.", flush=True)
+            try:
+                from src.core.bg_worker import log_system_event
+                log_system_event("LLM_TIMEOUT", "WARNING", f"Reflection timed out after {_ref_timeout}s for control '{state.get('control_id','')}'", session_id=state.get("bg_key", ""))
+            except Exception:
+                pass
             return {
                 "draft_finding": draft,
                 "validation_error": None,

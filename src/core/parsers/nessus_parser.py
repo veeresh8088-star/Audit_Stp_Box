@@ -3,6 +3,15 @@ import re
 from typing import List, Tuple, Any
 from bs4 import BeautifulSoup
 from .base_parser import BaseParser
+
+# Prefer lxml for speed; fallback to html.parser if unavailable
+try:
+    import lxml  # noqa: F401
+    _HTML_PARSER = "lxml"
+    _XML_PARSER = "lxml-xml"
+except ImportError:
+    _HTML_PARSER = "html.parser"
+    _XML_PARSER = "html.parser"
 from .finding_schema import Finding
 from .control_mapper import map_findings_list
 
@@ -22,7 +31,7 @@ class NessusParser(BaseParser):
         if not content:
             return [], []
 
-        soup = BeautifulSoup(content, 'html.parser')
+        soup = BeautifulSoup(content, _XML_PARSER if content.strip().startswith('<?xml') else _HTML_PARSER)
         actionable_findings: List[Finding] = []
         info_findings: List[Finding] = []
 

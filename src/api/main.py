@@ -1,6 +1,11 @@
 import sys
 import asyncio
 import os
+import warnings
+
+# Silence third-party library deprecation/version noise (LangChain / Pydantic V1)
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", message=".*Pydantic.*")
 
 if sys.platform == "win32":
     # Silence harmless Windows Proactor connection lost exception noise on socket reset

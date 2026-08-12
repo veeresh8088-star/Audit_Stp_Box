@@ -17,6 +17,7 @@ from src.core.auth import (
     _hash_pw
 )
 from src.db.database import SessionLocal, User, force_master
+from src.core.bg_worker import log_system_event
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -105,6 +106,7 @@ def api_register(req: RegisterRequest):
     img.save(buf, format="PNG")
     qr_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
     
+    log_system_event("USER_REGISTERED", "INFO", f"New user registered: {req.username} (role: {req.role})", actor=req.username)
     return {
         "success": True,
         "message": msg,
@@ -168,6 +170,7 @@ def api_verify_otp(req: VerifyOTPRequest, request: Request):
     is_valid = totp.verify(req.otp_code, valid_window=5)
 
     if is_valid:
+        log_system_event("USER_LOGIN", "INFO", f"User '{user.username}' (role: {user.role}) logged in successfully", actor=user.username)
         return {
             "success": True,
             "username": user.username,

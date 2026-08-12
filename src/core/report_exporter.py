@@ -76,7 +76,30 @@ def validate_and_derive_report_payload(findings, session_title="", file_registry
             cve_id = f_copy.get("cve") or ""
             f_copy["remediation"] = f"Apply vendor security update for {vuln_title}" + (f" ({cve_id})" if cve_id else "") + ". Upgrade affected components to current supported version."
 
+        # 4. Derive VAPT Risk Category, CIA/PII Impact, & Actionable Remediation if missing
+        from src.core.parsers.control_mapper import map_finding_to_risk_category, evaluate_cia_and_pii_impact, get_actionable_remediation
+        from src.core.parsers.finding_schema import Finding
+        
+        # Build lightweight Finding object for derivation functions
+        _tmp_finding = Finding(
+            title=f_copy.get("title") or f_copy.get("finding") or "",
+            severity=f_copy.get("severity") or "INFO",
+            description=f_copy.get("description") or f_copy.get("gap_description") or "",
+            evidence=f_copy.get("evidence") or f_copy.get("evidence_snippet") or "",
+            remediation=f_copy.get("remediation") or "",
+            cve_list=f_copy.get("cve_list") or []
+        )
+        if not f_copy.get("category"):
+            f_copy["category"] = map_finding_to_risk_category(_tmp_finding)
+        if not f_copy.get("cia_impact"):
+            cia_str, is_pii = evaluate_cia_and_pii_impact(_tmp_finding)
+            f_copy["cia_impact"] = cia_str
+            f_copy["is_pii_exposed"] = is_pii
+        if not f_copy.get("remediation_actionable"):
+            f_copy["remediation_actionable"] = get_actionable_remediation(_tmp_finding)
+
         validated_findings.append(f_copy)
+
 
     # 4. Derive Dynamic Scan Execution Dates
     scan_date_range = extract_scan_dates_from_registry(file_registry)
@@ -917,6 +940,24 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             r.cell("OWASP Top 10 (2021)", style=lbl_style)
             r.cell(clean_text(owasp_cat[:400]), style=body_style)
 
+            # ── Risk Category ─────────────────────────────────────────────────
+            risk_cat = f.get("category") or ""
+            if risk_cat:
+                r = table.row()
+                r.cell("Risk Category", style=lbl_style)
+                r.cell(clean_text(risk_cat), style=body_style)
+
+            # ── CIA Impact & PII Exposure ─────────────────────────────────────
+            cia_val = f.get("cia_impact") or ""
+            pii_flag = f.get("is_pii_exposed", False)
+            if cia_val:
+                cia_display = cia_val
+                if pii_flag:
+                    cia_display += "  |  ⚠ PII EXPOSURE DETECTED"
+                r = table.row()
+                r.cell("CIA Impact", style=lbl_style)
+                r.cell(clean_text(cia_display), style=body_style)
+
             # ── Plugin ID row (when available) ─────────────────────────────────
             plugin_id_val = str(f.get("plugin_id") or "").strip()
             if plugin_id_val:
@@ -977,7 +1018,20 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         pdf.set_font("Helvetica", "", 8.5)
         pdf.set_text_color(51, 65, 85)
         pdf.multi_cell(0, 4.5, clean_text(remed), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(4)
+        pdf.ln(2)
+
+        # Developer-Actionable Mitigation Steps Section
+        remed_actionable = f.get("remediation_actionable") or f.get("actionable_remediation") or ""
+        if remed_actionable and remed_actionable.strip() != remed.strip():
+            pdf.set_font("Helvetica", "B", 9)
+            pdf.set_text_color(15, 23, 42)
+            pdf.cell(0, 5, "Developer Actionable Mitigation Steps:", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 8.5)
+            pdf.set_text_color(30, 41, 59)
+            pdf.multi_cell(0, 4.5, clean_text(remed_actionable), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.ln(2)
+
+        pdf.ln(2)
 
         if main_img and os.path.exists(main_img):
             pdf.ln(2)
@@ -1502,6 +1556,22 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         r_m3 = pm.add_run(f"   |   Location / Target: {target_val}")
         if f.get("source_tool"):
             pm.add_run(f"   |   Tool: {f.get('source_tool')}")
+        if f.get("category"):
+            pm.add_run(f"   |   Risk Category: {f.get('category')}")
+
+        # CIA & PII Meta line
+        cia_val = f.get("cia_impact") or ""
+        pii_flag = f.get("is_pii_exposed", False)
+        if cia_val or pii_flag:
+            pm_cia = doc.add_paragraph()
+            pm_cia.paragraph_format.space_before = Pt(2)
+            r_c1 = pm_cia.add_run("CIA Impact: ")
+            r_c1.bold = True
+            r_c2 = pm_cia.add_run(cia_val or "C:NONE | I:NONE | A:NONE")
+            if pii_flag:
+                r_pii = pm_cia.add_run("   |   ⚠ PII EXPOSURE DETECTED")
+                r_pii.bold = True
+                r_pii.font.color.rgb = _rgb(220, 38, 38)
 
         # Issue Description
         p_desc_hdr = doc.add_paragraph()
@@ -1536,6 +1606,16 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         r_rh.bold = True
         r_rh.font.color.rgb = _rgb(217, 119, 6)
         doc.add_paragraph(remed_val)
+
+        # Developer Actionable Mitigation Steps
+        remed_actionable = f.get("remediation_actionable") or f.get("actionable_remediation") or ""
+        if remed_actionable and remed_actionable.strip() != remed_val.strip():
+            p_act_hdr = doc.add_paragraph()
+            p_act_hdr.paragraph_format.space_before = Pt(4)
+            r_ah = p_act_hdr.add_run("Developer Actionable Mitigation Steps:")
+            r_ah.bold = True
+            r_ah.font.color.rgb = _rgb(15, 23, 42)
+            doc.add_paragraph(remed_actionable)
 
         main_img = f.get("poc_image") or f.get("image_path")
         extra_img = f.get("extra_image")

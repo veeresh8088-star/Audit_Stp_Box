@@ -83,6 +83,11 @@ class LLMPortPoolManager:
         port_lock = self.port_locks[leased_port]
         acquired = port_lock.acquire(timeout=timeout)
         if not acquired:
+            try:
+                from src.core.bg_worker import log_system_event
+                log_system_event("PORT_LOCK_TIMEOUT", "ERROR", f"Failed to acquire port lock on {leased_port} within {timeout}s", session_id=session_id)
+            except Exception:
+                pass
             raise TimeoutError(f"Failed to acquire port lock on {leased_port} within {timeout}s for session {session_id}")
             
         t_acquire = (time.time() - start_ts) * 1000

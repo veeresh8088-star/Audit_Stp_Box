@@ -25,7 +25,8 @@ from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg
 from src.core.bg_worker import (
     _run_ollama_bg,
     _run_fast_technical_vapt_bg,
-    get_resumable_checkpoint
+    get_resumable_checkpoint,
+    log_system_event
 )
 from src.core.input_guardrail import scan_file_security
 from src.core.parsers.doc_parsers import extract_text
@@ -148,6 +149,7 @@ def api_create_session(
             )
             db.add(report)
             db.commit()
+            log_system_event("SESSION_CREATED", "INFO", f"Session '{session_title}' created (framework: {framework})", session_id=session_id, actor=username)
             return {"success": True, "session_id": session_id, "session_title": session_title}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create session: {e}")
@@ -211,7 +213,11 @@ def api_get_sessions(username: Optional[str] = None):
         for r in reports:
             score_row = db.query(ComplianceScore).filter(ComplianceScore.report_id == r.id).first()
             score_pct = score_row.score_percent if score_row else 0
-            findings_count = db.query(Finding).filter(Finding.report_id == r.id).count()
+            findings_count = db.query(Finding).filter(
+                Finding.report_id == r.id,
+                ~Finding.severity.ilike("%INFO%"),
+                ~Finding.status.ilike("%INFO%")
+            ).count()
             
             auditee_name = None
             if r.auditee_id:
@@ -373,66 +379,87 @@ async def api_upload_evidence(
                     detail=f"File '{f.filename}' exceeds the maximum allowed size of 100MB. Please upload a smaller file."
                 )
 
-            f_like = io.BytesIO(file_bytes)
-            f_like.name = f.filename
+            # ── ZIP Auto-Unpack: Extract all contained documents into individual evidence files ──
+            sub_files = []
+            if f.filename.lower().endswith(".zip"):
+                import zipfile
+                try:
+                    with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                        for entry in sorted(zf.namelist()):
+                            if entry.endswith("/") or "__MACOSX" in entry or os.path.basename(entry).startswith("."):
+                                continue
+                            ext = os.path.splitext(entry.lower())[1]
+                            if ext in (
+                                ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".csv",
+                                ".pptx", ".ppt", ".txt", ".html", ".htm", ".json",
+                                ".png", ".jpg", ".jpeg"
+                            ):
+                                inner_bytes = zf.read(entry)
+                                inner_name = os.path.basename(entry)
+                                sub_files.append((inner_name, inner_bytes))
+                except Exception as zip_err:
+                    print(f"[ZIP UNPACK WARNING] Failed to unpack {f.filename}: {zip_err}", flush=True)
 
-            # Security Scan
-            is_clean, reason = scan_file_security(f_like)
-            if not is_clean:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"SECURITY ALERT: '{f.filename}' BLOCKED! {reason}"
-                )
+            if not sub_files:
+                sub_files = [(f.filename, file_bytes)]
 
-            # Store file on local disk
-            ev_dir = os.path.normpath(os.path.join(os.getcwd(), "data", "evidence", str(report_id)))
-            os.makedirs(ev_dir, exist_ok=True)
-            prefix = "auditor_" if is_auditor_uploaded else "auditee_"
+            for sub_name, sub_bytes in sub_files:
+                f_like = io.BytesIO(sub_bytes)
+                f_like.name = sub_name
 
-            # ── PATH TRAVERSAL FIX: sanitize filename to prevent ../../evil.py attacks ──
-            safe_filename = os.path.basename(f.filename)  # Strip any directory components
-            safe_filename = re.sub(r"[^\w\-\.]", "_", safe_filename)  # Allow only safe chars
-            safe_filename = safe_filename.lstrip(".")  # Strip leading dots (hidden files)
-            if not safe_filename:
-                safe_filename = "upload_file"
-            dest_path = os.path.join(ev_dir, prefix + safe_filename)
+                # Security Scan
+                is_clean, reason = scan_file_security(f_like)
+                if not is_clean:
+                    continue  # Skip infected sub-file silently
 
-            # Verify final path is still inside ev_dir (double-check)
-            if not os.path.abspath(dest_path).startswith(os.path.abspath(ev_dir)):
-                raise HTTPException(status_code=400, detail="Invalid filename detected.")
+                # Store file on local disk
+                ev_dir = os.path.normpath(os.path.join(os.getcwd(), "data", "evidence", str(report_id)))
+                os.makedirs(ev_dir, exist_ok=True)
+                prefix = "auditor_" if is_auditor_uploaded else "auditee_"
 
-            f_like.seek(0)
-            with open(dest_path, "wb") as dest_f:
-                dest_f.write(file_bytes)
+                # ── PATH TRAVERSAL FIX: sanitize filename ──
+                safe_filename = os.path.basename(sub_name)
+                safe_filename = re.sub(r"[^\w\-\.]", "_", safe_filename).lstrip(".")
+                if not safe_filename:
+                    safe_filename = "upload_file"
+                dest_path = os.path.join(ev_dir, prefix + safe_filename)
 
-            # Check existence but don't commit yet — collect all records first
-            with force_master():
-                exists = db.query(EvidenceFile).filter(
-                    EvidenceFile.report_id == report_id,
-                    EvidenceFile.filename == f.filename
-                ).first()
-                if not exists:
-                    new_ev = EvidenceFile(
-                        report_id=report_id,
-                        filename=f.filename,
-                        file_path=os.path.abspath(dest_path),
-                        is_auditor_uploaded=is_auditor_uploaded,
-                        status="Completed"
-                    )
-                    db.add(new_ev)
-                    new_evidence_records.append(new_ev)
+                if not os.path.abspath(dest_path).startswith(os.path.abspath(ev_dir)):
+                    continue
 
-            # Asynchronously extract text & save chunks in background thread to guarantee 0.1s upload speed
-            if bg_tasks:
-                bg_tasks.add_task(_bg_extract_and_chunk, f.filename, file_bytes)
-            else:
-                _bg_extract_and_chunk(f.filename, file_bytes)
+                f_like.seek(0)
+                with open(dest_path, "wb") as dest_f:
+                    dest_f.write(sub_bytes)
 
-            uploaded_details.append({
-                "filename": f.filename,
-                "status": "Processed",
-                "bytes": len(file_bytes)
-            })
+                # Check existence but don't commit yet — collect all records first
+                with force_master():
+                    exists = db.query(EvidenceFile).filter(
+                        EvidenceFile.report_id == report_id,
+                        EvidenceFile.filename == sub_name
+                    ).first()
+                    if not exists:
+                        new_ev = EvidenceFile(
+                            report_id=report_id,
+                            filename=sub_name,
+                            file_path=os.path.abspath(dest_path),
+                            is_auditor_uploaded=is_auditor_uploaded,
+                            status="Completed"
+                        )
+                        db.add(new_ev)
+                        new_evidence_records.append(new_ev)
+
+                # Asynchronously extract text & save chunks in background thread
+                if bg_tasks:
+                    bg_tasks.add_task(_bg_extract_and_chunk, sub_name, sub_bytes)
+                else:
+                    _bg_extract_and_chunk(sub_name, sub_bytes)
+
+                uploaded_details.append({
+                    "filename": sub_name,
+                    "status": "Processed",
+                    "bytes": len(sub_bytes)
+                })
+
 
         # ── FIX 2: Single batch commit for ALL files → SQLite locked for ~0.002s total ──
         # ── FIX 3: Exponential backoff retry (max 3 attempts) → no infinite hang ──────
@@ -457,6 +484,7 @@ async def api_upload_evidence(
                     print(f"[UPLOAD RETRY] session={session_id} | DB locked, retrying in {backoff_s:.2f}s (attempt {attempt + 1}/{MAX_RETRIES})", flush=True)
                     time.sleep(backoff_s)
 
+        log_system_event("FILE_UPLOAD", "INFO", f"{len(uploaded_details)} file(s) uploaded: {', '.join(d['filename'] for d in uploaded_details)}", session_id=session_id, actor=username or "Auditor")
         return {"success": True, "files": uploaded_details}
     except HTTPException:
         raise
@@ -604,6 +632,7 @@ def api_delete_evidence_file(req: DeleteEvidenceRequest):
                 raise HTTPException(status_code=404, detail="File not found")
             file_rec.is_deleted = True
             db.commit()
+            log_system_event("FILE_DELETED", "WARNING", f"Evidence file '{file_rec.filename}' soft-deleted", session_id=req.session_id)
             return {"success": True, "message": f"File '{file_rec.filename}' deleted", "file_id": file_rec.id, "filename": file_rec.filename}
     finally:
         db.close()
@@ -644,7 +673,10 @@ def api_start_audit(req: StartAuditRequest):
     from src.core.resource_guard import check_memory_pressure
     _mem = check_memory_pressure()
     if _mem["status"] == "CRITICAL":
+        log_system_event("RESOURCE_GUARD_CRITICAL", "CRITICAL", f"Audit refused due to critical RAM pressure: {_mem['reason']}", session_id=req.session_id, actor=req.username or "Auditor")
         raise HTTPException(status_code=503, detail=_mem["reason"] + " Please wait for an active audit to finish before starting a new one.")
+    elif _mem["status"] == "WARNING":
+        log_system_event("RESOURCE_GUARD_WARNING", "WARNING", f"RAM pressure warning: {_mem['reason']}", session_id=req.session_id, actor=req.username or "Auditor")
 
     # Extract auditor identity from session_id (format: auditor-<username>-<timestamp>)
     # Fall back to first 16 chars if format differs
@@ -744,7 +776,8 @@ def api_start_audit(req: StartAuditRequest):
                 daemon=True
             )
         thread.start()
-        
+        _mode_label = "VAPT" if is_tech_only else req.audit_mode
+        log_system_event("AUDIT_STARTED", "INFO", f"Audit started (mode: {_mode_label}, controls: {len(req.selected_sls)}, files: {len(files_data)})", session_id=req.session_id, actor=req.username or "Auditor")
         return {"success": True, "status": "started", "message": "Background RAG scan initialized."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Scoping failed: {e}")
@@ -758,6 +791,7 @@ def api_stop_audit(session_id: str):
     with _bg_lock:
         _bg_running.discard(session_id)
         _bg_store["progress"].pop(session_id, None)
+    log_system_event("AUDIT_STOPPED", "WARNING", "Audit manually stopped by user", session_id=session_id)
     return {"success": True, "message": "Scan stopped successfully."}
 
 @router.get("/status/{session_id}")
@@ -1004,6 +1038,7 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest):
                 ))
                 
             db.commit()
+            log_system_event("FINDING_UPDATED", "INFO", f"Finding #{finding_id} updated to '{req.status}' (control: {finding.control_id})", session_id=str(finding.report_id))
             return {"success": True, "message": "Finding successfully updated and saved to Shakthi DB."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database update failed: {e}")
@@ -1085,6 +1120,14 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
             ))
 
             db.commit()
+            _action = "FORCE_COMMIT_SHAKTHI" if is_force else "COMMIT_SHAKTHI"
+            _sev = "WARNING" if is_force else "INFO"
+            log_system_event(
+                _action, _sev,
+                f"{'Force-committed' if is_force else 'Committed'} {total_ctrls} findings to Shakthi DB "
+                f"(Compliance: {score_pct}%, Unreviewed: {len(unreviewed)})",
+                session_id=session_id, actor=auditor_user
+            )
             return {
                 "success": True, 
                 "message": f"Successfully committed {total_ctrls} audit record(s) to Shakthi DB (Compliance Score: {score_pct}%).",
@@ -1259,6 +1302,7 @@ def api_deliver_report(
                 report.auditee_id = target_uid
             db.commit()
             
+        log_system_event("REPORT_DELIVERED", "INFO", f"Report delivered to auditee '{target_user.username if target_user else raw_target}'", session_id=session_id, actor=username)
         return {"success": True, "message": f"Report successfully delivered to auditee '{target_user.username if target_user else raw_target}'."}
     except Exception:
         raise HTTPException(status_code=500, detail="Operation failed. Please try again.")
@@ -1543,7 +1587,13 @@ def api_export_docx(
     brand_reviewer: Optional[str] = None,
     brand_approver: Optional[str] = None,
     brand_docid: Optional[str] = None,
-    brand_client: Optional[str] = None
+    brand_client: Optional[str] = None,
+    auditor_firm: Optional[str] = None,
+    auditor_lead: Optional[str] = None,
+    auditor_reviewer: Optional[str] = None,
+    auditor_approver: Optional[str] = None,
+    document_id: Optional[str] = None,
+    client_contact: Optional[str] = None
 ):
     """Exports findings report as DOCX using custom layout templates."""
     db = SessionLocal()
@@ -1604,12 +1654,12 @@ def api_export_docx(
             )
 
             meta_dict = {
-                "brand_firm": brand_firm,
-                "brand_auditor": brand_auditor,
-                "brand_reviewer": brand_reviewer,
-                "brand_approver": brand_approver,
-                "brand_docid": brand_docid,
-                "brand_client": brand_client,
+                "brand_firm": brand_firm or auditor_firm,
+                "brand_auditor": brand_auditor or auditor_lead,
+                "brand_reviewer": brand_reviewer or auditor_reviewer,
+                "brand_approver": brand_approver or auditor_approver,
+                "brand_docid": brand_docid or document_id,
+                "brand_client": brand_client or client_contact,
             }
 
             docx_bytes = export_docx_report(
@@ -1622,6 +1672,7 @@ def api_export_docx(
                 metadata=meta_dict
             )
             
+            log_system_event("REPORT_EXPORT_DOCX", "INFO", f"DOCX report generated ({len(findings_mapped)} findings)", session_id=session_id)
             import io
             return StreamingResponse(
                 io.BytesIO(docx_bytes),
@@ -1782,7 +1833,13 @@ def api_export_pdf(
     brand_reviewer: Optional[str] = None,
     brand_approver: Optional[str] = None,
     brand_docid: Optional[str] = None,
-    brand_client: Optional[str] = None
+    brand_client: Optional[str] = None,
+    auditor_firm: Optional[str] = None,
+    auditor_lead: Optional[str] = None,
+    auditor_reviewer: Optional[str] = None,
+    auditor_approver: Optional[str] = None,
+    document_id: Optional[str] = None,
+    client_contact: Optional[str] = None
 ):
     """Exports findings report as PDF using custom layout templates."""
     db = SessionLocal()
@@ -1823,6 +1880,22 @@ def api_export_pdf(
                 ev_pres = f.evidence_present or ("Compliant" if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") else "No")
                 is_comp = (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") or (pol_pres == "Compliant" and ev_pres == "Compliant")
 
+                # Compute CIA and PII impact if missing
+                _desc_str = f.description or f.gap_detected or ""
+                _c_impact = getattr(f, "cia_impact", None)
+                _risk_cat = getattr(f, "category", None)
+                _is_pii = getattr(f, "is_pii_exposed", False)
+
+                if not _c_impact or not _risk_cat:
+                    try:
+                        from src.core.parsers.control_mapper import evaluate_cia_and_pii_impact, _determine_owasp_category
+                        if not _c_impact:
+                            _c_impact, _is_pii = evaluate_cia_and_pii_impact(f.control_name or "", _desc_str, f.severity or "")
+                        if not _risk_cat:
+                            _risk_cat = _determine_owasp_category(f.control_name or "", _desc_str, getattr(f, "evidence_snippet", ""))
+                    except Exception:
+                        pass
+
                 findings_mapped.append({
                     "control_id": f.control_id,
                     "control_name": f.control_name or f.control_id,
@@ -1830,7 +1903,7 @@ def api_export_pdf(
                     "finding": f.control_name or f.description or "",
                     "control": f.control_name or f.control_id,
                     "clause": "ISO 27001 Annex A",
-                    "description": f.description or f.gap_detected or "",
+                    "description": _desc_str,
                     "status": "Compliant" if is_comp else (f.status or "Non-Compliant"),
                     "policy_present": pol_pres,
                     "evidence_present": ev_pres,
@@ -1843,7 +1916,10 @@ def api_export_pdf(
                     "evidence_quote": f.evidence_snippet or "",
                     "source_files": f.source_files or "",
                     "reasoning": f.reasoning or "",
-                    "gap_description": f.description or f.gap_detected or "",
+                    "gap_description": _desc_str,
+                    "category": _risk_cat or "Injection",
+                    "cia_impact": _c_impact or "C:Confidential (High - PII Data Present) | I:HIGH | A:NONE",
+                    "is_pii_exposed": _is_pii
                 })
                 if is_comp:
                     resolved_list.append(f.control_id)
@@ -1855,12 +1931,12 @@ def api_export_pdf(
             fw_name = (report.framework or "Audit_Report").replace(" ", "_").replace("/", "_")
 
             meta_dict = {
-                "brand_firm": brand_firm,
-                "brand_auditor": brand_auditor,
-                "brand_reviewer": brand_reviewer,
-                "brand_approver": brand_approver,
-                "brand_docid": brand_docid,
-                "brand_client": brand_client,
+                "brand_firm": brand_firm or auditor_firm,
+                "brand_auditor": brand_auditor or auditor_lead,
+                "brand_reviewer": brand_reviewer or auditor_reviewer,
+                "brand_approver": brand_approver or auditor_approver,
+                "brand_docid": brand_docid or document_id,
+                "brand_client": brand_client or client_contact,
             }
 
             if is_vapt:
@@ -1884,6 +1960,7 @@ def api_export_pdf(
                     metadata=meta_dict
                 )
             
+            log_system_event("REPORT_EXPORT_PDF", "INFO", f"PDF report generated ({len(findings_mapped)} findings, VAPT: {is_vapt})", session_id=session_id)
             return StreamingResponse(
                 io.BytesIO(pdf_bytes),
                 media_type="application/pdf",

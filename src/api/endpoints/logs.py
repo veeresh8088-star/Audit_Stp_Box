@@ -146,16 +146,15 @@ def api_purge_logs(request: Request, days: int = Query(90, ge=1)):
 # table in the Admin Dashboard. Falls back to zeros if Redis is offline.
 # ─────────────────────────────────────────────────────────────────────────────
 @router.get("/live-metrics")
-def api_get_live_metrics():
+def api_get_live_metrics(limit: int = 500):
     """
     Returns live token counts, latency, file sizes, error counts, and
-    per-session active auditor metrics from Redis.
-    Falls back gracefully to zero values if Redis is not available.
-    Used by the Admin Dashboard 'Live Server Metrics (Redis Stream)' KPI cards.
+    per-session active auditor metrics from Redis or ShaktiDB fallback.
+    Accepts optional ?limit= query parameter (defaults to 500).
     """
     try:
         from src.core.redis_metrics import get_live_metrics
-        data = get_live_metrics()
+        data = get_live_metrics(limit=limit)
         return {"success": True, **data}
     except Exception as e:
         return {
@@ -169,6 +168,7 @@ def api_get_live_metrics():
             "global_errors": 0,
             "active_sessions": []
         }
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

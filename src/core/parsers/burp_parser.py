@@ -3,6 +3,15 @@ import re
 from typing import List, Tuple, Optional
 from bs4 import BeautifulSoup
 from .base_parser import BaseParser
+
+# Prefer lxml for speed; fallback to html.parser if unavailable
+try:
+    import lxml  # noqa: F401
+    _HTML_PARSER = "lxml"
+    _XML_PARSER = "lxml-xml"
+except ImportError:
+    _HTML_PARSER = "html.parser"
+    _XML_PARSER = "html.parser"
 from .finding_schema import Finding
 from .control_mapper import map_findings_list
 
@@ -72,7 +81,7 @@ class BurpParser(BaseParser):
         return 0.0, "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:N"
 
     def _parse_html(self, content: str) -> Tuple[List[Finding], List[Finding]]:
-        soup = BeautifulSoup(content, 'html.parser')
+        soup = BeautifulSoup(content, _HTML_PARSER)
         actionable_findings: List[Finding] = []
         info_findings: List[Finding] = []
 
@@ -223,20 +232,19 @@ class BurpParser(BaseParser):
 
     def _parse_xml(self, content: str) -> Tuple[List[Finding], List[Finding]]:
         import base64
-        soup = BeautifulSoup(content, 'html.parser')
+        soup = BeautifulSoup(content, _XML_PARSER)
         actionable_findings: List[Finding] = []
         info_findings: List[Finding] = []
 
-        issues = soup.find_all('issue')
-        for issue in issues:
-            name = issue.find('name')
-            title = name.get_text().strip() if name else "Burp Suite Finding"
+        def _get_child_text(parent, tag_pattern):
+            node = parent.find(re.compile(rf'^{tag_pattern}$', re.IGNORECASE))
+            return node.get_text().strip() if node else ""
 
-            sev = issue.find('severity')
-            raw_sev = sev.get_text().strip().upper() if sev else "INFO"
-            
-            conf = issue.find('confidence')
-            raw_conf = conf.get_text().strip() if conf else "Firm"
+        issues = soup.find_all(re.compile(r'^issue$', re.IGNORECASE))
+        for issue in issues:
+            title = _get_child_text(issue, 'name') or "Burp Suite Finding"
+            raw_sev = _get_child_text(issue, 'severity').upper() or "INFO"
+            raw_conf = _get_child_text(issue, 'confidence') or "Firm"
 
             if "HIGH" in raw_sev:
                 severity = "HIGH"
@@ -249,32 +257,26 @@ class BurpParser(BaseParser):
 
             score, cvss_vector = self._calculate_score_and_vector(title, raw_sev, raw_conf)
 
-            host = issue.find('host')
-            path = issue.find('path')
-            location = issue.find('location')
-            h_str = host.get_text().strip() if host else ""
-            p_str = path.get_text().strip() if path else ""
-            loc_str = location.get_text().strip() if location else ""
+            h_str = _get_child_text(issue, 'host')
+            p_str = _get_child_text(issue, 'path')
+            loc_str = _get_child_text(issue, 'location')
             target_str = f"{h_str}{p_str} ({loc_str})".strip() if loc_str else f"{h_str}{p_str}".strip()
 
-            detail = issue.find('issuedetail')
-            bg = issue.find('issuebackground')
-            desc_detail = detail.get_text().strip() if detail else ""
-            desc_bg = bg.get_text().strip() if bg else ""
+            desc_detail = _get_child_text(issue, 'issuedetail')
+            desc_bg = _get_child_text(issue, 'issuebackground')
             
             if desc_detail and desc_bg:
                 full_desc = f"{desc_detail}\n\n[Issue Background]\n{desc_bg}"
             else:
                 full_desc = desc_detail or desc_bg
 
-            remed_bg = issue.find('remediationbackground')
-            remed_dt = issue.find('remediationdetail')
-            r_bg_str = remed_bg.get_text().strip() if remed_bg else ""
-            r_dt_str = remed_dt.get_text().strip() if remed_dt else ""
+            r_bg_str = _get_child_text(issue, 'remediationbackground')
+            r_dt_str = _get_child_text(issue, 'remediationdetail')
             if r_dt_str and r_bg_str:
                 full_remed = f"{r_dt_str}\n\n[Remediation Background]\n{r_bg_str}"
             else:
                 full_remed = r_dt_str or r_bg_str
+
 
             # Parse HTTP Request / Response evidence proof
             evidence = ""

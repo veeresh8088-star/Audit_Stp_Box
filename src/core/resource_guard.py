@@ -26,13 +26,14 @@ except ImportError:
     psutil = None
 
 FIXED_OVERHEAD_GB = float(os.environ.get("RESOURCE_GUARD_FIXED_OVERHEAD_GB", "8.0"))
-PER_SLOT_GB = float(os.environ.get("RESOURCE_GUARD_PER_SLOT_GB", "2.5"))
+PER_SLOT_GB = float(os.environ.get("RESOURCE_GUARD_PER_SLOT_GB", "0.8"))
 SAFETY_MARGIN = float(os.environ.get("RESOURCE_GUARD_SAFETY_MARGIN", "0.85"))
 MIN_SLOTS = 1
 
 WARNING_AVAILABLE_PERCENT = float(os.environ.get("RESOURCE_GUARD_WARN_PERCENT", "15"))
 CRITICAL_AVAILABLE_PERCENT = float(os.environ.get("RESOURCE_GUARD_CRITICAL_PERCENT", "8"))
-CRITICAL_ABSOLUTE_FLOOR_GB = float(os.environ.get("RESOURCE_GUARD_CRITICAL_FLOOR_GB", "1.0"))
+CRITICAL_ABSOLUTE_FLOOR_GB = float(os.environ.get("RESOURCE_GUARD_CRITICAL_FLOOR_GB", "0.5"))
+
 
 _CGROUP_V2_MAX = "/sys/fs/cgroup/memory.max"
 _CGROUP_V2_CURRENT = "/sys/fs/cgroup/memory.current"

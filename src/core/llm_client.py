@@ -38,16 +38,74 @@ def get_llm_backend():
     return "llama.cpp"
 
 def _resolve_host(url=None, default_port=11434):
-    """Resolves host URL. Round-robin (LLM_HOSTS) only applies to the standard completion
-    port — callers asking for a different port (e.g. the embedding server) get that port
-    directly instead of silently landing on the completion server."""
+    """Resolves host URL."""
     if url is None:
         url = _get_next_llm_host() if default_port == 11434 else f"http://127.0.0.1:{default_port}"
     if url and not url.startswith("http://") and not url.startswith("https://"):
         url = f"http://{url}" if ":" in url else f"http://{url}:{default_port}"
     return url
 
-def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thread=None, timeout=None, stop=None, session_id=None, token_stats=None):
+def _ensure_llama_server_running(port=11434):
+    """Auto-detects if llama-server.exe on port 11434 (LLM) or 11435 (Embedding) is offline,
+    and automatically spawns it in the background so the platform self-heals."""
+    import socket, subprocess, sys, time
+    
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(1.5)
+    try:
+        s.connect(("127.0.0.1", port))
+        s.close()
+        return True # Port is active & healthy!
+    except Exception:
+        pass
+    finally:
+        s.close()
+
+    print(f"[AUTO-START LLM] llama-server port {port} is offline. Auto-launching process...", flush=True)
+    
+    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    llama_exe = None
+    candidates = [
+        r"C:\Users\HP\Downloads\llama,,ccppp mode\llama-server.exe",
+        os.path.join(base_dir, "llama-server.exe"),
+        r"C:\Users\veeresh988V\Desktop\llama\llama-server.exe"
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            llama_exe = c
+            break
+            
+    if not llama_exe:
+        print(f"[AUTO-START LLM] Could not locate llama-server.exe in candidates.", flush=True)
+        return False
+
+    if port == 11434:
+        model_path = os.path.join(base_dir, "google_gemma-4-E4B-it-Q4_K_M.gguf")
+        cmd = [llama_exe, "--port", "11434", "-m", model_path, "-c", "4096", "-np", "2", "-t", "4"]
+    else:
+        model_path = os.path.join(base_dir, "nomic-embed-text-v1.5.f16.gguf")
+        cmd = [llama_exe, "--port", "11435", "-m", model_path, "-t", "4", "--embedding"]
+
+    try:
+        creation_flag = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
+        subprocess.Popen(cmd, creationflags=creation_flag)
+        # Wait up to 25 seconds for model to load into RAM and accept HTTP requests
+        for _ in range(25):
+            time.sleep(1.0)
+            try:
+                r_check = requests.get(f"http://127.0.0.1:{port}/health", timeout=1.5)
+                if r_check.status_code == 200:
+                    print(f"[AUTO-START LLM] Successfully launched llama-server on port {port}!", flush=True)
+                    return True
+            except Exception:
+                pass
+        print(f"[AUTO-START LLM] Server process started on port {port}, warming up...", flush=True)
+        return True
+    except Exception as e:
+        print(f"[AUTO-START LLM] Auto-start error on port {port}: {e}", flush=True)
+    return False
+
+def query_llm(prompt, model, format=None, num_ctx=16384, temperature=0.0, num_thread=None, timeout=None, stop=None, session_id=None, token_stats=None):
     """Sends a non-streaming prompt completion request exclusively to llama-server.exe."""
     if timeout is None or timeout in (1800, 600):
         try:
@@ -78,10 +136,28 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
             }
             if format == "json":
                 payload["response_format"] = {"type": "json_object"}
-            r = requests.post(url, json=payload, timeout=timeout)
-            if r.status_code != 200:
-                raise Exception(f"llama-server.exe error: HTTP {r.status_code} - {r.text}")
-            return r.json()
+            try:
+                r = requests.post(url, json=payload, timeout=timeout)
+                if r.status_code != 200:
+                    try:
+                        from src.core.bg_worker import log_system_event
+                        log_system_event("LLM_HTTP_ERROR", "ERROR", f"LLM server returned HTTP {r.status_code}: {r.text[:200]}", session_id=session_id)
+                    except Exception: pass
+                    raise Exception(f"llama-server.exe error: HTTP {r.status_code} - {r.text}")
+                return r.json()
+            except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as _conn_err:
+                print(f"[LLM CLIENT] Connection error to {url}: {_conn_err}. Attempting auto-start...", flush=True)
+                if _ensure_llama_server_running(11434):
+                    r = requests.post(url, json=payload, timeout=timeout)
+                    if r.status_code == 200:
+                        return r.json()
+                raise Exception(f"llama-server.exe connection error on {url}: {_conn_err}")
+            except requests.exceptions.Timeout as _to_err:
+                try:
+                    from src.core.bg_worker import log_system_event
+                    log_system_event("LLM_REQUEST_TIMEOUT", "ERROR", f"LLM HTTP request timed out after {timeout}s", session_id=session_id)
+                except Exception: pass
+                raise
 
         result = _complete(1536)
         if result.get("stop_type") == "limit":
@@ -97,7 +173,7 @@ def query_llm(prompt, model, format=None, num_ctx=4096, temperature=0.0, num_thr
 
         return result.get("content", "").strip()
 
-def query_llm_stream(prompt, model, num_ctx=4096, temperature=0.0, num_thread=None, session_id=None):
+def query_llm_stream(prompt, model, num_ctx=16384, temperature=0.0, num_thread=None, session_id=None):
     """Generates streaming tokens from the dedicated llama-server.exe engine.
     Shares the same port_pool_manager slots as query_llm() instead of an independent,
     uncoordinated round-robin — otherwise a streaming and non-streaming call could
@@ -145,8 +221,17 @@ def get_embedding(text, model="nomic-embed-text"):
             emb = r.json().get("embedding")
             if emb:
                 return emb
-    except Exception:
-        pass
+    except Exception as e_emb:
+        print(f"[EMBEDDING RETRY] Connection error on {url}: {e_emb}. Attempting auto-start on 11435...", flush=True)
+        if _ensure_llama_server_running(11435):
+            try:
+                r = requests.post(url, json={"content": text_sample}, timeout=embed_timeout)
+                if r.status_code == 200:
+                    emb = r.json().get("embedding")
+                    if emb:
+                        return emb
+            except Exception:
+                pass
 
     # Fallback to OpenAI-compatible /v1/embeddings on llama-server.exe
     try:

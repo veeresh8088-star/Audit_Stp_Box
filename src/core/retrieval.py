@@ -158,15 +158,16 @@ def _vec_native_search(query_vector, filenames, top_k, engine):
             from sqlalchemy import text
             vec_str = "[" + ",".join(str(v) for v in query_vector) + "]"
             if filenames:
-                f_list = ",".join(f"'{f}'" for f in filenames)
-                sql = (f"SELECT pvc.chunk_id, 1-(pvc.embedding <=> '{vec_str}'::vector) AS sim "
-                       f"FROM pg_vec_chunks pvc JOIN document_chunks dc ON dc.id=pvc.chunk_id "
-                       f"WHERE dc.filename IN ({f_list}) ORDER BY sim DESC LIMIT {top_k*4}")
+                sql = text("SELECT pvc.chunk_id, 1-(pvc.embedding <=> :vec_str::vector) AS sim "
+                           "FROM pg_vec_chunks pvc JOIN document_chunks dc ON dc.id=pvc.chunk_id "
+                           "WHERE dc.filename = ANY(:fn_list) ORDER BY sim DESC LIMIT :top_k_val")
+                params = {"vec_str": vec_str, "fn_list": list(filenames), "top_k_val": top_k * 4}
             else:
-                sql = (f"SELECT chunk_id, 1-(embedding <=> '{vec_str}'::vector) AS sim "
-                       f"FROM pg_vec_chunks ORDER BY sim DESC LIMIT {top_k*4}")
+                sql = text("SELECT chunk_id, 1-(embedding <=> :vec_str::vector) AS sim "
+                           "FROM pg_vec_chunks ORDER BY sim DESC LIMIT :top_k_val")
+                params = {"vec_str": vec_str, "top_k_val": top_k * 4}
             with engine["engine"].begin() as conn:
-                rows = conn.execute(text(sql)).fetchall()
+                rows = conn.execute(sql, params).fetchall()
             return {r[0]: float(r[1]) for r in rows}
     except Exception as e:
         print(f"[VEC SEARCH] Native search error ({e}); falling back to Python cosine.", flush=True)
@@ -477,9 +478,9 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
     Phase 5: Token-budget accumulation: TARGET=4000 tokens, HARD_MAX=5000 tokens.
     Phase 8: Returns retrieved_chunk_metas for evidence source provenance.
     """
-    # Token budget: optimized for CPU execution on Azure VM to prevent prefill bottlenecks.
-    TARGET_CONTEXT_TOKENS = 1200
-    HARD_MAX_CONTEXT_TOKENS = 1500
+    # Token budget: dynamically configurable via env vars (defaults: 3000 / 5000 tokens)
+    TARGET_CONTEXT_TOKENS = int(os.environ.get("TARGET_CONTEXT_TOKENS", "3000"))
+    HARD_MAX_CONTEXT_TOKENS = int(os.environ.get("HARD_MAX_CONTEXT_TOKENS", "5000"))
 
     # Smart Vector Chunking for ALL documents (no bypass).
     # All documents go through: Parent-Child Sentence Windows →
@@ -530,7 +531,8 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
     file_type = max(type_counts, key=type_counts.get) if type_counts else "pdf"
 
     top_k_config = load_top_k_config()
-    configured_top_k = top_k_config.get(file_type, 8)
+    configured_top_k = top_k_config.get(file_type, 15)
+
 
     # Fallback: paragraph split from raw context if DB empty
     paragraphs = []

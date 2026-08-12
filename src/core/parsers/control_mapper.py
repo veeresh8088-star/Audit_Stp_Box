@@ -140,11 +140,226 @@ def map_finding_to_control(finding: Finding) -> str:
     # Default fallback for network scanner findings
     return "VAPT-3"
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# RISK CATEGORY TAXONOMY  (100% offline — static deterministic lookup)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Maps OWASP Top 10 codes to human-readable risk categories
+_OWASP_TO_CATEGORY = {
+    "A01": "Access Control",
+    "A02": "Cryptographic Failures",
+    "A03": "Injection",
+    "A04": "Insecure Design",
+    "A05": "Security Misconfiguration",
+    "A06": "Vulnerable Components",
+    "A07": "Authentication Failures",
+    "A08": "Data Integrity Failures",
+    "A09": "Logging & Monitoring",
+    "A10": "SSRF",
+}
+
+def map_finding_to_risk_category(finding: Finding) -> str:
+    """
+    Maps a Finding to a human-readable Risk Category using:
+    1. CWE → OWASP Top 10 static lookup
+    2. Title/description keyword fallback
+    Returns a category string like 'Injection', 'Access Control', etc.
+    100% offline — no network calls.
+    """
+    # Try CWE-based OWASP mapping first
+    cwe_id = None
+    # Extract CWE from CVE list or evidence
+    combined = f"{(finding.title or '').lower()} {(finding.description or '').lower()} {(finding.evidence or '').lower()}"
+    cwe_match = re.search(r'CWE-(\d+)', combined, re.IGNORECASE)
+    if cwe_match:
+        cwe_id = cwe_match.group(0).upper()
+
+    if cwe_id:
+        owasp = CWE_TO_OWASP_MAP.get(cwe_id, "")
+        if owasp:
+            # Extract A0x prefix to map to category
+            code = owasp[:3]
+            if code in _OWASP_TO_CATEGORY:
+                return _OWASP_TO_CATEGORY[code]
+
+    # Use the existing OWASP mapper as fallback
+    owasp_str = map_finding_to_owasp(cwe_id, finding.title, finding.description)
+    if owasp_str:
+        code = owasp_str[:3]
+        if code in _OWASP_TO_CATEGORY:
+            return _OWASP_TO_CATEGORY[code]
+
+    # Final keyword-based fallback
+    if any(k in combined for k in ("xss", "sqli", "sql injection", "command injection", "ldap injection", "scripting", "injection")):
+        return "Injection"
+    if any(k in combined for k in ("access control", "privilege escalation", "directory traversal", "cors", "idor", "unauthorized")):
+        return "Access Control"
+    if any(k in combined for k in ("weak cipher", "ssl", "tls", "plaintext", "unencrypted", "hsts", "crypto")):
+        return "Cryptographic Failures"
+    if any(k in combined for k in ("auth", "password", "session", "credential", "jwt", "login")):
+        return "Authentication Failures"
+    if any(k in combined for k in ("ssrf", "server-side request forgery")):
+        return "SSRF"
+    if any(k in combined for k in ("patch", "update", "outdated", "eol", "end of life")):
+        return "Vulnerable Components"
+    if any(k in combined for k in ("network", "port", "tcp", "udp", "firewall", "nmap", "open port")):
+        return "Network Security"
+    if any(k in combined for k in ("log", "monitoring", "audit trail")):
+        return "Logging & Monitoring"
+
+    return "Security Misconfiguration"
+
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CIA IMPACT & PII EXPOSURE EVALUATOR  (100% offline — regex-based)
+# ══════════════════════════════════════════════════════════════════════════════
+
+# PII / sensitive data patterns (reused from src/core/pii_redactor.py logic)
+_PII_PATTERNS = [
+    re.compile(r'[\w.+\-]+@[\w\-]+\.(?:[a-zA-Z]{2,})', re.IGNORECASE),        # Email
+    re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'),  # IPv4
+    re.compile(r'(?:password|passwd|pwd|secret|api[_\-]?key|token|credential|private[_\-]?key)\s*[:=]\s*\S+', re.IGNORECASE),  # Credentials
+    re.compile(r'(?:ssn|social\s+security|credit\s+card|card\s+number|pan\s+number|aadhaar)', re.IGNORECASE),  # PII identifiers
+]
+
+def evaluate_cia_and_pii_impact(finding: Finding) -> tuple:
+    """
+    Evaluates CIA (Confidentiality, Integrity, Availability) impact and
+    PII exposure for a Finding based on its content.
+    Returns (cia_impact_str, is_pii_exposed).
+    100% offline — uses local regex patterns only.
+    """
+    combined = f"{finding.title or ''} {finding.description or ''} {finding.evidence or ''} {finding.remediation or ''}"
+
+    # ── PII Exposure Detection ──
+    is_pii = False
+    for pattern in _PII_PATTERNS:
+        if pattern.search(combined):
+            is_pii = True
+            break
+
+    # ── CIA Impact Assessment ──
+    combined_lower = combined.lower()
+    c_impact = "NONE"
+    i_impact = "NONE"
+    a_impact = "NONE"
+
+    # Confidentiality indicators
+    if is_pii or any(k in combined_lower for k in (
+        "information disclosure", "data leak", "sensitive", "credential",
+        "password", "token", "private key", "directory listing",
+        "source code", "backup file", "database dump", "pii"
+    )):
+        c_impact = "HIGH"
+    elif any(k in combined_lower for k in (
+        "version disclosure", "banner", "stack trace", "error message",
+        "server header", "configuration"
+    )):
+        c_impact = "MEDIUM"
+
+    # Integrity indicators
+    if any(k in combined_lower for k in (
+        "injection", "sqli", "xss", "csrf", "command injection",
+        "code execution", "rce", "file upload", "deserialization"
+    )):
+        i_impact = "HIGH"
+    elif any(k in combined_lower for k in (
+        "open redirect", "clickjacking", "header injection"
+    )):
+        i_impact = "MEDIUM"
+
+    # Availability indicators
+    if any(k in combined_lower for k in (
+        "denial of service", "dos", "ddos", "buffer overflow",
+        "resource exhaustion", "crash", "memory corruption"
+    )):
+        a_impact = "HIGH"
+    elif any(k in combined_lower for k in (
+        "rate limit", "timeout", "slow"
+    )):
+        a_impact = "MEDIUM"
+
+    if is_pii:
+        c_impact = "Confidential (High - PII Data Present)"
+    cia_str = f"C:{c_impact} | I:{i_impact} | A:{a_impact}"
+    return cia_str, is_pii
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ACTIONABLE DEVELOPER REMEDIATION ENGINE  (100% offline — template-based)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_REMEDIATION_TEMPLATES = {
+    "sql injection": "Use parameterized queries (prepared statements) instead of string concatenation. Example: `cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))`. Apply input validation and use an ORM where possible.",
+    "sqli": "Use parameterized queries (prepared statements) instead of string concatenation. Apply input validation and use an ORM where possible.",
+    "cross-site scripting": "Encode all user-supplied output using context-aware encoding (HTML entity, JavaScript, URL encoding). Implement Content-Security-Policy (CSP) headers. Use frameworks with auto-escaping (React, Angular).",
+    "xss": "Encode all user-supplied output using context-aware encoding. Implement Content-Security-Policy (CSP) headers.",
+    "csrf": "Implement anti-CSRF tokens (synchronizer token pattern) on all state-changing requests. Set `SameSite=Strict` or `SameSite=Lax` on session cookies.",
+    "hsts": "Add `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload` to all HTTPS responses. Ensure all resources load over HTTPS.",
+    "ssl": "Upgrade to TLS 1.2+ minimum. Disable SSLv3, TLS 1.0, TLS 1.1. Use strong cipher suites (AES-GCM, ChaCha20). Renew expired certificates.",
+    "tls": "Upgrade to TLS 1.2+ minimum. Disable weak protocols and cipher suites. Configure perfect forward secrecy (ECDHE).",
+    "weak cipher": "Disable RC4, DES, 3DES, and CBC-mode ciphers. Configure server to prefer AES-256-GCM or ChaCha20-Poly1305.",
+    "outdated": "Update the affected software/library to the latest stable version. Establish a patch management policy with regular update cycles.",
+    "end of life": "Migrate to a supported version of the software immediately. Unsupported software receives no security patches.",
+    "open redirect": "Validate and whitelist redirect URLs against a list of allowed domains. Never pass user-controlled URLs directly to redirect functions.",
+    "directory traversal": "Sanitize file path inputs. Use a whitelist of allowed file paths. Never use user input directly in file system operations.",
+    "command injection": "Avoid passing user input to shell commands. Use language-specific safe APIs (e.g., `subprocess.run()` with `shell=False`). Apply strict input validation.",
+    "rce": "Patch the vulnerable component immediately. Isolate the affected service using network segmentation. Apply least-privilege execution context.",
+    "default credentials": "Change all default usernames and passwords before deployment. Implement strong password policies and credential rotation.",
+    "missing security headers": "Add security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Content-Security-Policy`, `Referrer-Policy: strict-origin-when-cross-origin`.",
+    "clickjacking": "Set `X-Frame-Options: DENY` or `SAMEORIGIN`. Implement `Content-Security-Policy: frame-ancestors 'none'`.",
+    "information disclosure": "Remove verbose error messages from production. Disable server version banners. Remove unnecessary HTTP response headers.",
+    "ssrf": "Validate and whitelist allowed URLs/IP ranges. Block requests to internal/private IP ranges (10.x, 172.16-31.x, 192.168.x). Use a dedicated egress proxy.",
+    "deserialization": "Avoid deserializing untrusted data. Use safe serialization formats (JSON) instead of native object serialization. Implement integrity checks.",
+    "file upload": "Validate file types using content inspection (magic bytes), not just extensions. Store uploads outside the web root. Set size limits and scan for malware.",
+    "privilege escalation": "Apply principle of least privilege. Validate authorization on every privileged action server-side. Use role-based access control (RBAC).",
+    "brute force": "Implement account lockout or rate limiting after failed attempts. Use CAPTCHA. Enforce strong password policies and multi-factor authentication.",
+}
+
+def get_actionable_remediation(finding: Finding) -> str:
+    """
+    Returns developer-actionable remediation guidance based on finding title/description.
+    Uses a deterministic local template dictionary — 100% offline, no LLM required.
+    Falls back to the scanner's original remediation text if no template matches.
+    """
+    combined = f"{(finding.title or '').lower()} {(finding.description or '').lower()}"
+
+    # Check each template key against combined text
+    for key, guidance in _REMEDIATION_TEMPLATES.items():
+        if key in combined:
+            return guidance
+
+    # Fallback: return the scanner's own remediation if available
+    if finding.remediation and finding.remediation.strip():
+        return finding.remediation.strip()
+
+    return ""
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# UNIFIED ENRICHMENT PIPELINE
+# ══════════════════════════════════════════════════════════════════════════════
+
 def map_findings_list(findings: List[Finding]) -> List[Finding]:
     """
-    Centralized mapper helper to assign control_id to a list of Findings in-place.
+    Centralized mapper helper that enriches a list of Findings in-place:
+    1. Assigns control_id (VAPT-1..VAPT-15)
+    2. Assigns risk category (Access Control, Injection, etc.)
+    3. Evaluates CIA impact & PII exposure
+    4. Generates actionable developer remediation
+    All operations are 100% offline and deterministic.
     """
     for f in findings:
         if not f.control_id:
             f.control_id = map_finding_to_control(f)
+        if not f.category:
+            f.category = map_finding_to_risk_category(f)
+        if not f.cia_impact:
+            cia_str, is_pii = evaluate_cia_and_pii_impact(f)
+            f.cia_impact = cia_str
+            f.is_pii_exposed = is_pii
+        if not f.remediation_actionable:
+            f.remediation_actionable = get_actionable_remediation(f)
     return findings

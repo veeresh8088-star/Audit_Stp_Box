@@ -632,18 +632,19 @@ Ensure the output contains only the XML tags and no surrounding text.
 
 def get_num_ctx(model_name: str) -> int:
     import os
+    env_ctx = os.environ.get("LLM_NUM_CTX", "").strip()
+    if env_ctx and env_ctx.isdigit():
+        return int(env_ctx)
     backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
     if backend in ("llama.cpp", "llamacpp"):
-        # FIX 3: Raised from 4096 to 8192. The Motorola IRP is ~16KB and the
-        # prompt template adds ~3KB overhead. 4096 tokens caused entire document
-        # sections (Post Incident, Lessons Learned) to be truncated from context.
-        return 8192
+        return 16384
     name = model_name.lower()
-    if any(x in name for x in ["7b", "8b", "9b", "12b", "27b"]):
-        return 8192
-    if "3b" in name:
-        return 4096
-    return 4096
+    if any(x in name for x in ["3b", "4b", "7b", "8b", "9b", "12b", "14b", "27b"]):
+        return 16384
+    return 16384
+
+    return 16384
+
 
 class NativeOllamaChain:
     """

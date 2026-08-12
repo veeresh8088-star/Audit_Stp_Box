@@ -389,8 +389,10 @@ def extract_text(f):
                         except Exception as ocr_err:
                             print(f"[HYBRID OCR WARNING] Failed embedded image OCR: {ocr_err}", flush=True)
 
-                    # If page contains little or no native text (<50 chars), OCR the entire page
-                    if len(text.strip()) < 50:
+                    # Fail-Safe Full Page OCR Trigger:
+                    # Runs if native text is low (<300 chars) OR if page has images but embedded OCR produced no text
+                    should_full_ocr = (len(text.strip()) < 300) or (hasattr(p, "images") and p.images and "[Embedded Image OCR]" not in text)
+                    if should_full_ocr:
                         try:
                             if img_page is None:
                                 img_page = p.to_image(resolution=150)
@@ -402,6 +404,8 @@ def extract_text(f):
                                 text += "\n[Page Image OCR]: " + " ".join(res)
                         except Exception as page_ocr_err:
                             print(f"[HYBRID OCR WARNING] Failed full page OCR: {page_ocr_err}", flush=True)
+
+
                     pages_text.append(text)
                     for line in text.splitlines():
                         line_str = line.strip()
@@ -683,7 +687,13 @@ def extract_text(f):
             html_str = html_bytes.decode("utf-8", errors="ignore")
             
             from bs4 import BeautifulSoup
-            soup = BeautifulSoup(html_str, "html.parser")
+            # Prefer lxml for speed; fallback to html.parser if unavailable
+            try:
+                import lxml  # noqa: F401
+                _parser = "lxml"
+            except ImportError:
+                _parser = "html.parser"
+            soup = BeautifulSoup(html_str, _parser)
             
             for script in soup(["script", "style", "head", "meta", "link", "svg"]):
                 script.decompose()

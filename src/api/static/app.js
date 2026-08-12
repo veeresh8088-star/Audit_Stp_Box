@@ -1587,13 +1587,57 @@ function setupFileDropZone() {
         dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
     });
 
-    dropZone.addEventListener("drop", e => {
+    dropZone.addEventListener("drop", async e => {
         e.preventDefault();
         dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
 
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            uploadFiles(files);
+        const items = e.dataTransfer.items;
+        let filesToUpload = [];
+
+        if (items && items.length > 0) {
+            const entryPromises = [];
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.kind === "file") {
+                    const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+                    if (entry) {
+                        entryPromises.push(readEntryRecursively(entry));
+                    } else {
+                        const file = item.getAsFile();
+                        if (file) filesToUpload.push(file);
+                    }
+                }
+            }
+            if (entryPromises.length > 0) {
+                const results = await Promise.all(entryPromises);
+                results.forEach(fArr => filesToUpload.push(...fArr));
+            }
+        }
+
+        if (filesToUpload.length === 0 && e.dataTransfer.files.length > 0) {
+            filesToUpload = Array.from(e.dataTransfer.files);
+        }
+
+        if (filesToUpload.length > 0) {
+            uploadFiles(filesToUpload);
+        }
+    });
+}
+
+async function readEntryRecursively(entry) {
+    return new Promise((resolve) => {
+        if (entry.isFile) {
+            entry.file(file => resolve([file]), () => resolve([]));
+        } else if (entry.isDirectory) {
+            const dirReader = entry.createReader();
+            dirReader.readEntries(async (entries) => {
+                const childPromises = entries.map(child => readEntryRecursively(child));
+                const childResults = await Promise.all(childPromises);
+                const allFiles = childResults.flat();
+                resolve(allFiles);
+            }, () => resolve([]));
+        } else {
+            resolve([]);
         }
     });
 }
@@ -1604,6 +1648,14 @@ function handleEvidenceUpload(e) {
         uploadFiles(files);
     }
 }
+
+function handleEvidenceFolderUpload(e) {
+    const files = e.target.files;
+    if (files.length > 0) {
+        uploadFiles(files);
+    }
+}
+
 
 async function uploadFiles(files) {
     const dropZone = document.getElementById("drop-zone");
@@ -1827,7 +1879,12 @@ async function triggerAuditAnalysis() {
         btn.disabled = false;
         btn.innerText = "▶ Run RAG Scan";
         if (stopBtn) stopBtn.style.display = "none";
-        alert(`Failed to start scan: ${err.message}`);
+        const msg = String(err.message || "");
+        if (msg.toLowerCase().includes("failed to fetch") || msg.toLowerCase().includes("networkerror")) {
+            alert("Server Connection Error: The local backend service is starting up or temporarily offline. Please wait a few seconds and click 'Start Scan' again.");
+        } else {
+            alert(`Failed to start scan: ${msg}`);
+        }
     }
 }
 
@@ -2203,25 +2260,25 @@ function ensureAdminModalDOM() {
 
                     <!-- Benchmark Table -->
                     <div style="overflow-x: auto; border: 1px solid rgba(148,163,184,0.15); border-radius: 8px;">
-                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.78rem;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8rem;">
                             <thead>
-                                <tr style="background: rgba(15,23,42,0.6); color: #94a3b8; font-weight: 700; border-bottom: 1px solid rgba(148,163,184,0.2);">
-                                    <th style="padding: 10px; width: 36px; text-align: center;">
+                                <tr style="background: #1e293b; color: #f8fafc; font-weight: 800; border-bottom: 2px solid #334155;">
+                                    <th style="padding: 11px 10px; width: 36px; text-align: center;">
                                         <input type="checkbox" id="select-all-benchmark-chk" onchange="toggleSelectAllBenchmarkSessions(this.checked)" style="cursor: pointer;">
                                     </th>
-                                    <th style="padding: 10px;">Session ID / Timestamp</th>
-                                    <th style="padding: 10px;">CPU Hardware</th>
-                                    <th style="padding: 10px;">Files & Types</th>
-                                    <th style="padding: 10px;">File Size</th>
-                                    <th style="padding: 10px;">Text Chars</th>
-                                    <th style="padding: 10px;">Tokens Used</th>
-                                    <th style="padding: 10px;">Audit Latency</th>
-                                    <th style="padding: 10px;">Compliance %</th>
-                                    <th style="padding: 10px; text-align: center;">Actions</th>
+                                    <th style="padding: 11px 10px;">Session ID / Timestamp</th>
+                                    <th style="padding: 11px 10px;">CPU Hardware</th>
+                                    <th style="padding: 11px 10px;">Files & Types</th>
+                                    <th style="padding: 11px 10px;">File Size</th>
+                                    <th style="padding: 11px 10px;">Text Chars</th>
+                                    <th style="padding: 11px 10px;">Tokens Used</th>
+                                    <th style="padding: 11px 10px;">Audit Latency</th>
+                                    <th style="padding: 11px 10px;">Compliance %</th>
+                                    <th style="padding: 11px 10px; text-align: center;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="benchmark-table-body">
-                                <tr><td colspan="10" style="text-align:center; padding:16px; color:#94a3b8;">Loading audit session telemetry...</td></tr>
+                                <tr><td colspan="10" style="text-align:center; padding:16px; color:#cbd5e1;">Loading audit session telemetry...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -2230,14 +2287,14 @@ function ensureAdminModalDOM() {
                 <!-- TAB 2: ADMIN OVERRIDES & SECURITY LOG -->
                 <div id="admin-tab-overrides" style="display: none;">
                     <div style="overflow-x: auto; border: 1px solid rgba(148,163,184,0.15); border-radius: 8px;">
-                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.78rem;">
+                        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.8rem;">
                             <thead>
-                                <tr style="background: rgba(15,23,42,0.6); color: #94a3b8; font-weight: 700; border-bottom: 1px solid rgba(148,163,184,0.2);">
-                                    <th style="padding: 10px;">Timestamp</th>
-                                    <th style="padding: 10px;">Auditor User</th>
-                                    <th style="padding: 10px;">Action</th>
-                                    <th style="padding: 10px;">Unreviewed Controls</th>
-                                    <th style="padding: 10px;">Details</th>
+                                <tr style="background: #1e293b; color: #f8fafc; font-weight: 800; border-bottom: 2px solid #334155;">
+                                    <th style="padding: 11px 10px;">Timestamp</th>
+                                    <th style="padding: 11px 10px;">Auditor User</th>
+                                    <th style="padding: 11px 10px;">Action</th>
+                                    <th style="padding: 11px 10px;">Unreviewed Controls</th>
+                                    <th style="padding: 11px 10px;">Details</th>
                                 </tr>
                             </thead>
                             <tbody id="admin-log-table-body">
@@ -2949,6 +3006,10 @@ function formatStructuredPoc(pocText) {
         clean = clean.split("Plugin Output:")[1].trim();
     }
     clean = clean.replace(/^(Target Host|Plugin ID|CVE\(s\)|Scanner):[^\n]*\n?/gm, '').trim();
+
+    if (!clean || clean.toLowerCase().includes("not available in scan report")) {
+        return "";
+    }
 
     // Auto-structure Nessus / Burp key-value outputs cleanly with bullet points
     clean = clean
@@ -4093,7 +4154,7 @@ async function loadSystemEvents() {
             fetchUrl += `&session_id=${encodeURIComponent(activeSessionId)}`;
         }
 
-        const response = await fetch(fetchUrl);
+        const response = await authFetch(fetchUrl);
         const data = await response.json();
 
         if (data.success && data.events.length > 0) {
@@ -4146,7 +4207,7 @@ function nextLogsPage() {
 async function purgeLogs() {
     if (!confirm("Are you sure you want to delete all log entries older than 90 days?")) return;
     try {
-        const response = await fetch(`${API_BASE}/logs/purge?days=90`, { method: "POST" });
+        const response = await authFetch(`${API_BASE}/logs/purge?days=90`, { method: "POST" });
         const data = await response.json();
         if (data.success) {
             alert(data.message);
@@ -4161,7 +4222,7 @@ async function purgeLogs() {
 async function loadDeveloperLogs() {
     const terminal = document.getElementById("developer-terminal");
     try {
-        const response = await fetch(`${API_BASE}/logs/developer`);
+        const response = await authFetch(`${API_BASE}/logs/developer`);
         const data = await response.json();
         if (data.success) {
             terminal.value = data.logs || "No server latency logs recorded yet.";
@@ -4175,7 +4236,7 @@ async function loadDeveloperLogs() {
 async function clearDeveloperLogs() {
     if (!confirm("Clear developer latency log file?")) return;
     try {
-        const response = await fetch(`${API_BASE}/logs/developer`, { method: "DELETE" });
+        const response = await authFetch(`${API_BASE}/logs/developer`, { method: "DELETE" });
         const data = await response.json();
         if (data.success) {
             loadDeveloperLogs();
@@ -4993,7 +5054,7 @@ function getBrandingQueryParams() {
     const docid = encodeURIComponent(document.getElementById("brand-docid")?.value || "");
     const client = encodeURIComponent(document.getElementById("brand-client")?.value || "");
     const email = encodeURIComponent(document.getElementById("brand-email")?.value || "");
-    return `&auditor_firm=${firm}&auditor_lead=${auditor}&auditor_reviewer=${reviewer}&auditor_approver=${approver}&document_id=${docid}&client_contact=${client}&client_email=${email}`;
+    return `&brand_firm=${firm}&brand_auditor=${auditor}&brand_reviewer=${reviewer}&brand_approver=${approver}&brand_docid=${docid}&brand_client=${client}&auditor_firm=${firm}&auditor_lead=${auditor}&auditor_reviewer=${reviewer}&auditor_approver=${approver}&document_id=${docid}&client_contact=${client}&client_email=${email}`;
 }
 
 async function downloadFileWithLoader(buttonId, textId, defaultText, exportUrl, defaultFilename, labelType) {
@@ -5371,13 +5432,12 @@ function switchActiveAuditSession(sessionId) {
 // Load recent sessions on page load
 document.addEventListener("DOMContentLoaded", () => {
     loadRecentSessionsList();
-    fetchLicenseStatus();
 });
 
 // ── LICENSE & TOKEN BILLING ENGINE ──
 async function fetchLicenseStatus() {
     try {
-        const res = await fetch(`${API_BASE}/license/wallet`);
+        const res = await authFetch(`${API_BASE}/license/wallet`);
         if (!res.ok) return;
         const data = await res.json();
 
@@ -5661,22 +5721,35 @@ async function selectRecentSessionScope() {
     }
 }
 
+function closeToastBanner() {
+    let toast = document.getElementById("app-toast-banner");
+    if (toast) {
+        toast.style.opacity = "0";
+        setTimeout(() => { if (toast) toast.style.display = "none"; }, 300);
+    }
+}
+
 function showToastBanner(msgText) {
     let toast = document.getElementById("app-toast-banner");
     if (!toast) {
         toast = document.createElement("div");
         toast.id = "app-toast-banner";
-        toast.style.cssText = "position: fixed; top: 20px; right: 20px; z-index: 99999; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1px solid #3b82f6; color: #fff; padding: 14px 20px; border-radius: 12px; font-size: 0.84rem; font-weight: 700; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 10px; transition: all 0.3s ease;";
+        toast.style.cssText = "position: fixed; top: 20px; right: 20px; z-index: 99999; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1px solid #3b82f6; color: #fff; padding: 12px 18px; border-radius: 12px; font-size: 0.84rem; font-weight: 700; box-shadow: 0 10px 30px rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: space-between; gap: 12px; transition: all 0.3s ease; max-width: 520px;";
         document.body.appendChild(toast);
     }
-    toast.innerText = msgText;
+
+    const safeText = (typeof escapeHtml === "function") ? escapeHtml(msgText) : msgText;
+    toast.innerHTML = `
+        <div style="display:flex; align-items:center; gap:8px; flex:1;">
+            <span>${safeText}</span>
+        </div>
+        <button type="button" onclick="closeToastBanner()" style="background:rgba(255,255,255,0.15); border:none; color:#cbd5e1; font-size:0.9rem; font-weight:900; line-height:1; cursor:pointer; width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all 0.2s;" onmouseleave="this.style.color='#cbd5e1';this.style.background='rgba(255,255,255,0.15)';" onmouseenter="this.style.color='#fff';this.style.background='rgba(239,68,68,0.7)';" title="Close Warning">✕</button>
+    `;
     toast.style.display = "flex";
     toast.style.opacity = "1";
-    setTimeout(() => {
-        toast.style.opacity = "0";
-        setTimeout(() => toast.style.display = "none", 300);
-    }, 4000);
 }
+
+
 
 function toggleRecentSessionsSidebar() {
     const container = document.getElementById("recent-sessions-container");

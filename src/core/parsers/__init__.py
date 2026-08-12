@@ -5,7 +5,7 @@ Multi-Tool Vulnerability Ingestion Engine (Nessus, Nmap, BurpSuite, Qualys, Triv
 from typing import List, Tuple, Any
 from .finding_schema import Finding
 from .base_parser import BaseParser
-from .control_mapper import map_finding_to_control
+from .control_mapper import map_finding_to_control, map_findings_list
 from .nessus_parser import NessusParser
 from .nmap_parser import NmapParser
 from .burp_parser import BurpParser
@@ -23,15 +23,13 @@ ALL_PARSERS = [
 def parse_tool_file(filename: str, content: str) -> Tuple[List[Finding], Any]:
     """
     Auto-detects file type and dispatches to the appropriate security tool parser.
+    Applies unified VAPT enrichments (control mapping, risk category, CIA/PII impact, actionable remediation).
     Returns (actionable_findings, extra_info/inventory).
     """
     for p in ALL_PARSERS:
         if p.can_parse(filename, content):
             res = p.parse(filename, content)
             findings, extra = res if isinstance(res, tuple) else (res, None)
-            # Safety net: a matched-but-empty result is silently indistinguishable
-            # from "genuinely clean scan" unless it's logged. Never let a recognized
-            # file produce a misleadingly clean "0 findings" without a visible trace.
             if not findings:
                 print(
                     f"[VAPT PARSER WARNING] '{p.__class__.__name__}' recognized '{filename}' "
@@ -39,13 +37,19 @@ def parse_tool_file(filename: str, content: str) -> Tuple[List[Finding], Any]:
                     f"the parser may not support this export's exact format/columns and needs review.",
                     flush=True
                 )
+            if findings:
+                map_findings_list(findings)
             return findings, extra
 
     # Default fallback to NessusParser (handles general HTML/XML)
-    return NessusParser().parse(filename, content)
+    findings, extra = NessusParser().parse(filename, content)
+    if findings:
+        map_findings_list(findings)
+    return findings, extra
 
 __all__ = [
-    "Finding", "BaseParser", "map_finding_to_control",
+    "Finding", "BaseParser", "map_finding_to_control", "map_findings_list",
     "NessusParser", "NmapParser", "BurpParser", "QualysParser", "TrivyParser",
     "parse_tool_file"
 ]
+

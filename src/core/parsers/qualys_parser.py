@@ -5,6 +5,15 @@ import re
 from typing import List, Tuple, Optional
 from bs4 import BeautifulSoup
 from .base_parser import BaseParser
+
+# Prefer lxml for speed; fallback to html.parser if unavailable
+try:
+    import lxml  # noqa: F401
+    _HTML_PARSER = "lxml"
+    _XML_PARSER = "lxml-xml"
+except ImportError:
+    _HTML_PARSER = "html.parser"
+    _XML_PARSER = "html.parser"
 from .finding_schema import Finding
 from .control_mapper import map_findings_list
 
@@ -148,12 +157,12 @@ class QualysParser(BaseParser):
     def _parse_xml(self, content: str) -> List[Finding]:
         findings: List[Finding] = []
         try:
-            soup = BeautifulSoup(content, "xml") if BeautifulSoup(content, "html.parser").find() else None
+            soup = BeautifulSoup(content, _XML_PARSER)
         except Exception:
             soup = None
         if soup is None:
             try:
-                soup = BeautifulSoup(content, "html.parser")
+                soup = BeautifulSoup(content, _HTML_PARSER)
             except Exception:
                 return []
 
