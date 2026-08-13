@@ -30,8 +30,9 @@ COPY requirements.txt .
 # runs torch on a GPU (llama-server handles all LLM compute separately over
 # HTTP). Installing the CPU wheel first satisfies that dependency before pip
 # ever considers the CUDA variant.
-RUN pip install --no-cache-dir --user torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir --user torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir --user -r requirements.txt psycopg2-binary
+
 
 
 FROM python:3.11-slim AS runtime
