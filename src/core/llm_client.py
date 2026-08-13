@@ -4,6 +4,10 @@ import requests
 import json
 from src.core.port_pool import port_pool_manager
 
+def in_docker():
+    return os.path.exists('/.dockerenv')
+
+
 # ── Round-Robin Load Balancer ─────────────────────────────────────────────────
 # When LLM_HOSTS env var is set (e.g. "11434,11436"), requests are distributed
 # across all configured LLM instances in a thread-safe round-robin fashion.
@@ -218,20 +222,22 @@ def get_embedding(text, model="nomic-embed-text"):
     try:
         r = requests.post(url, json={"content": text_sample}, timeout=embed_timeout)
         if r.status_code == 200:
-            emb = r.json().get("embedding")
-            if emb:
-                return emb
+            res_data = r.json()
+            if isinstance(res_data, list):
+                if res_data and isinstance(res_data[0], list):
+                    return res_data[0]
+                elif res_data and isinstance(res_data[0], dict):
+                    return res_data[0].get("embedding") or res_data[0]
+                return res_data
+            elif isinstance(res_data, dict):
+                emb = res_data.get("embedding")
+                if emb:
+                    return emb
     except Exception as e_emb:
-        print(f"[EMBEDDING RETRY] Connection error on {url}: {e_emb}. Attempting auto-start on 11435...", flush=True)
-        if _ensure_llama_server_running(11435):
-            try:
-                r = requests.post(url, json={"content": text_sample}, timeout=embed_timeout)
-                if r.status_code == 200:
-                    emb = r.json().get("embedding")
-                    if emb:
-                        return emb
-            except Exception:
-                pass
+        if not in_docker():
+            print(f"[EMBEDDING RETRY] Connection error on {url}: {e_emb}. Attempting auto-start on 11435...", flush=True)
+            _ensure_llama_server_running(11435)
+
 
     # Fallback to OpenAI-compatible /v1/embeddings on llama-server.exe
     try:
