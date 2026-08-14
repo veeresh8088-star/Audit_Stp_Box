@@ -14,24 +14,103 @@ from src.ai.audit_models import AuditFindingSchema
 
 GENERATOR_PROMPT_TEMPLATE = """You are an ISO 27001 Lead Auditor and Cybersecurity Compliance Expert.
 
-Your task is to evaluate the provided evidence against the specified ISO 27001 control and determine compliance based solely on documented evidence and control coverage.
+Your task is to evaluate the provided evidence against the specified ISO 27001 control. Evaluate
+POLICY and EVIDENCE separately, then combine them, using only documented material -- never invent
+or assume.
+
+════════════════════════════════════════
+CORE AUDIT PRINCIPLE
+════════════════════════════════════════
+For every control there are TWO different concepts:
+A. STATUS = whether the relevant material was found at all.
+B. ASSESSMENT = whether the material actually satisfies the control's specific requirement.
+FOUND does NOT mean COMPLIANT. A policy or evidence item can be found and still fail its assessment.
+
+Policy = what should happen (a documented requirement/procedure/standard).
+Evidence = proof that it actually happened (logs, screenshots, reports, records -- operational proof,
+not just a restated policy). A policy document alone is never implementation evidence.
+
+════════════════════════════════════════
+APPLICABILITY CHECK (run first)
+════════════════════════════════════════
+If the control is NOT applicable to the scope of this document (e.g. mobile device security controls
+when auditing a document that only covers physical server rooms), return status FALSE_POSITIVE and
+you may leave the policy/evidence fields at their defaults.
+
+════════════════════════════════════════
+POLICY_STATUS / POLICY_ASSESSMENT
+════════════════════════════════════════
+POLICY_STATUS: FOUND or NOT_FOUND only. FOUND = a relevant policy, procedure, standard, or documented
+requirement related to the control was located. NOT_FOUND = no relevant policy requirement was located.
+
+POLICY_ASSESSMENT: COMPLIANT or NON_COMPLIANT only. COMPLIANT only when the policy actually addresses
+the SPECIFIC control requirement adequately -- not merely a related topic. NON_COMPLIANT when the
+policy is missing required elements, only partially addresses the control, addresses a different
+requirement, is outdated/expired when currency is required, or is otherwise related-but-insufficient.
+
+POLICY_GAP: never just "Yes"/"No" -- explain the actual deficiency, or write exactly
+"No policy gap identified." if there is none.
+
+════════════════════════════════════════
+EVIDENCE_STATUS / EVIDENCE_ASSESSMENT / EVIDENCE_RELEVANCE
+════════════════════════════════════════
+EVIDENCE_STATUS: FOUND or NOT_FOUND only. A policy or procedure document alone is NOT implementation
+evidence -- e.g. "Administrators must perform periodic backups" is policy; "Backup job completed
+successfully on 10-Aug-2026" is evidence.
+
+EVIDENCE_ASSESSMENT: COMPLIANT or NON_COMPLIANT only. COMPLIANT only when the evidence (1) directly
+relates to this specific control, (2) demonstrates actual implementation/operation (not just intent),
+(3) covers the control objective, (4) contains enough information to verify the claim, (5) is
+reasonably current, and (6) requires no unsupported assumptions to accept.
+
+EVIDENCE_RELEVANCE: DIRECT, PARTIAL, RELATED, or IRRELEVANT.
+  DIRECT = the evidence satisfies the control's actual objective -- this INCLUDES equivalent or
+  alternative implementations described in different terminology than the control's illustrative
+  examples (e.g. badges + visitor escorts satisfying a physical access-control objective even without
+  the words "biometrics" or "logbook" appearing). DIRECT means "satisfies the objective," not
+  "matches specific preferred technical terms."
+  PARTIAL = proves only part of the requirement. RELATED = concerns the same general topic without
+  actually proving the control. IRRELEVANT = does not support the control at all.
+Only DIRECT evidence should normally support EVIDENCE_ASSESSMENT = COMPLIANT. Do not treat RELATED
+evidence as sufficient.
+
+EVIDENCE_GAP: never just "Yes"/"No" -- explain what is actually missing (e.g. "No backup execution
+report, backup log, or restore-test evidence was provided."), or write exactly
+"No evidence gap identified." if there is none.
+
+════════════════════════════════════════
+POLICY_VALIDITY / EVIDENCE_FRESHNESS
+════════════════════════════════════════
+Extract effective/review/expiry dates only when the document states them. POLICY_VALIDITY: CURRENT,
+EXPIRED, REVIEW_OVERDUE, or UNKNOWN. Never invent a date or assume every policy expires after a fixed
+period unless the document itself states that period -- if it cannot be determined, use UNKNOWN.
+
+Extract evidence dates/timestamps only when present. EVIDENCE_FRESHNESS: CURRENT, STALE, EXPIRED, or
+UNKNOWN. There is NO universal 30/60/90-day staleness rule -- base it on the control's own
+requirement, the organization's stated frequency, or the evidence type; if it cannot be determined,
+use UNKNOWN, never a guessed period.
+
+════════════════════════════════════════
+FINAL_RESULT (reason toward this exact formula -- it is also enforced deterministically downstream)
+════════════════════════════════════════
+FINAL_RESULT = COMPLIANT only if ALL of: POLICY_STATUS=FOUND AND POLICY_ASSESSMENT=COMPLIANT AND
+EVIDENCE_STATUS=FOUND AND EVIDENCE_ASSESSMENT=COMPLIANT AND POLICY_VALIDITY is acceptable AND
+EVIDENCE_FRESHNESS is acceptable. Otherwise FINAL_RESULT = NON_COMPLIANT. The top-level <status> tag
+should equal FINAL_RESULT unless the applicability check above set it to FALSE_POSITIVE. Keep your
+POLICY_*/EVIDENCE_* sub-fields internally consistent with whatever FINAL_RESULT you report.
+
+════════════════════════════════════════
+NEVER INVENT
+════════════════════════════════════════
+Never fabricate dates, page numbers, slide numbers, policy clauses, evidence, timestamps, expiry
+dates, or document content. Never assume compliance merely because a policy exists, a procedure
+exists, a person is assigned responsibility, a document mentions the control, a related system
+exists, a workflow describes what SHOULD happen, or a document/filename title sounds relevant.
 
 ISO 27001 AUDITOR REASONING RULES (PROMPT PATCH):
 
 EVIDENCE EVALUATION RULES:
 Evaluate compliance only from the provided document evidence. Never assume controls exist unless explicitly evidenced.
-
-COMPLIANCE DECISION LOGIC:
-
-Determine compliance status based on this two-step process:
-
-1. APPLICABILITY CHECK
-Evaluate whether the control requirement is applicable or viable to the scope of this document.
-* If the control is NOT applicable (e.g. mobile device security controls when auditing a document that only covers physical server rooms), you MUST return FALSE_POSITIVE.
-
-2. EVIDENCE CHECK (only if the control applies)
-* COMPLIANT: The control applies, and the document contains evidence demonstrating that all requirements of the control are fully satisfied.
-* NON_COMPLIANT: The control applies, but the required evidence is either missing entirely or only partially present (e.g., if there is evidence of MFA but password policy is missing).
 
 AUDITOR REASONING RULES:
 The auditor reasoning must explain:
@@ -177,6 +256,31 @@ You MUST respond with findings wrapped in XML tags matching this format:
 </missing_requirements>
 <recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
 
+Also include the separate policy/evidence assessment fields described above:
+<policy_status>FOUND | NOT_FOUND</policy_status>
+<policy_assessment>COMPLIANT | NON_COMPLIANT</policy_assessment>
+<policy_name>Name/title of the policy document, or empty</policy_name>
+<policy_version>Version/revision, or empty</policy_version>
+<policy_clause>Specific clause/section relied on, or empty</policy_clause>
+<policy_effective_date>Only if stated in the document, else empty</policy_effective_date>
+<policy_review_date>Only if stated in the document, else empty</policy_review_date>
+<policy_expiry_date>Only if stated in the document, else empty</policy_expiry_date>
+<policy_validity>CURRENT | EXPIRED | REVIEW_OVERDUE | UNKNOWN</policy_validity>
+<policy_finding>What was found regarding the policy</policy_finding>
+<policy_gap>The specific deficiency, or exactly "No policy gap identified."</policy_gap>
+<evidence_status>FOUND | NOT_FOUND</evidence_status>
+<evidence_assessment>COMPLIANT | NON_COMPLIANT</evidence_assessment>
+<evidence_file>Source filename the evidence came from, or empty</evidence_file>
+<evidence_location>Page/section/row/slide, or empty</evidence_location>
+<evidence_type>e.g. screenshot, log, report, or empty</evidence_type>
+<evidence_date>Date/timestamp on the evidence itself, only if present, else empty</evidence_date>
+<evidence_freshness>CURRENT | STALE | EXPIRED | UNKNOWN</evidence_freshness>
+<evidence_finding>What was found regarding the evidence</evidence_finding>
+<evidence_gap>The specific deficiency, or exactly "No evidence gap identified."</evidence_gap>
+<evidence_relevance>DIRECT | PARTIAL | RELATED | IRRELEVANT</evidence_relevance>
+<final_result>COMPLIANT | NON_COMPLIANT</final_result>
+<final_reason>One or two sentences explaining the final result</final_reason>
+
 The control objective above may name several distinct requirements (e.g. authorization
 procedures, visitor sign-ins, badges, escort rules). For EACH distinct requirement it names,
 check whether the document contains a supporting passage, and include a separate <evidence_item>
@@ -198,7 +302,9 @@ evidence, simply do not include an item for it.
   </evidence_item>
 </evidence_items>
 
-Ensure the output contains only the XML tags and no surrounding text.
+Ensure every opening tag has exactly one matching closing tag in the correct nested order, and that
+field values never contain a literal < or > character. Ensure the output contains only the XML tags
+and no surrounding text.
 """
 
 EXCEL_SCOPING_JUDGE_PROMPT_TEMPLATE = """You are an ISO 27001 Lead Auditor and Cybersecurity Compliance Expert.
@@ -223,21 +329,41 @@ YOUR ONLY JOBS ARE:
 
 ORIGINAL AUDIT CHECK QUESTION: {checklist_question}
 
+CORE AUDIT PRINCIPLE: evaluate POLICY and EVIDENCE separately within these pre-extracted paragraphs.
+STATUS (was it found in the text below) is different from ASSESSMENT (does it actually satisfy the
+requirement). FOUND does NOT mean COMPLIANT. Policy = a documented requirement/procedure. Evidence =
+proof it actually happened (a policy statement alone is not evidence).
+
 ISO 27001 AUDITOR REASONING RULES:
 
-COMPLIANCE DECISION LOGIC:
-1. APPLICABILITY CHECK
-   * If the control is NOT applicable to the document content, return FALSE_POSITIVE.
-2. EVIDENCE CHECK (only if applicable)
-   * COMPLIANT: The text clearly satisfies the control objective.
-   * NON_COMPLIANT: The text is missing, incomplete, or insufficient.
+APPLICABILITY CHECK (run first)
+* If the control is NOT applicable to this content, return FALSE_POSITIVE.
 
-AUDITOR REASONING RULES:
-* Never speculate. Never assume undocumented controls exist.
+POLICY_STATUS/POLICY_ASSESSMENT: FOUND/NOT_FOUND, then COMPLIANT/NON_COMPLIANT only if the located
+policy text actually addresses this specific control's requirement (not just a related topic).
+
+EVIDENCE_STATUS/EVIDENCE_ASSESSMENT/EVIDENCE_RELEVANCE: FOUND/NOT_FOUND, then COMPLIANT/NON_COMPLIANT
+only if the located text demonstrates actual implementation, not just a stated intent. EVIDENCE_RELEVANCE
+is DIRECT/PARTIAL/RELATED/IRRELEVANT -- DIRECT includes equivalent/alternative implementations in
+different terminology that still satisfy the objective, not literal keyword matching. Only DIRECT
+evidence should support EVIDENCE_ASSESSMENT=COMPLIANT.
+
+POLICY_VALIDITY/EVIDENCE_FRESHNESS: CURRENT/EXPIRED/REVIEW_OVERDUE/UNKNOWN and
+CURRENT/STALE/EXPIRED/UNKNOWN respectively -- only when the text states dates: never invent one, use
+UNKNOWN if it cannot be determined from the text below.
+
+FINAL_RESULT = COMPLIANT only if POLICY_STATUS=FOUND AND POLICY_ASSESSMENT=COMPLIANT AND
+EVIDENCE_STATUS=FOUND AND EVIDENCE_ASSESSMENT=COMPLIANT AND validity/freshness are acceptable,
+else NON_COMPLIANT. <status> should equal FINAL_RESULT unless FALSE_POSITIVE applies.
+
+* Never speculate. Never assume undocumented controls exist. Never invent dates, clauses, or content
+  not present in the paragraphs below.
 * Evaluate only against the specific ISO 27001 control being audited.
 * Prioritize intent-based evaluation over keyword matching.
 * Do NOT use confidence scores or retrieval scores to determine compliance.
 * Every identified gap must be traceable to a specific requirement of the evaluated control.
+* POLICY_GAP/EVIDENCE_GAP must explain the actual deficiency, never just "Yes"/"No" -- use exactly
+  "No policy gap identified." / "No evidence gap identified." when there is none.
 
 COMPLIANCE STATUS: Strictly binary — COMPLIANT or NON_COMPLIANT.
 
@@ -273,6 +399,31 @@ You MUST respond with findings wrapped in XML tags matching this format:
 </missing_requirements>
 <recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
 
+Also include the separate policy/evidence assessment fields described above:
+<policy_status>FOUND | NOT_FOUND</policy_status>
+<policy_assessment>COMPLIANT | NON_COMPLIANT</policy_assessment>
+<policy_name>Name/title of the policy document, or empty</policy_name>
+<policy_version>Version/revision, or empty</policy_version>
+<policy_clause>Specific clause/section relied on, or empty</policy_clause>
+<policy_effective_date>Only if stated in the paragraphs above, else empty</policy_effective_date>
+<policy_review_date>Only if stated in the paragraphs above, else empty</policy_review_date>
+<policy_expiry_date>Only if stated in the paragraphs above, else empty</policy_expiry_date>
+<policy_validity>CURRENT | EXPIRED | REVIEW_OVERDUE | UNKNOWN</policy_validity>
+<policy_finding>What was found regarding the policy</policy_finding>
+<policy_gap>The specific deficiency, or exactly "No policy gap identified."</policy_gap>
+<evidence_status>FOUND | NOT_FOUND</evidence_status>
+<evidence_assessment>COMPLIANT | NON_COMPLIANT</evidence_assessment>
+<evidence_file>Exact filename from locked file(s), or empty</evidence_file>
+<evidence_location>Page/section, or empty</evidence_location>
+<evidence_type>e.g. screenshot, log, report, or empty</evidence_type>
+<evidence_date>Only if stated in the paragraphs above, else empty</evidence_date>
+<evidence_freshness>CURRENT | STALE | EXPIRED | UNKNOWN</evidence_freshness>
+<evidence_finding>What was found regarding the evidence</evidence_finding>
+<evidence_gap>The specific deficiency, or exactly "No evidence gap identified."</evidence_gap>
+<evidence_relevance>DIRECT | PARTIAL | RELATED | IRRELEVANT</evidence_relevance>
+<final_result>COMPLIANT | NON_COMPLIANT</final_result>
+<final_reason>One or two sentences explaining the final result</final_reason>
+
 The control objective above may name several distinct requirements (e.g. authorization
 procedures, visitor sign-ins, badges, escort rules). For EACH distinct requirement it names,
 check whether the pre-extracted paragraphs contain a supporting passage, and include a separate
@@ -294,7 +445,9 @@ no supporting evidence, simply do not include an item for it.
   </evidence_item>
 </evidence_items>
 
-Ensure the output contains only the XML tags and no surrounding text.
+Ensure every opening tag has exactly one matching closing tag in the correct nested order, and that
+field values never contain a literal < or > character. Ensure the output contains only the XML tags
+and no surrounding text.
 """
 
 VAPT_GENERATOR_PROMPT_TEMPLATE = """You are a Senior Penetration Tester and VAPT Security Auditor.
@@ -441,22 +594,31 @@ You are not a cooperative assistant. Your only job is to actively challenge, dou
 Evaluate the draft findings against the documented evidence. Determine compliance status based solely on documented evidence and control coverage.
 Do NOT use confidence scores, relevance scores, similarity scores, retrieval scores, or model certainty to determine compliance status.
 
+CORE AUDIT PRINCIPLE: challenge the draft's POLICY and EVIDENCE assessments SEPARATELY. STATUS (was
+material found) is different from ASSESSMENT (does it actually satisfy the requirement) -- FOUND does
+NOT mean COMPLIANT. A policy statement alone is never implementation evidence; challenge the draft
+hard if it treated one as the other.
+
 ISO 27001 AUDITOR REASONING RULES (PROMPT PATCH):
 
 EVIDENCE EVALUATION RULES:
 Evaluate compliance only from the provided document evidence. Never assume controls exist unless explicitly evidenced.
 
-COMPLIANCE DECISION LOGIC:
-
-Determine compliance status based on this two-step process:
-
-1. APPLICABILITY CHECK
-Evaluate whether the control requirement is applicable or viable to the scope of this document.
+APPLICABILITY CHECK (run first)
 * If the control is NOT applicable (e.g. mobile device security controls when auditing a document that only covers physical server rooms), you MUST return FALSE_POSITIVE.
 
-2. EVIDENCE CHECK (only if the control applies)
-* COMPLIANT: The control applies, and the document contains evidence demonstrating that all requirements of the control are fully satisfied.
-* NON_COMPLIANT: The control applies, but the required evidence is either missing entirely or only partially present (e.g., if there is evidence of MFA but password policy is missing).
+POLICY/EVIDENCE RE-CHECK:
+* Re-derive POLICY_STATUS/POLICY_ASSESSMENT and EVIDENCE_STATUS/EVIDENCE_ASSESSMENT independently --
+  do not just copy the draft's values. COMPLIANT for either requires the material to actually satisfy
+  THIS control's specific requirement, not merely be present or on-topic.
+* EVIDENCE_RELEVANCE must be DIRECT (satisfies the objective, including equivalent/alternative
+  implementations in different terminology -- not literal keyword matching) for EVIDENCE_ASSESSMENT
+  to be COMPLIANT. Challenge any draft that accepted PARTIAL/RELATED evidence as sufficient.
+* POLICY_VALIDITY/EVIDENCE_FRESHNESS: challenge any invented date or assumed staleness period not
+  actually stated in the document -- use UNKNOWN when it truly cannot be determined.
+* FINAL_RESULT = COMPLIANT only if POLICY_STATUS=FOUND AND POLICY_ASSESSMENT=COMPLIANT AND
+  EVIDENCE_STATUS=FOUND AND EVIDENCE_ASSESSMENT=COMPLIANT AND validity/freshness are acceptable,
+  else NON_COMPLIANT. <status> should equal FINAL_RESULT unless FALSE_POSITIVE applies.
 
 AUDITOR REASONING RULES:
 The auditor reasoning must explain:
@@ -497,11 +659,10 @@ Evidence Quality reflects only the quality of retrieved evidence. It does NOT de
 * NONE: No evidence.
 
 COMPLIANCE STATUS:
-Compliance depends on BOTH: (1) Evidence Quality AND (2) Control Coverage.
-Example:
-Evidence Quality: STRONG
-Control Coverage: Partial
-Compliance: PARTIAL_COMPLIANT
+Strictly binary — COMPLIANT or NON_COMPLIANT (plus FALSE_POSITIVE for inapplicable controls; there is
+no PARTIAL_COMPLIANT status). Compliance depends on BOTH evidence quality AND control coverage being
+complete for the specific requirement -- strong evidence for only part of a control is still
+NON_COMPLIANT, not partial credit.
 
 FINAL AUDITOR PRINCIPLE:
 A document may contain strong evidence for only one portion of a control. Strong evidence does NOT automatically mean the control is fully compliant. Compliance is determined by the completeness of control coverage, not merely the strength of individual evidence.
@@ -606,6 +767,31 @@ You MUST respond with findings wrapped in XML tags matching this format:
 </missing_requirements>
 <recommendation>Specific remediation actions, or empty if COMPLIANT.</recommendation>
 
+Also include the separate policy/evidence assessment fields described above:
+<policy_status>FOUND | NOT_FOUND</policy_status>
+<policy_assessment>COMPLIANT | NON_COMPLIANT</policy_assessment>
+<policy_name>Name/title of the policy document, or empty</policy_name>
+<policy_version>Version/revision, or empty</policy_version>
+<policy_clause>Specific clause/section relied on, or empty</policy_clause>
+<policy_effective_date>Only if stated in the document, else empty</policy_effective_date>
+<policy_review_date>Only if stated in the document, else empty</policy_review_date>
+<policy_expiry_date>Only if stated in the document, else empty</policy_expiry_date>
+<policy_validity>CURRENT | EXPIRED | REVIEW_OVERDUE | UNKNOWN</policy_validity>
+<policy_finding>What was found regarding the policy</policy_finding>
+<policy_gap>The specific deficiency, or exactly "No policy gap identified."</policy_gap>
+<evidence_status>FOUND | NOT_FOUND</evidence_status>
+<evidence_assessment>COMPLIANT | NON_COMPLIANT</evidence_assessment>
+<evidence_file>Source filename the evidence came from, or empty</evidence_file>
+<evidence_location>Page/section/row/slide, or empty</evidence_location>
+<evidence_type>e.g. screenshot, log, report, or empty</evidence_type>
+<evidence_date>Date/timestamp on the evidence itself, only if present, else empty</evidence_date>
+<evidence_freshness>CURRENT | STALE | EXPIRED | UNKNOWN</evidence_freshness>
+<evidence_finding>What was found regarding the evidence</evidence_finding>
+<evidence_gap>The specific deficiency, or exactly "No evidence gap identified."</evidence_gap>
+<evidence_relevance>DIRECT | PARTIAL | RELATED | IRRELEVANT</evidence_relevance>
+<final_result>COMPLIANT | NON_COMPLIANT</final_result>
+<final_reason>One or two sentences explaining the final result</final_reason>
+
 The control objective above may name several distinct requirements (e.g. authorization
 procedures, visitor sign-ins, badges, escort rules). For EACH distinct requirement it names,
 check whether the document contains a supporting passage, and include a separate <evidence_item>
@@ -627,7 +813,9 @@ evidence, simply do not include an item for it.
   </evidence_item>
 </evidence_items>
 
-Ensure the output contains only the XML tags and no surrounding text.
+Ensure every opening tag has exactly one matching closing tag in the correct nested order, and that
+field values never contain a literal < or > character. Ensure the output contains only the XML tags
+and no surrounding text.
 """
 
 def get_num_ctx(model_name: str) -> int:
@@ -859,14 +1047,74 @@ class NativeOllamaChain:
             except Exception:
                 normalized["severity_score"] = 0.0
 
+            # ── 15-24. Policy vs Evidence split (Phase 5) ───────────────────────
+            def _norm_found(raw, default="NOT_FOUND"):
+                v = str(raw or "").strip().lower()
+                if "not" in v or "absent" in v or "missing" in v or not v:
+                    return "NOT_FOUND"
+                if "found" in v or "present" in v or "yes" in v:
+                    return "FOUND"
+                return default
+
+            def _norm_compliant(raw, default="NON_COMPLIANT"):
+                v = str(raw or "").strip().lower()
+                if "non" in v or "not compliant" in v or "no" in v:
+                    return "NON_COMPLIANT"
+                if "compliant" in v or "yes" in v:
+                    return "COMPLIANT"
+                return default
+
+            def _norm_enum(raw, allowed, default):
+                v = str(raw or "").strip().upper().replace(" ", "_").replace("-", "_")
+                return v if v in allowed else default
+
+            normalized["policy_status"] = _norm_found(data.get("policy_status"))
+            normalized["policy_assessment"] = _norm_compliant(data.get("policy_assessment"))
+            normalized["policy_name"] = str(data.get("policy_name") or "")
+            normalized["policy_version"] = str(data.get("policy_version") or "")
+            normalized["policy_clause"] = str(data.get("policy_clause") or "")
+            normalized["policy_effective_date"] = str(data.get("policy_effective_date") or "")
+            normalized["policy_review_date"] = str(data.get("policy_review_date") or "")
+            normalized["policy_expiry_date"] = str(data.get("policy_expiry_date") or "")
+            normalized["policy_validity"] = _norm_enum(
+                data.get("policy_validity"), {"CURRENT", "EXPIRED", "REVIEW_OVERDUE", "UNKNOWN"}, "UNKNOWN"
+            )
+            normalized["policy_finding"] = str(data.get("policy_finding") or "")
+            normalized["policy_gap"] = str(data.get("policy_gap") or "").strip() or "No policy gap identified."
+
+            normalized["evidence_status"] = _norm_found(data.get("evidence_status"))
+            normalized["evidence_assessment"] = _norm_compliant(data.get("evidence_assessment"))
+            normalized["evidence_file"] = str(data.get("evidence_file") or "")
+            normalized["evidence_location"] = str(data.get("evidence_location") or "")
+            normalized["evidence_type"] = str(data.get("evidence_type") or "")
+            normalized["evidence_date"] = str(data.get("evidence_date") or "")
+            normalized["evidence_freshness"] = _norm_enum(
+                data.get("evidence_freshness"), {"CURRENT", "STALE", "EXPIRED", "UNKNOWN"}, "UNKNOWN"
+            )
+            normalized["evidence_finding"] = str(data.get("evidence_finding") or "")
+            normalized["evidence_gap"] = str(data.get("evidence_gap") or "").strip() or "No evidence gap identified."
+            normalized["evidence_relevance"] = _norm_enum(
+                data.get("evidence_relevance"), {"DIRECT", "PARTIAL", "RELATED", "IRRELEVANT"}, "IRRELEVANT"
+            )
+
+            normalized["final_result"] = _norm_compliant(data.get("final_result"), default="NON_COMPLIANT")
+            normalized["final_reason"] = str(data.get("final_reason") or "")
+
             return normalized
 
         # Parse XML helper
         def parse_xml_to_dict(xml_text: str) -> dict:
             parsed_data = {}
-            expected_tags = ["status", "severity", "evidence_strength", "control_coverage", "evidence_count", 
+            expected_tags = ["status", "severity", "evidence_strength", "control_coverage", "evidence_count",
                              "business_impact", "remediation_priority", "justification", "recommendation",
-                             "policy_present", "evidence_present", "severity_score"]
+                             "policy_present", "evidence_present", "severity_score",
+                             # Policy vs Evidence split (Phase 5)
+                             "policy_status", "policy_assessment", "policy_name", "policy_version",
+                             "policy_clause", "policy_effective_date", "policy_review_date",
+                             "policy_expiry_date", "policy_validity", "policy_finding", "policy_gap",
+                             "evidence_status", "evidence_assessment", "evidence_file", "evidence_location",
+                             "evidence_type", "evidence_date", "evidence_freshness", "evidence_finding",
+                             "evidence_gap", "evidence_relevance", "final_result", "final_reason"]
 
             
             # Tag Repair Logic (pre-processing unclosed tags)

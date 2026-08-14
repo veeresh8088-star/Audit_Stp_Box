@@ -873,9 +873,16 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             else:
                 finding["review_note"] = hal_note
 
-    # Get & Normalize status — strictly binary output: COMPLIANT or NON_COMPLIANT (no partial status allowed)
+    # Get & Normalize status — strictly binary COMPLIANT/NON_COMPLIANT, with FALSE_POSITIVE
+    # preserved as its own third state (a control that doesn't apply is not the same as a
+    # failed one). Pre-existing bug fixed here: FALSE_POSITIVE doesn't contain the substring
+    # "COMPLIANT", so this used to always fall through to the `else` and get silently
+    # relabeled NON_COMPLIANT, destroying the FALSE_POSITIVE/Out-of-Scope classification
+    # set earlier in this function (the "PASSED all gates as FALSE_POSITIVE" branch above).
     status = finding.get("status", "NON_COMPLIANT").upper()
-    if "COMPLIANT" in status and "NON" not in status and "PARTIAL" not in status:
+    if status == "FALSE_POSITIVE":
+        finding["status"] = "FALSE_POSITIVE"
+    elif "COMPLIANT" in status and "NON" not in status and "PARTIAL" not in status:
         finding["status"] = "COMPLIANT"
     else:
         finding["status"] = "NON_COMPLIANT"
@@ -1005,169 +1012,84 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
             else:
                 finding["review_note"] = pot_note
 
-    # ── RULE 8 INTENT-BASED GUARDRAIL (ALL CONTROLS) ────────────────────
-    # Workspace Audit Reasoning Rule 8: Evidence may be in any form — screenshots, logs,
-    # policy documents, PDFs, TXT files, etc. If documented evidence satisfies the control
-    # objective (directly or through equivalent controls), do NOT mark NON_COMPLIANT.
-    # Applies to ALL controls, not just technical ones.
-    reasoning_lower = str(finding.get("reasoning") or "").lower()
-    quote = str(finding.get("evidence_quote") or "").strip()
-    description_lower = str(finding.get("description") or "").lower()
-    # The LLM's "what's missing" explanation is written under gap_description/finding,
-    # not description/reasoning — must be scanned too, or an explicit stated gap
-    # (e.g. "Missing Requirements: a formal documented retention policy") is invisible
-    # to the negative-phrase check below and gets silently overridden.
-    gap_lower = str(finding.get("gap_description") or finding.get("finding") or "").lower()
-    status_curr = str(finding.get("status") or "").strip().upper()
+    # ── DETERMINISTIC POLICY/EVIDENCE FINAL RESULT (RAG accuracy overhaul, Phase 6) ──
+    # Replaces both the removed "Rule 8" heuristic upgrade (which silently upgraded
+    # NON_COMPLIANT to COMPLIANT based on keyword matches in the LLM's own reasoning
+    # text) and the old policy_present/evidence_present combination matrix. This is
+    # plain Python conditional logic operating on the Phase 5 policy/evidence fields,
+    # not LLM judgment -- per the user's explicit "deterministic, not free LLM
+    # judgment" requirement. The LLM still gets exactly one chance to judge
+    # equivalent-terminology evidence as satisfying the control, in its own
+    # evidence_assessment/evidence_relevance fields -- there is no second guess here.
+    #
+    # FALSE_POSITIVE (control doesn't apply) is a different concept entirely and is
+    # left untouched rather than being forced into this formula.
+    if finding.get("status") != "FALSE_POSITIVE":
+        policy_status = str(finding.get("policy_status") or "NOT_FOUND").strip().upper()
+        policy_assessment = str(finding.get("policy_assessment") or "NON_COMPLIANT").strip().upper()
+        policy_validity = str(finding.get("policy_validity") or "UNKNOWN").strip().upper()
+        evidence_status = str(finding.get("evidence_status") or "NOT_FOUND").strip().upper()
+        evidence_assessment = str(finding.get("evidence_assessment") or "NON_COMPLIANT").strip().upper()
+        evidence_freshness = str(finding.get("evidence_freshness") or "UNKNOWN").strip().upper()
 
-    if status_curr == "NON_COMPLIANT" and quote and quote.upper() != "NOT_FOUND":
-        # Check if the quote is actually stating that NO evidence was found or is explaining an absence.
-        # Use broad regex-style matching to catch all "no X evidence" / "no X policy" phrasing.
-        quote_lower = quote.lower()
-        import re as _re
-        _neg_exact = [
-            "no evidence", "not found", "no mention", "not documented", "not provided",
-            "no evidence whatsoever", "focuses entirely on", "exclusively details",
-            "no formal", "no explicit", "no clear", "no direct", "no specific",
-            "not available", "not present", "not observed", "not located",
-            "no information", "no detail", "no record", "no policy",
-            "could not", "unable to", "failed to", "does not contain",
-            "does not include", "does not address", "does not cover",
-            "does not mention", "does not document",
-            "not met", "requirement is not met", "control requirement is not met",
-            "no overarching", "was not established", "was not found",
-            "no approved", "not complied", "non-compliant"
-        ]
-        is_negative_quote = any(neg in quote_lower for neg in _neg_exact)
-        # Also check: if the observation/description text says evidence is absent,
-        # Rule 8 must NOT override to COMPLIANT (prevents self-contradiction in the report).
-        _neg_description = [
-            "no documentary evidence", "no formal policy", "no evidence was found",
-            "no explicit", "not documented", "not found", "not provided",
-            "not available", "no clear", "no direct", "could not locate",
-            "does not address", "does not contain", "not observed",
-            "not met", "requirement is not met", "control requirement is not met",
-            "no overarching", "was not established", "was not found",
-            "no approved", "not complied", "was not found"
-        ]
-        # "Missing Requirements:" is a fixed template label (see audit_chains.py) that
-        # appears even when nothing is actually missing (e.g. "Missing Requirements: None
-        # identified") — a plain substring match on the label alone would false-positive
-        # on compliant findings. Only treat it as negative when real content follows the
-        # label, not "none"/"n/a"/"nil".
-        _has_real_missing_requirement = bool(_re.search(
-            r'missing requirements?\s*:\s*(?!none\b|n/?a\b|nil\b|not applicable\b)\w',
-            gap_lower
-        ))
-        is_negative_description = (
-            any(neg in description_lower for neg in _neg_description) or
-            any(neg in gap_lower for neg in _neg_description) or
-            _has_real_missing_requirement
-        )
-
-        # RULE 8 INTENT OVERRIDE: If description/reasoning explicitly states that the evidence
-        # directly satisfies or meets the control objective, override negative policy phrases!
-        _satisfies_phrases = [
-            "directly satisfies", "satisfies the control", "satisfies the intent",
-            "satisfies the control objective", "meets the control objective",
-            "fully satisfies", "directly supports", "satisfies the requirement"
-        ]
-        explicitly_satisfies = (
-            any(sp in description_lower for sp in _satisfies_phrases) or
-            any(sp in reasoning_lower for sp in _satisfies_phrases)
-        )
-
-        if explicitly_satisfies:
-            is_negative_quote = False
-            is_negative_description = False
-
-        if is_negative_quote or is_negative_description:
-            # Do NOT upgrade — but state the real reason instead of one generic message,
-            # since "evidence is absent" is misleading when a real quote exists and the
-            # actual trigger was a stated (but unmet) gap/missing-requirement.
-            cid = finding.get("control_id") or ""
-            if is_negative_quote:
-                _skip_reason = "Evidence quote itself explicitly states evidence is absent/not found"
-            elif any(neg in description_lower for neg in _neg_description) or any(neg in gap_lower for neg in _neg_description):
-                _skip_reason = "Description/gap text explicitly states evidence is absent/not documented"
-            else:
-                _skip_reason = "Gap description states a real, unmet 'Missing Requirements' item (evidence exists but does not fully satisfy the control)"
-            print(f"[RULE 8 SKIP] Control {cid}: {_skip_reason}. "
-                  f"Keeping NON_COMPLIANT to prevent self-contradiction.", flush=True)
-        else:
-            # Evidence exists in the quote — check if the reasoning acknowledges it was found
-            evidence_acknowledged = explicitly_satisfies or any(kw in reasoning_lower for kw in [
-                "evidence was found", "demonstrating", "mfa", "pam", "multi-factor",
-                "privileged access", "db_backup", "backup", "implementation", "screenshot",
-                "cloudwatch", "ntp", "clock sync", "log archive", "policy", "approved",
-                "documented", "procedure", "control", "ciso", "information security",
-                "access control", "authentication", "isms", "records", "retention"
-            ])
-
-            if evidence_acknowledged:
-                cid = finding.get("control_id") or ""
-                print(f"[RULE 8 GUARDRAIL] Control {cid}: Evidence present in any form (quote: '{quote[:40]}...'). Upgrading from NON_COMPLIANT to COMPLIANT under Workspace Audit Rule 8.", flush=True)
-                finding["status"] = "COMPLIANT"
-                finding["policy_present"] = "Compliant"
-                finding["evidence_present"] = "Compliant"
-                finding["severity"] = "N/A"
-                finding["recommendation"] = "No action required. Evidence satisfies the control objective. Continue periodic evidence review."
-                finding["review_note"] = "Rule 8 Applied: Evidence in any form (document/screenshot/log) satisfied control objective."
-
-
-    # ── POLICY VS EVIDENCE COMBINATION MATRIX RULE ───────────────────────
-    # Both Policy AND Evidence must be Compliant/YES for overall COMPLIANT.
-    # If either Policy or Evidence is missing or non-compliant, result is NON_COMPLIANT.
-    if finding.get("status") == "COMPLIANT":
-        finding["policy_present"] = "Compliant"
-        finding["evidence_present"] = "Compliant"
-        finding["severity"] = "N/A"
-        if finding.get("reasoning"):
-            finding["description"] = finding["reasoning"]
-        finding["recommendation"] = finding.get("recommendation") or "No action required. Continue to maintain current procedures and ensure periodic review of compliance evidence."
-    else:
-        pol_pres = str(finding.get("policy_present") or "No").strip().upper()
-        ev_pres  = str(finding.get("evidence_present") or "No").strip().upper()
-
-        # Reconcile with the already-verified grounded evidence quote: grounding
-        # independently confirmed (against the source document, not the LLM's opinion)
-        # whether real evidence text exists. Trust that over the LLM's separate,
-        # unverified evidence_present self-rating so the two can't disagree on the
-        # same underlying fact (e.g. Evidence=YES above vs Evidence=NOT FOUND here).
+        # Trust independently-verified grounding (Gates 1-3.5, checked against the
+        # actual source document) over the LLM's own unverified evidence_status
+        # self-rating, so the two can never disagree about whether real evidence
+        # text exists.
         _quote_check = str(finding.get("evidence_quote") or "").strip()
         if (finding.get("hallucination_check") in ("GROUNDED", "GROUNDED_WITH_OCR_WARNING")
                 and _quote_check and _quote_check.upper() != "NOT_FOUND"):
-            ev_pres = "YES"
+            evidence_status = "FOUND"
 
-        if pol_pres in ("YES", "COMPLIANT") and ev_pres in ("YES", "COMPLIANT"):
-            finding["status"] = "COMPLIANT"
+        # UNKNOWN validity/freshness is acceptable (confirmed with the user) -- most
+        # real documents never state effective/review/expiry dates or evidence
+        # timestamps, and "never invent/assume" means an absent date is not itself
+        # evidence of a problem. Only an explicitly *confirmed* issue (EXPIRED,
+        # REVIEW_OVERDUE, STALE) blocks COMPLIANT.
+        policy_valid_ok = policy_validity in ("CURRENT", "UNKNOWN")
+        evidence_fresh_ok = evidence_freshness in ("CURRENT", "UNKNOWN")
+
+        is_compliant = (
+            policy_status == "FOUND" and policy_assessment == "COMPLIANT"
+            and evidence_status == "FOUND" and evidence_assessment == "COMPLIANT"
+            and policy_valid_ok and evidence_fresh_ok
+        )
+
+        finding["policy_status"] = policy_status
+        finding["evidence_status"] = evidence_status
+        finding["final_result"] = "COMPLIANT" if is_compliant else "NON_COMPLIANT"
+        finding["status"] = finding["final_result"]
+
+        # Keep the legacy policy_present/evidence_present fields (still read by the
+        # UI/DB pending Phase 7) in sync with the new deterministic fields, rather
+        # than the LLM's separate old-schema self-rating.
+        if is_compliant:
             finding["policy_present"] = "Compliant"
             finding["evidence_present"] = "Compliant"
             finding["severity"] = "N/A"
             if finding.get("reasoning"):
                 finding["description"] = finding["reasoning"]
+            finding["recommendation"] = finding.get("recommendation") or "No action required. Continue to maintain current procedures and ensure periodic review of compliance evidence."
         else:
             cid = finding.get("control_id") or ""
             cname = finding.get("control_name") or "Control"
-            print(f"[POLICY-EVIDENCE MATRIX] Control {cid}: Policy={pol_pres}, Evidence={ev_pres}. Both must be COMPLIANT for overall COMPLIANT. Final Verdict: NON_COMPLIANT", flush=True)
-            finding["status"] = "NON_COMPLIANT"
+            print(f"[DETERMINISTIC FINAL RESULT] Control {cid}: policy_status={policy_status}, "
+                  f"policy_assessment={policy_assessment}, policy_validity={policy_validity}, "
+                  f"evidence_status={evidence_status}, evidence_assessment={evidence_assessment}, "
+                  f"evidence_freshness={evidence_freshness} -> NON_COMPLIANT", flush=True)
 
-            # ── FOUND vs NOT FOUND DETERMINATION ──────────────────────────
+            # ── FOUND vs NOT FOUND DETERMINATION (unchanged from before) ──────
             # "Found" = Document was uploaded & read, but fails control requirements
             # "Not Found" = Document completely missing from uploaded evidence
             doc_text_present = bool(str(finding.get("condensed_context") or
                                        finding.get("evidence_snippet") or
                                        finding.get("justification") or "").strip())
-            pol_val = str(finding.get("policy_present") or "No").strip().upper()
-            ev_val  = str(finding.get("evidence_present") or "No").strip().upper()
-
-            # Determine if document was actually read/present or fully missing
-            pol_found  = pol_val in ("FOUND", "YES", "PARTIAL")
-            ev_found   = ev_val  in ("FOUND", "YES", "PARTIAL")
+            pol_found = policy_status == "FOUND"
+            ev_found = evidence_status == "FOUND"
 
             if pol_found or ev_found or doc_text_present:
                 # Document uploaded and read, but fails control — orange badge
-                finding["policy_present"]  = "Found"
+                finding["policy_present"] = "Found"
                 finding["evidence_present"] = "Found"
                 rec_str = str(finding.get("recommendation") or "").lower()
                 if not rec_str or _is_stale_no_action_recommendation(rec_str):
@@ -1179,7 +1101,7 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                     )
             else:
                 # Document completely absent — red badge
-                finding["policy_present"]  = "Not Found"
+                finding["policy_present"] = "Not Found"
                 finding["evidence_present"] = "Not Found"
                 # Clear misleading snippet if evidence absent
                 snip_lower = str(finding.get("evidence_snippet") or "").lower()
@@ -1193,8 +1115,7 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                         f"implement technical controls, establish evidence logging procedures, "
                         f"and upload the documentation before the next audit cycle."
                     )
-    # ─────────────────────────────────────────────────────────────────────
-            
+
     return finding
 
 

@@ -35,6 +35,12 @@ from src.api.endpoints.logs import router as logs_router
 from src.api.endpoints.audit import router as audit_router
 from src.api.endpoints.license import router as license_router
 
+# Sentry error tracking — no-op until SENTRY_DSN is set (see qa/monitoring/README.md)
+_sentry_dsn = os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    import sentry_sdk
+    sentry_sdk.init(dsn=_sentry_dsn, traces_sample_rate=0.1, send_default_pii=False)
+
 app = FastAPI(
     title="AICyberAuditBox - Local API Server",
     description="Offline REST API Server for RAG ISO 27001 Compliance Audit Intelligence",

@@ -100,10 +100,21 @@ def _init_pgvector(pg_engine):
         print(f"[VEC SEARCH] pgvector init failed ({e}); using Python cosine.", flush=True)
         return "python"
 
+def _flatten_embedding_vector(v):
+    """Unwraps a vector nested in however many list-of-one-list layers get_embedding()
+    left in place (observed varying by input length/backend response shape -- a single
+    fixed-depth unwrap wasn't enough), down to a flat list of numbers."""
+    while isinstance(v, list) and len(v) == 1 and isinstance(v[0], list):
+        v = v[0]
+    return v
+
 def _vec_store_embedding(chunk_db_id, vector, engine):
     """Store a single embedding in the native vector engine."""
     if engine is None or engine == "python" or vector is None:
         return
+    # Same defense as _vec_native_search() -- without it this silently fails (caught by
+    # the bare except below) and native search finds nothing to search.
+    vector = _flatten_embedding_vector(vector)
     try:
         if engine.get("type") == "sqlite-vec":
             import sqlite_vec, sqlite3, struct
@@ -132,6 +143,11 @@ def _vec_native_search(query_vector, filenames, top_k, engine):
     """Perform KNN search using native engine. Returns {chunk_db_id: similarity}."""
     if engine is None or engine == "python" or query_vector is None:
         return {}
+    # get_embedding() can return a vector wrapped in list-of-one-list, and how many
+    # layers varies (observed differing by input length) -- without unwrapping fully,
+    # sqlite-vec's struct.pack blows up and pgvector's CAST(... AS vector) gets a
+    # doubly-bracketed literal it can't parse ("invalid input syntax for type vector").
+    query_vector = _flatten_embedding_vector(query_vector)
     try:
         if engine.get("type") == "sqlite-vec":
             import sqlite_vec, sqlite3, struct
@@ -215,6 +231,22 @@ DEFAULT_TOP_K = {
     "pptx": 12,
     "image": 12
 }
+
+# Flavor-signal terms for the dual policy/evidence retrieval pass (see
+# _retrieve_rag_context): a chunk heavy on either list scores well on that flavor's
+# BM25 query even if it doesn't otherwise match the control's own keywords strongly --
+# e.g. a dated log entry should surface for the evidence pass even on a control whose
+# own keyword list is policy-document-flavored.
+POLICY_SIGNAL_TERMS = [
+    "policy", "procedure", "standard", "shall", "must", "should", "approved",
+    "documented", "requirement", "guideline", "framework", "governance",
+    "mandate", "revision", "version"
+]
+EVIDENCE_SIGNAL_TERMS = [
+    "log", "report", "screenshot", "evidence", "completed", "executed",
+    "performed", "record", "timestamp", "date", "confirmed", "verified",
+    "output", "result", "export", "successful"
+]
 
 
 
@@ -305,7 +337,16 @@ def save_document_chunks(filename, text):
                             metadata_json=json.dumps(child_metadata),
                             source_file=child_metadata.get("source_file"),
                             source_type=child_metadata.get("source_type"),
-                            chunk_id=child_metadata.get("chunk_id")
+                            chunk_id=child_metadata.get("chunk_id"),
+                            # These previously only lived inside metadata_json (a JSON
+                            # blob), never in their own typed columns, despite the
+                            # columns existing on the model -- populating them enables
+                            # direct DB filtering/joins by page/row/slide/image later.
+                            page_number=child_metadata.get("page_number"),
+                            row_number=child_metadata.get("start_row"),
+                            slide_number=child_metadata.get("slide_number"),
+                            image_id=child_metadata.get("image_id"),
+                            section_heading=child_metadata.get("section_heading")
                         )
                         session.add(db_chunk)
                         chunks_saved += 1
@@ -468,11 +509,9 @@ def _get_ollama_embedding(text, model="nomic-embed-text", url=None):
 def _cosine_similarity(v1, v2):
     if v1 is None or v2 is None:
         return 0.0
-    # Defensively flatten list of lists if passed
-    if isinstance(v1, list) and len(v1) > 0 and isinstance(v1[0], list):
-        v1 = v1[0]
-    if isinstance(v2, list) and len(v2) > 0 and isinstance(v2[0], list):
-        v2 = v2[0]
+    # Defensively flatten list-of-one-list nesting if passed (see _flatten_embedding_vector)
+    v1 = _flatten_embedding_vector(v1)
+    v2 = _flatten_embedding_vector(v2)
     try:
         dot_product = sum(x * y for x, y in zip(v1, v2))
         norm_v1 = sum(x * x for x in v1) ** 0.5
@@ -484,7 +523,7 @@ def _cosine_similarity(v1, v2):
         print(f"[COSINE ERROR] Failed to compute similarity: {e}. v1_type={type(v1)}, v2_type={type(v2)}", flush=True)
         return 0.0
 
-def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, KEYWORD_SYNONYMS):
+def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, KEYWORD_SYNONYMS, audit_mode=None):
     """Production RAG retrieval engine.
     Phase 3: Multi-document evidence aggregation — searches ALL uploaded files simultaneously.
     Phase 4: Pipeline: keyword scoring -> exact dedup -> Jaccard near-dedup -> diversity -> rank.
@@ -494,6 +533,13 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
     # Token budget: dynamically configurable via env vars (defaults: 3000 / 5000 tokens)
     TARGET_CONTEXT_TOKENS = int(os.environ.get("TARGET_CONTEXT_TOKENS", "3000"))
     HARD_MAX_CONTEXT_TOKENS = int(os.environ.get("HARD_MAX_CONTEXT_TOKENS", "5000"))
+
+    # Deep mode (the default/thorough audit mode) gets more retrieval candidates and the
+    # stronger reranker; Quick mode keeps the leaner original behavior. Anything other
+    # than an explicit "Quick"-prefixed mode (including callers that don't pass audit_mode
+    # at all, e.g. tests/run_evals.py's "Normal") is treated as Deep -- the more thorough
+    # path is the safer default when the mode is unknown.
+    is_quick_mode = str(audit_mode or "").strip().lower().startswith("quick")
 
     # Smart Vector Chunking for ALL documents (no bypass).
     # All documents go through: Parent-Child Sentence Windows →
@@ -545,6 +591,11 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
 
     top_k_config = load_top_k_config()
     configured_top_k = top_k_config.get(file_type, 15)
+    # Deep mode raises the candidate floor toward the 15-30 range regardless of the
+    # per-file-type config; Quick mode keeps whatever's configured (a user-raised config
+    # value still wins either way, this only ever raises the floor, never lowers it).
+    if not is_quick_mode:
+        configured_top_k = max(configured_top_k, 20)
 
 
     # Fallback: paragraph split from raw context if DB empty
@@ -583,16 +634,54 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
         for kw, weight in c_keywords.items():
             batch_keywords[kw] = max(batch_keywords.get(kw, 0), weight)
 
-    # Step 2: Score ALL chunks
+    # Step 2: Score ALL chunks with real BM25 (IDF + document-length normalization,
+    # replacing the previous plain term-count x weight scorer). Two flavored queries
+    # (policy-leaning / evidence-leaning signal terms layered onto the same weighted
+    # control keywords) are scored independently and merged by taking the max per
+    # chunk, so a chunk strongly relevant to EITHER flavor surfaces -- not just chunks
+    # that are generically on-topic for the control as a whole.
+    def _weighted_query_tokens(extra_terms):
+        tokens = []
+        for kw, weight in batch_keywords.items():
+            tokens.extend(kw.split() * max(1, round(weight)))
+        for term in extra_terms:
+            tokens.extend(term.split())
+        return tokens
+
+    policy_query_tokens = _weighted_query_tokens(POLICY_SIGNAL_TERMS)
+    evidence_query_tokens = _weighted_query_tokens(EVIDENCE_SIGNAL_TERMS)
+
+    chunk_texts = [c.content for c in db_chunks] if db_chunks else paragraphs
+    tokenized_corpus = [re.findall(r'\b[a-zA-Z0-9_\-]{3,}\b', t.lower()) for t in chunk_texts]
+
+    combined_scores = None
+    if tokenized_corpus:
+        try:
+            from rank_bm25 import BM25Okapi
+            bm25 = BM25Okapi(tokenized_corpus)
+            policy_scores = bm25.get_scores(policy_query_tokens)
+            evidence_scores = bm25.get_scores(evidence_query_tokens)
+            # Cast off numpy scalars here so nothing downstream (JSON serialization,
+            # DB float columns) has to know BM25 was ever involved.
+            combined_scores = [float(max(p, e)) for p, e in zip(policy_scores, evidence_scores)]
+        except Exception as bm25_err:
+            print(f"[BM25 WARNING] BM25 scoring failed ({bm25_err}); falling back to term-count scorer.", flush=True)
+
+        if combined_scores is None:
+            # Fallback: original plain term-count x weight scorer.
+            combined_scores = []
+            for t in chunk_texts:
+                t_lower = t.lower()
+                score = 0
+                for kw, weight in batch_keywords.items():
+                    count = len(re.findall(r'\b' + re.escape(kw) + r'\b', t_lower))
+                    if count > 0:
+                        score += count * weight
+                combined_scores.append(score)
+
     scored_chunks = []
     if db_chunks:
-        for chunk in db_chunks:
-            p_lower = chunk.content.lower()
-            score = 0
-            for kw, weight in batch_keywords.items():
-                count = len(re.findall(r'\b' + re.escape(kw) + r'\b', p_lower))
-                if count > 0:
-                    score += count * weight
+        for score, chunk in zip(combined_scores or [], db_chunks):
             src_fname = chunk.filename
             if chunk.metadata_json:
                 try:
@@ -603,13 +692,7 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
                     pass
             scored_chunks.append((score, chunk.content, chunk.chunk_index, src_fname, chunk))
     else:
-        for idx, p in enumerate(paragraphs):
-            p_lower = p.lower()
-            score = 0
-            for kw, weight in batch_keywords.items():
-                count = len(re.findall(r'\b' + re.escape(kw) + r'\b', p_lower))
-                if count > 0:
-                    score += count * weight
+        for idx, (score, p) in enumerate(zip(combined_scores or [], paragraphs)):
             scored_chunks.append((score, p, idx, "fallback", None))
 
     unique_src_files = list({sc[3] for sc in scored_chunks if sc[3] != "fallback"})
@@ -758,7 +841,13 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
     deduplicated.sort(key=lambda x: x[0], reverse=True)
     
     # ── Cross-Encoder Reranking ──────────────────────────────────────────────
-    rerank_mode = os.environ.get("RAG_RERANK_MODE", "quick").strip().lower()
+    # An explicit RAG_RERANK_MODE env var always wins (operator override); otherwise
+    # Deep mode defaults to the stronger BGE reranker and Quick mode keeps MiniLM.
+    _env_rerank_mode = os.environ.get("RAG_RERANK_MODE")
+    if _env_rerank_mode:
+        rerank_mode = _env_rerank_mode.strip().lower()
+    else:
+        rerank_mode = "quick" if is_quick_mode else "deep"
     reranker = get_reranker(rerank_mode)
     
     if reranker is not None and deduplicated:
@@ -815,73 +904,90 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
     # a fixed threshold rejects almost everything regardless of actual relevance. The
     # reranker's ordering (already sorted best-first above) is what determines quality;
     # the token budget below is the real, meaningful stopping condition.
-    selected_chunks = []
-    current_tokens = 0
-    for item in deduplicated:
-        chunk_tokens = len(item[1]) // 4
-        if current_tokens + chunk_tokens > HARD_MAX_CONTEXT_TOKENS:
-            break
-        selected_chunks.append(item)
-        current_tokens += chunk_tokens
-        if current_tokens >= TARGET_CONTEXT_TOKENS:
-            break
+    #
+    # Wrapped in a function so it can be run twice: once at the normal 3-5K budget, and
+    # -- only if that yields nothing usable while real candidates existed beyond the
+    # cutoff -- once more at an expanded budget, before falling back to a raw-text slice
+    # (which is effectively a "give up" path that looks like NOT_FOUND downstream).
+    def _select_and_condense(hard_max_tokens):
+        selected_chunks = []
+        current_tokens = 0
+        for item in deduplicated:
+            chunk_tokens = len(item[1]) // 4
+            if current_tokens + chunk_tokens > hard_max_tokens:
+                break
+            selected_chunks.append(item)
+            current_tokens += chunk_tokens
+            if current_tokens >= TARGET_CONTEXT_TOKENS:
+                break
 
-    actual_top_k = len(selected_chunks)
-    files_in_selected = list({item[3] for item in selected_chunks})
+        files_in_selected = list({item[3] for item in selected_chunks})
+        print(
+            f"[RAG LOG] file_type={file_type} | docs={len(file_names_list)} | "
+            f"total_chunks={total_available_chunks} | selected={len(selected_chunks)} | "
+            f"token_estimate={current_tokens} | budget={hard_max_tokens} | files_in_evidence={files_in_selected}"
+        )
 
-    print(
-        f"[RAG LOG] file_type={file_type} | docs={len(file_names_list)} | "
-        f"total_chunks={total_available_chunks} | selected={actual_top_k} | "
-        f"token_estimate={current_tokens} | files_in_evidence={files_in_selected}"
-    )
+        # Chronological sort within each file
+        file_order = {fname: idx for idx, fname in enumerate(file_names_list)}
+        final_sorted = sorted(
+            selected_chunks,
+            key=lambda x: (file_order.get(x[3], 999), x[2])
+        )
 
-    # Chronological sort within each file
-    file_order = {fname: idx for idx, fname in enumerate(file_names_list)}
-    final_sorted = sorted(
-        selected_chunks,
-        key=lambda x: (file_order.get(x[3], 999), x[2])
-    )
+        # Collect chunk metadata
+        chunk_metas = []
+        for _, content, index, src_file, chunk_obj in final_sorted:
+            if chunk_obj is not None and chunk_obj.metadata_json:
+                try:
+                    meta = json.loads(chunk_obj.metadata_json)
+                    chunk_metas.append(meta)
+                except Exception:
+                    chunk_metas.append({"source_file": src_file})
+            else:
+                chunk_metas.append({"source_file": src_file})
 
-    # Collect chunk metadata
-    retrieved_chunk_metas = []
-    for _, content, index, src_file, chunk_obj in final_sorted:
-        if chunk_obj is not None and chunk_obj.metadata_json:
-            try:
-                meta = json.loads(chunk_obj.metadata_json)
-                retrieved_chunk_metas.append(meta)
-            except Exception:
-                retrieved_chunk_metas.append({"source_file": src_file})
-        else:
-            retrieved_chunk_metas.append({"source_file": src_file})
+        # Build condensed context (Parent-Child Sentence Window Expansion)
+        condensed = ""
+        added_paragraphs = set()
+        for _, child_content, _, _, chunk_obj in final_sorted:
+            # Retrieve parent paragraph if available in metadata, else fallback to child sentence
+            parent_context = child_content
+            if chunk_obj is not None and chunk_obj.metadata_json:
+                try:
+                    meta = json.loads(chunk_obj.metadata_json)
+                    if "parent_context" in meta:
+                        parent_context = meta["parent_context"]
+                except Exception:
+                    pass
 
-    # Build condensed context (Parent-Child Sentence Window Expansion)
-    condensed_context = ""
-    added_paragraphs = set()
-    for _, child_content, _, _, chunk_obj in final_sorted:
-        # Retrieve parent paragraph if available in metadata, else fallback to child sentence
-        parent_context = child_content
-        if chunk_obj is not None and chunk_obj.metadata_json:
-            try:
-                meta = json.loads(chunk_obj.metadata_json)
-                if "parent_context" in meta:
-                    parent_context = meta["parent_context"]
-            except Exception:
-                pass
-                
-        paras = [para.strip() for para in parent_context.split('\n\n') if para.strip()]
-        chunk_unique_text = []
-        for para in paras:
-            para_body = para
-            if para.startswith('[') and ']' in para:
-                lines = para.split('\n', 1)
-                if len(lines) > 1:
-                    para_body = lines[1]
-            para_norm = " ".join(para_body.lower().split())
-            if para_norm not in added_paragraphs:
-                chunk_unique_text.append(para)
-                added_paragraphs.add(para_norm)
-        if chunk_unique_text:
-            condensed_context += "\n\n".join(chunk_unique_text) + "\n\n"
+            paras = [para.strip() for para in parent_context.split('\n\n') if para.strip()]
+            chunk_unique_text = []
+            for para in paras:
+                para_body = para
+                if para.startswith('[') and ']' in para:
+                    lines = para.split('\n', 1)
+                    if len(lines) > 1:
+                        para_body = lines[1]
+                para_norm = " ".join(para_body.lower().split())
+                if para_norm not in added_paragraphs:
+                    chunk_unique_text.append(para)
+                    added_paragraphs.add(para_norm)
+            if chunk_unique_text:
+                condensed += "\n\n".join(chunk_unique_text) + "\n\n"
+
+        return condensed, len(selected_chunks), chunk_metas
+
+    condensed_context, actual_top_k, retrieved_chunk_metas = _select_and_condense(HARD_MAX_CONTEXT_TOKENS)
+
+    # Expanded-budget retry: only fires when the normal budget produced nothing at all
+    # AND there were more candidates sitting beyond the cutoff that never got a chance --
+    # i.e. the budget itself was the limiting factor, not a genuine absence of evidence.
+    if not condensed_context.strip() and len(deduplicated) > actual_top_k:
+        EXPANDED_CONTEXT_TOKENS = int(os.environ.get("EXPANDED_CONTEXT_TOKENS", "8000"))
+        print(f"[RAG BUDGET] Normal budget ({HARD_MAX_CONTEXT_TOKENS} tokens) yielded no usable context "
+              f"with {len(deduplicated)} candidates available -- retrying once at {EXPANDED_CONTEXT_TOKENS} tokens.", flush=True)
+        condensed_context, actual_top_k, retrieved_chunk_metas = _select_and_condense(EXPANDED_CONTEXT_TOKENS)
 
     if not condensed_context.strip():
         condensed_context = context[:4000 if "3b" in llm_model.lower() else 6000]

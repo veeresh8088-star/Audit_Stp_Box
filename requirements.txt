@@ -35,6 +35,8 @@ opencv-python-headless
 psutil
 cvss>=3.1
 lxml>=5.0.0
+sentry-sdk[fastapi]>=2.0.0
+rank-bm25>=0.2.2
 
 
 

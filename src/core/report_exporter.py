@@ -1686,6 +1686,57 @@ from fpdf.enums import XPos, YPos
 from src.core.pii_redactor import redact_pii
 
 
+# ── RAG accuracy overhaul (Phase 5/6/7): export enrichment helpers ─────────────
+# The findings table across all export paths (Word template, programmatic DOCX
+# fallback, PDF) uses a fixed 8-column professional layout that predates the
+# policy/evidence split -- confirmed with the user not to add new columns (would
+# widen/disturb the template). Instead these helpers build short summary strings
+# that get folded into the existing Observations/Evidence cell text. All return ""
+# when a finding predates this schema (its DB columns are null), so older reports
+# are unaffected.
+def _policy_evidence_summary(f):
+    """Compact 'Policy: X, Y | Evidence: X, Y' line for the Observations cell."""
+    pol_status = f.get("policy_status")
+    pol_assess = f.get("policy_assessment")
+    ev_status = f.get("evidence_status")
+    ev_assess = f.get("evidence_assessment")
+    if not (pol_status or pol_assess or ev_status or ev_assess):
+        return ""
+    parts = []
+    if pol_status or pol_assess:
+        parts.append(f"Policy: {pol_status or 'UNKNOWN'}, {pol_assess or 'UNKNOWN'}")
+    if ev_status or ev_assess:
+        parts.append(f"Evidence: {ev_status or 'UNKNOWN'}, {ev_assess or 'UNKNOWN'}")
+    return " | ".join(parts)
+
+
+def _policy_evidence_gap_text(f):
+    """Specific gap explanations, appended to the Observations cell."""
+    pol_gap = str(f.get("policy_gap") or "").strip()
+    ev_gap = str(f.get("evidence_gap") or "").strip()
+    parts = []
+    if pol_gap and pol_gap.lower() != "no policy gap identified.":
+        parts.append(f"Policy Gap: {pol_gap}")
+    if ev_gap and ev_gap.lower() != "no evidence gap identified.":
+        parts.append(f"Evidence Gap: {ev_gap}")
+    return " ".join(parts)
+
+
+def _evidence_meta_summary(f):
+    """Validity/freshness/relevance line, appended to the Evidence cell."""
+    parts = []
+    validity = f.get("policy_validity")
+    freshness = f.get("evidence_freshness")
+    relevance = f.get("evidence_relevance")
+    if validity and validity != "UNKNOWN":
+        parts.append(f"Policy Validity: {validity}")
+    if freshness and freshness != "UNKNOWN":
+        parts.append(f"Evidence Freshness: {freshness}")
+    if relevance:
+        parts.append(f"Relevance: {relevance}")
+    return " | ".join(parts)
+
+
 def _export_iso_template_docx(session_title, findings, resolved_list, status, comments="", custom_logo=None, metadata=None):
     """
     Generates an ISO audit DOCX report using `VAPT/Sample report.docx` as the master template.
@@ -1960,11 +2011,20 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
 
             policy_ref = str(f.get("policy_reference") or f.get("reference") or f.get("control_id") or "")
             obs        = str(f.get("gap_description") or f.get("reasoning") or f.get("observation") or f.get("finding") or "")[:800]
+            pe_summary = _policy_evidence_summary(f)
+            pe_gap     = _policy_evidence_gap_text(f)
+            if pe_summary:
+                obs = f"{pe_summary}\n{obs}"
+            if pe_gap:
+                obs = f"{obs}\n{pe_gap}"
             display_s  = str(f.get("display_status") or f.get("status") or "Open")
             risk_lbl   = _risk_level(f)
             impact     = str(f.get("impact") or f.get("risk_impact") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Business Risk"))
             suggestion = str(f.get("recommendation") or f.get("suggestion") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Remediate as per IS guidelines."))[:400]
             evidence   = str(f.get("source_files") or f.get("evidence_quote") or f.get("evidence") or "Audit Evidence Files")
+            ev_meta    = _evidence_meta_summary(f)
+            if ev_meta:
+                evidence = f"{evidence}\n{ev_meta}"
 
 
             _add_obs_row(
@@ -2458,12 +2518,22 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         row_cells[0].paragraphs[0].add_run(str(f_idx))
         row_cells[1].paragraphs[0].add_run(f.get("control_id", "") + " " + f.get("control", ""))
         row_cells[2].paragraphs[0].add_run(f.get("clause", "") or "ISO 27001 Annex A")
-        row_cells[3].paragraphs[0].add_run(redact_pii(f.get("finding") or f.get("description") or "-"))
+        obs_text = redact_pii(f.get("finding") or f.get("description") or "-")
+        pe_summary = _policy_evidence_summary(f)
+        pe_gap = _policy_evidence_gap_text(f)
+        if pe_summary:
+            obs_text = f"{pe_summary}\n{obs_text}"
+        if pe_gap:
+            obs_text = f"{obs_text}\n{pe_gap}"
+        row_cells[3].paragraphs[0].add_run(obs_text)
         row_cells[4].paragraphs[0].add_run(risk_text).bold = True
         row_cells[5].paragraphs[0].add_run(redact_pii(f.get("business_impact") or "NIL"))
         row_cells[6].paragraphs[0].add_run(redact_pii(f.get("recommendation") or "NIL"))
-        
+
         ev_text = redact_pii(f.get("evidence_snippet") or f.get("evidence_quote") or "N/A")
+        ev_meta = _evidence_meta_summary(f)
+        if ev_meta:
+            ev_text = f"{ev_text}\n{ev_meta}"
         row_cells[7].paragraphs[0].add_run(ev_text)
 
     # Set column widths
@@ -2924,18 +2994,27 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
             
             # PII redacted before writing to exported PDF
             obs_text = redact_pii(f.get("finding") or f.get("description") or "-")
-            r.cell(clean_text(truncate_cell_text(obs_text, 600)), style=cell_style)
-            
+            pe_summary = _policy_evidence_summary(f)
+            pe_gap = _policy_evidence_gap_text(f)
+            if pe_summary:
+                obs_text = f"{pe_summary}\n{obs_text}"
+            if pe_gap:
+                obs_text = f"{obs_text}\n{pe_gap}"
+            r.cell(clean_text(truncate_cell_text(obs_text, 700)), style=cell_style)
+
             r.cell(clean_text(risk_text), style=risk_style)
-            
+
             imp_text = redact_pii(f.get("business_impact") or "NIL")
             r.cell(clean_text(truncate_cell_text(imp_text, 400)), style=cell_style)
-            
+
             sug_text = redact_pii(f.get("recommendation") or "NIL")
             r.cell(clean_text(truncate_cell_text(sug_text, 500)), style=cell_style)
-            
+
             ev_text = redact_pii(f.get("evidence_snippet") or f.get("evidence_quote") or "N/A")
-            r.cell(clean_text(truncate_cell_text(ev_text, 400)), style=cell_style)
+            ev_meta = _evidence_meta_summary(f)
+            if ev_meta:
+                ev_text = f"{ev_text}\n{ev_meta}"
+            r.cell(clean_text(truncate_cell_text(ev_text, 500)), style=cell_style)
 
     pdf_bytes = pdf.output()
     return bytes(pdf_bytes)

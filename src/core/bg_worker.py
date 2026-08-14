@@ -37,6 +37,7 @@ def log_system_event(event_type, severity, details, session_id=None, actor="rk1@
     except Exception as _e:
         print(f"[SYSTEM EVENT LOG ERROR] {_e}", flush=True)
 from src.core.controls_data import USE_CASES
+from src.core.control_keywords import CONTROL_KEYWORDS
 from src.core.input_guardrail import scan_file_security
 from src.core.parsers.doc_parsers import extract_text
 from src.core.retrieval import save_document_chunks
@@ -198,6 +199,10 @@ def _load_custom_use_cases(force: bool = False) -> list:
                 f"the custom control {cid} ({name})."
             ),
             "_is_custom": True,
+            # Raw curated keywords (structured, not just flattened into prompt_hint text
+            # above) so _build_controls_for_audit() can turn them into real retrieval
+            # scoring weights instead of leaving retrieval.py's keyword scorer blind to them.
+            "keywords": row["keywords"] or [],
         })
 
     _CUSTOM_USE_CASES_CACHE = custom_ucs
@@ -254,6 +259,14 @@ def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
             continue
         if selected_sls is None or uc["sl"] in selected_sls:
             seen_controls.add(ctrl_id)
+            # Custom controls carry real auditor-curated keywords (weighted highest, 2.5,
+            # since a human picked them) via _load_custom_use_cases(); standard controls
+            # use the deterministically pre-generated CONTROL_KEYWORDS lookup. Either way,
+            # retrieval.py's keyword scorer previously always fell back to empty here.
+            if uc.get("_is_custom") and uc.get("keywords"):
+                kw_weights = {kw: 2.5 for kw in uc["keywords"]}
+            else:
+                kw_weights = CONTROL_KEYWORDS.get(ctrl_id, {})
             controls.append({
                 "control": ctrl_id,
                 "label": uc["label"],
@@ -262,6 +275,7 @@ def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
                 "severity": uc.get("severity", "MEDIUM"),
                 "standard": uc.get("standard", ""),
                 "recommendation": uc.get("recommendation", ""),
+                "keywords": kw_weights,
             })
     return controls
 
@@ -870,6 +884,7 @@ Return format: ["topic1", "topic2", ...]"""
             "severity": c["severity"],
             "standard": c.get("standard", "ISO 27001:2022"),
             "recommendation": c.get("recommendation", ""),
+            "keywords": c.get("keywords") or {},
 
             # Context & Config
             "document_text": control_context,
@@ -1356,7 +1371,28 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                         status="COMPLIANT" if is_comp else f_status,
                         policy_present=f.get("policy_present") or ("Compliant" if is_comp else "No"),
                         evidence_present=f.get("evidence_present") or ("Compliant" if is_comp else "No"),
-                        source_files=f.get("source_files", "")
+                        source_files=f.get("source_files", ""),
+                        # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7)
+                        policy_status=f.get("policy_status"),
+                        policy_assessment=f.get("policy_assessment"),
+                        policy_name=f.get("policy_name"),
+                        policy_version=f.get("policy_version"),
+                        policy_clause=f.get("policy_clause"),
+                        policy_effective_date=f.get("policy_effective_date"),
+                        policy_review_date=f.get("policy_review_date"),
+                        policy_expiry_date=f.get("policy_expiry_date"),
+                        policy_validity=f.get("policy_validity"),
+                        policy_finding=f.get("policy_finding"),
+                        policy_gap=f.get("policy_gap"),
+                        evidence_status=f.get("evidence_status"),
+                        evidence_assessment=f.get("evidence_assessment"),
+                        evidence_date=f.get("evidence_date"),
+                        evidence_freshness=f.get("evidence_freshness"),
+                        evidence_finding=f.get("evidence_finding"),
+                        evidence_gap=f.get("evidence_gap"),
+                        evidence_relevance=f.get("evidence_relevance"),
+                        final_result=f.get("final_result"),
+                        final_reason=f.get("final_reason")
                     ))
 
                 # 3. Calculate score and update ComplianceScore

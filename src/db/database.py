@@ -100,6 +100,32 @@ class Finding(Base):
     severity_score        = Column(Float, default=0.0, server_default="0.0")
     is_saved_to_shakthi   = Column(Boolean, default=False, server_default="false")
 
+    # Policy vs Evidence split (RAG accuracy overhaul, Phase 7) -- persists the
+    # AuditFindingSchema fields from Phase 5/6. Dates kept as free-text strings
+    # since documents state them in arbitrary formats, not parsed into real Date
+    # columns. All nullable so existing rows aren't affected by the auto schema
+    # reconciliation in init_db() picking these up as new columns.
+    policy_status          = Column(String(50), nullable=True)
+    policy_assessment      = Column(String(50), nullable=True)
+    policy_name            = Column(String(300), nullable=True)
+    policy_version         = Column(String(100), nullable=True)
+    policy_clause          = Column(String(300), nullable=True)
+    policy_effective_date  = Column(String(100), nullable=True)
+    policy_review_date     = Column(String(100), nullable=True)
+    policy_expiry_date     = Column(String(100), nullable=True)
+    policy_validity        = Column(String(50), nullable=True)
+    policy_finding         = Column(Text, nullable=True)
+    policy_gap             = Column(Text, nullable=True)
+    evidence_status        = Column(String(50), nullable=True)
+    evidence_assessment    = Column(String(50), nullable=True)
+    evidence_date          = Column(String(100), nullable=True)
+    evidence_freshness     = Column(String(50), nullable=True)
+    evidence_finding       = Column(Text, nullable=True)
+    evidence_gap           = Column(Text, nullable=True)
+    evidence_relevance     = Column(String(50), nullable=True)
+    final_result           = Column(String(50), nullable=True)
+    final_reason           = Column(Text, nullable=True)
+
 class AdminAuditLog(Base):
     """
     Audit log tracking administrative actions, force acceptances, and override events.

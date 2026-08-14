@@ -27,6 +27,7 @@ class AuditState(TypedDict):
     severity: str
     standard: str
     recommendation: str
+    keywords: Optional[Dict[str, float]]  # per-control retrieval keyword weights, see control_keywords.py
     
     # Document Context & Config
     document_text: str
@@ -116,7 +117,8 @@ def retrieve_node(state: AuditState) -> Dict[str, Any]:
         "control": state["control_id"],
         "label": state["control_label"],
         "expected": state["expected_evidence"],
-        "prompt_hint": state["prompt_hint"]
+        "prompt_hint": state["prompt_hint"],
+        "keywords": state.get("keywords") or {}
     }]
 
     # ── Phase 1: Locked-file retrieval (Excel scoping mode) ───────────────────
@@ -133,7 +135,8 @@ def retrieve_node(state: AuditState) -> Dict[str, Any]:
             controls_batch=controls_batch,
             file_names_list=locked_filenames,   # ← LOCKED: only these files
             llm_model=state["llm_model"],
-            KEYWORD_SYNONYMS=KEYWORD_SYNONYMS
+            KEYWORD_SYNONYMS=KEYWORD_SYNONYMS,
+            audit_mode=state.get("audit_mode")
         )
         # Safety guarantee: if locked files returned no context, fall back
         # to raw document_text (never send empty context to LLM)
@@ -151,7 +154,8 @@ def retrieve_node(state: AuditState) -> Dict[str, Any]:
             controls_batch=controls_batch,
             file_names_list=state["file_names_list"],
             llm_model=state["llm_model"],
-            KEYWORD_SYNONYMS=KEYWORD_SYNONYMS
+            KEYWORD_SYNONYMS=KEYWORD_SYNONYMS,
+            audit_mode=state.get("audit_mode")
         )
 
     return {"retrieved_context": condensed}
@@ -350,32 +354,13 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
         code: [state["expected_evidence"], state["prompt_hint"]]
     }
     
-    # ── FAST-PATH GUARDRAIL CHECK (0% Accuracy Drop) ──────────────────────
-    quote = str(draft.get("evidence_quote") or "").strip()
-    status_draft = str(draft.get("status") or "").strip().upper()
-    doc_text = str(state.get("document_text") or "").strip()
+    # NOTE: a fast-path guardrail that bypassed post_process() entirely for
+    # COMPLIANT findings with a verbatim-matching quote used to live here. Removed
+    # per the RAG accuracy overhaul (Phase 6) -- a verbatim quote proves grounding,
+    # not compliance, and every finding now always goes through the full gate
+    # sequence (leakage, grounding, and the deterministic policy/evidence formula)
+    # below, with zero exceptions.
 
-    if quote and quote.upper() != "NOT_FOUND" and len(quote) >= 10 and status_draft in ("COMPLIANT", "PASSED") and doc_text:
-        clean_q = quote.lower().replace("\n", " ").strip()
-        clean_doc = doc_text.lower().replace("\n", " ")
-        clean_q_stripped = clean_q.strip("\"'.,:;")
-        
-        # Strict Python-level exact substring verification
-        if clean_q_stripped in clean_doc or any(part in clean_doc for part in clean_q_stripped.split(". ") if len(part) >= 18):
-            print(f"[FAST-PATH GUARDRAIL] Verified exact verbatim quote in document text for control {state['control_id']}. Bypassing secondary reflection gates with 100% accuracy.", flush=True)
-            fast_finding = dict(draft)
-            fast_finding["control_id"] = state["control_id"]
-            fast_finding["hallucination_check"] = "VERBATIM_CONFIRMED"
-            fast_finding["requires_human_review"] = False
-            fast_finding["requires_review"] = False
-            fast_finding["review_note"] = "Fast-Path Verified: Evidence quote matched document text verbatim."
-            _log_execution_event(state, fast_finding)
-            return {
-                "validation_error": None,
-                "final_finding": fast_finding
-            }
-    # ───────────────────────────────────────────────────────────────────────
-    
     # Query database chunks for verbatim verification
     session = SessionLocal()
     db_chunks = []

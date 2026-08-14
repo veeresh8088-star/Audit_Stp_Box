@@ -3529,21 +3529,44 @@ function renderFindingsList() {
             && !cleanSnipCheck.includes("not found in the document")
             && !cleanSnipCheck.includes("no explicit evidence")
             && !cleanSnipCheck.includes("not_found");
-        // ── BUG FIX: Evidence Missing must override COMPLIANT status ──
-        // If evidence snippet is absent/invalid, the finding CANNOT be marked COMPLIANT
-        // regardless of the LLM status field. This prevents the paradox of
-        // "⚠ Evidence: Missing" + green "COMPLIANT" badge appearing simultaneously.
-        const isComp = hasValidQuote && isFindingCompliant(f, singleSnip);
+        // ── RAG accuracy overhaul (Phase 5/6/7): prefer the backend's deterministic
+        // final_result/policy_status/policy_assessment/evidence_status/evidence_assessment
+        // fields over re-deriving compliance client-side. The backend's Phase 6 formula
+        // is the single source of truth for what's actually COMPLIANT -- recomputing a
+        // second, possibly-disagreeing answer here from evidence-snippet text was exactly
+        // the kind of inconsistency this overhaul was meant to remove. Falls back to the
+        // legacy heuristic only for older findings saved before these fields existed
+        // (their DB columns are null).
+        const backendFinalResult = String(f.final_result || f.status || "").trim().toUpperCase();
+        const hasBackendResult = backendFinalResult === "COMPLIANT" || backendFinalResult === "NON_COMPLIANT";
+        const isComp = hasBackendResult ? (backendFinalResult === "COMPLIANT") : (hasValidQuote && isFindingCompliant(f, singleSnip));
 
-        const policyBadgeHtml = isComp
-            ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Policy: Compliant</span>`
-            : `<span class="badge badge-danger" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✕ Policy: Non-Compliant</span>`;
+        const policyStatusVal = f.policy_status;       // FOUND | NOT_FOUND
+        const policyAssessVal = f.policy_assessment;   // COMPLIANT | NON_COMPLIANT
+        const evidenceStatusVal = f.evidence_status;
+        const evidenceAssessVal = f.evidence_assessment;
+        const hasPolicyFields = policyStatusVal && policyAssessVal;
+        const hasEvidenceFields = evidenceStatusVal && evidenceAssessVal;
 
-        const evidenceBadgeHtml = hasValidQuote
-            ? (isComp
-                ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Evidence: Compliant</span>`
-                : `<span class="badge badge-info" style="background:rgba(59,130,246,0.15); color:#3b82f6; border:1px solid rgba(59,130,246,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Evidence: Present</span>`)
-            : `<span class="badge badge-warning" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">⚠ Evidence: Missing</span>`;
+        const policyBadgeHtml = hasPolicyFields
+            ? (policyAssessVal === "COMPLIANT"
+                ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Policy ${policyStatusVal === 'FOUND' ? 'Found' : 'Not Found'}: Compliant</span>`
+                : `<span class="badge badge-danger" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✕ Policy ${policyStatusVal === 'FOUND' ? 'Found' : 'Not Found'}: Non-Compliant</span>`)
+            : (isComp
+                ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Policy: Compliant</span>`
+                : `<span class="badge badge-danger" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✕ Policy: Non-Compliant</span>`);
+
+        const evidenceBadgeHtml = hasEvidenceFields
+            ? (evidenceAssessVal === "COMPLIANT"
+                ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Evidence ${evidenceStatusVal === 'FOUND' ? 'Found' : 'Not Found'}: Compliant</span>`
+                : evidenceStatusVal === "FOUND"
+                    ? `<span class="badge badge-info" style="background:rgba(59,130,246,0.15); color:#3b82f6; border:1px solid rgba(59,130,246,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✕ Evidence Found: Non-Compliant</span>`
+                    : `<span class="badge badge-warning" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">⚠ Evidence: Not Found</span>`)
+            : (hasValidQuote
+                ? (isComp
+                    ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Evidence: Compliant</span>`
+                    : `<span class="badge badge-info" style="background:rgba(59,130,246,0.15); color:#3b82f6; border:1px solid rgba(59,130,246,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Evidence: Present</span>`)
+                : `<span class="badge badge-warning" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">⚠ Evidence: Missing</span>`);
 
         const mainBadgeHtml = isComp
             ? `<span class="badge badge-success" style="background:#10b981; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">COMPLIANT</span>`

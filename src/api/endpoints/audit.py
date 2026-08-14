@@ -103,6 +103,27 @@ class UpdateFindingRequest(BaseModel):
     evidence_present: Optional[str] = None
     source_files: Optional[str] = None
     comment: Optional[str] = None
+    # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7) -- manual overrides
+    policy_status: Optional[str] = None
+    policy_assessment: Optional[str] = None
+    policy_name: Optional[str] = None
+    policy_version: Optional[str] = None
+    policy_clause: Optional[str] = None
+    policy_effective_date: Optional[str] = None
+    policy_review_date: Optional[str] = None
+    policy_expiry_date: Optional[str] = None
+    policy_validity: Optional[str] = None
+    policy_finding: Optional[str] = None
+    policy_gap: Optional[str] = None
+    evidence_status: Optional[str] = None
+    evidence_assessment: Optional[str] = None
+    evidence_date: Optional[str] = None
+    evidence_freshness: Optional[str] = None
+    evidence_finding: Optional[str] = None
+    evidence_gap: Optional[str] = None
+    evidence_relevance: Optional[str] = None
+    final_result: Optional[str] = None
+    final_reason: Optional[str] = None
 
 class ChatSendRequest(BaseModel):
     session_id: str
@@ -986,7 +1007,28 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
                 "evidence_present": f.evidence_present,
                 "is_saved_to_shakthi": bool(f.is_saved_to_shakthi or f.human_verified),
                 "human_verified": bool(f.human_verified),
-                "review_note": f.review_note or ""
+                "review_note": f.review_note or "",
+                # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7)
+                "policy_status": f.policy_status,
+                "policy_assessment": f.policy_assessment,
+                "policy_name": f.policy_name,
+                "policy_version": f.policy_version,
+                "policy_clause": f.policy_clause,
+                "policy_effective_date": f.policy_effective_date,
+                "policy_review_date": f.policy_review_date,
+                "policy_expiry_date": f.policy_expiry_date,
+                "policy_validity": f.policy_validity,
+                "policy_finding": f.policy_finding,
+                "policy_gap": f.policy_gap,
+                "evidence_status": f.evidence_status,
+                "evidence_assessment": f.evidence_assessment,
+                "evidence_date": f.evidence_date,
+                "evidence_freshness": f.evidence_freshness,
+                "evidence_finding": f.evidence_finding,
+                "evidence_gap": f.evidence_gap,
+                "evidence_relevance": f.evidence_relevance,
+                "final_result": f.final_result,
+                "final_reason": f.final_reason
             })
         return {
             "success": True, 
@@ -1016,6 +1058,28 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest):
             if req.policy_present: finding.policy_present = req.policy_present
             if req.evidence_present: finding.evidence_present = req.evidence_present
             if req.source_files is not None: finding.source_files = req.source_files
+
+            # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7) -- manual overrides
+            if req.policy_status: finding.policy_status = req.policy_status
+            if req.policy_assessment: finding.policy_assessment = req.policy_assessment
+            if req.policy_name is not None: finding.policy_name = req.policy_name
+            if req.policy_version is not None: finding.policy_version = req.policy_version
+            if req.policy_clause is not None: finding.policy_clause = req.policy_clause
+            if req.policy_effective_date is not None: finding.policy_effective_date = req.policy_effective_date
+            if req.policy_review_date is not None: finding.policy_review_date = req.policy_review_date
+            if req.policy_expiry_date is not None: finding.policy_expiry_date = req.policy_expiry_date
+            if req.policy_validity: finding.policy_validity = req.policy_validity
+            if req.policy_finding is not None: finding.policy_finding = req.policy_finding
+            if req.policy_gap is not None: finding.policy_gap = req.policy_gap
+            if req.evidence_status: finding.evidence_status = req.evidence_status
+            if req.evidence_assessment: finding.evidence_assessment = req.evidence_assessment
+            if req.evidence_date is not None: finding.evidence_date = req.evidence_date
+            if req.evidence_freshness: finding.evidence_freshness = req.evidence_freshness
+            if req.evidence_finding is not None: finding.evidence_finding = req.evidence_finding
+            if req.evidence_gap is not None: finding.evidence_gap = req.evidence_gap
+            if req.evidence_relevance: finding.evidence_relevance = req.evidence_relevance
+            if req.final_result: finding.final_result = req.final_result
+            if req.final_reason is not None: finding.final_reason = req.final_reason
             
             # Explicitly mark as reviewed and saved to Shakthi DB
             finding.is_saved_to_shakthi = True
@@ -1648,6 +1712,16 @@ def api_export_docx(
                     "source_files": f.source_files or "",
                     "reasoning": f.reasoning or "",
                     "gap_description": f.description or f.gap_detected or "",
+                    # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7)
+                    "policy_status": f.policy_status,
+                    "policy_assessment": f.policy_assessment,
+                    "policy_validity": f.policy_validity,
+                    "policy_gap": f.policy_gap,
+                    "evidence_status": f.evidence_status,
+                    "evidence_assessment": f.evidence_assessment,
+                    "evidence_freshness": f.evidence_freshness,
+                    "evidence_gap": f.evidence_gap,
+                    "evidence_relevance": f.evidence_relevance,
                 })
                 if f.status == "Compliant":
                     resolved_list.append(f.control_id)
@@ -1925,7 +1999,17 @@ def api_export_pdf(
                     "gap_description": _desc_str,
                     "category": _risk_cat or "Injection",
                     "cia_impact": _c_impact or "C:Confidential (High - PII Data Present) | I:HIGH | A:NONE",
-                    "is_pii_exposed": _is_pii
+                    "is_pii_exposed": _is_pii,
+                    # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7)
+                    "policy_status": f.policy_status,
+                    "policy_assessment": f.policy_assessment,
+                    "policy_validity": f.policy_validity,
+                    "policy_gap": f.policy_gap,
+                    "evidence_status": f.evidence_status,
+                    "evidence_assessment": f.evidence_assessment,
+                    "evidence_freshness": f.evidence_freshness,
+                    "evidence_gap": f.evidence_gap,
+                    "evidence_relevance": f.evidence_relevance,
                 })
                 if is_comp:
                     resolved_list.append(f.control_id)

@@ -35,6 +35,15 @@ function showToast(msg, type = "info") {
     }, 3500);
 }
 
+// Sentry error tracking — no-op unless both the vendored SDK file and a DSN are
+// present (see qa/monitoring/README.md). Never loaded from a CDN: this app is
+// offline-first, so the SDK must be vendored locally like llama-server.exe/GGUF models.
+function initSentryIfConfigured() {
+    if (typeof window.Sentry === "undefined" || !window.SENTRY_DSN) return;
+    window.Sentry.init({ dsn: window.SENTRY_DSN, tracesSampleRate: 0.1 });
+}
+initSentryIfConfigured();
+
 function isFindingCompliant(f) {
     const polRaw = String(f.policy_present || "No").trim().toLowerCase();
     const evRaw = String(f.evidence_present || "No").trim().toLowerCase();

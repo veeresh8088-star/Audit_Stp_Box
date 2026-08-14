@@ -83,6 +83,13 @@ services:
       # JWT_SECRET auto-generates and persists to the app-data volume on
       # first boot if not set here. Uncomment to pin one yourself instead:
       # - JWT_SECRET=your-unique-secret-here
+      #
+      # DO NOT set SENTRY_DSN here. This file is the air-gapped customer
+      # deliverable ("no internet access" above) -- Sentry phones home to an
+      # external server on every error, which both breaks the air-gap
+      # guarantee and risks leaking customer audit data off their network.
+      # SENTRY_DSN is for docker-compose.yml (your own internal/dev/staging
+      # use) only. See qa/monitoring/README.md.
     volumes:
       - app_data:/app/data
     restart: always

@@ -267,6 +267,47 @@ def _extract_ole_text_heuristic(stream_bytes: bytes, min_run: int = 4) -> str:
     return " ".join(_runs(stream_bytes, 1, False))
 
 
+def _extract_ole_embedded_images_heuristic(ole, stream_name: str):
+    """
+    Best-effort embedded-image extraction from a legacy OLE (.doc/.ppt) stream --
+    the counterpart to _extract_ole_text_heuristic() above, same "no full binary
+    format parser" philosophy. Scans for JPEG/PNG magic-byte signatures and slices
+    each byte range up to the next signature (or end of stream) out as a candidate
+    image; PIL tolerates trailing garbage past an image's real end for these
+    formats, so this coarse slicing is good enough without decoding the real
+    picture-descriptor structures these formats use internally. BMP's 2-byte
+    signature ("BM") is deliberately excluded -- far too likely to false-positive
+    on arbitrary binary data to be worth the noise.
+    Returns a list of raw image byte blobs (not yet OCR'd/validated as real images).
+    """
+    if not ole.exists(stream_name):
+        return []
+    try:
+        data = ole.openstream(stream_name).read()
+    except Exception:
+        return []
+
+    SIGNATURES = [b"\xFF\xD8\xFF", b"\x89PNG\r\n\x1a\n"]
+    offsets = []
+    for sig in SIGNATURES:
+        start = 0
+        while True:
+            idx = data.find(sig, start)
+            if idx == -1:
+                break
+            offsets.append(idx)
+            start = idx + len(sig)
+    offsets.sort()
+
+    images = []
+    for i, idx in enumerate(offsets):
+        end = offsets[i + 1] if i + 1 < len(offsets) else len(data)
+        blob = data[idx:end]
+        if len(blob) >= 100:  # too small to plausibly be a real image -- skip
+            images.append(blob)
+    return images
+
+
 def extract_text(f):
     name_lower = f.name.lower()
 
@@ -328,12 +369,18 @@ def extract_text(f):
             img_np = _preprocess_image_for_ocr(np.array(img))
             res = reader.readtext(img_np, detail=0)
             ocr_text = " ".join(res)
-            
+
             image_chunks = []
             img_fname = getattr(f, "name", "unknown.png")
             img_ext = os.path.splitext(img_fname.lower())[1].lstrip(".")
-            chunks = chunk_text_by_chars(ocr_text, target=1000, overlap=200)
-            for chunk_content in chunks:
+            # Paragraph-based chunking: each OCR-detected text region/line is treated as
+            # its own paragraph unit (chunk_paragraphs groups them up to ~1000 chars,
+            # same as DOCX/HTML) instead of collapsing all regions into one string first
+            # and char-slicing it, which cuts mid-line regardless of where OCR's own
+            # region boundaries fell.
+            paragraphs_data = [(line, "") for line in res if line and line.strip()]
+            chunks = chunk_paragraphs(paragraphs_data, target=1000, overlap=200) if paragraphs_data else []
+            for chunk_content, _chunk_section, _, _ in chunks:
                 image_chunks.append((chunk_content, {
                     "source_file": img_fname,
                     "source_type": "image",
@@ -440,6 +487,9 @@ def extract_text(f):
             excel_data = pd.read_excel(f, sheet_name=None)
             sheets_text = []
             xlsx_chunks = []
+            xlsx_fname = getattr(f, "name", "unknown.xlsx")
+            xlsx_ext = os.path.splitext(xlsx_fname.lower())[1].lstrip(".")
+            xlsx_src_type = "xls" if xlsx_ext == "xls" else "xlsx"
             for sheet_name, df in excel_data.items():
                 df_filled = df.fillna("")
                 total_rows = len(df_filled)
@@ -453,9 +503,6 @@ def extract_text(f):
                 ROWS_PER_CHUNK = 5
                 ROW_OVERLAP = 1
                 MAX_CHUNK_CHARS = 2000   # hard cap per chunk
-                xlsx_fname = getattr(f, "name", "unknown.xlsx")
-                xlsx_ext = os.path.splitext(xlsx_fname.lower())[1].lstrip(".")
-                xlsx_src_type = "xls" if xlsx_ext == "xls" else "xlsx"
                 columns = [str(c) for c in df_filled.columns]
                 start_row = 0
                 while start_row < total_rows:
@@ -530,6 +577,68 @@ def extract_text(f):
                 sheets_text.append(
                     f"--- Sheet: {sheet_name} ---\n" + df_filled.to_string(index=False)
                 )
+
+            # ── Embedded images (e.g. a screenshot pasted into a cell) ──────────
+            # pandas.read_excel() only ever sees cell values -- pasted images are
+            # completely invisible to it. openpyxl exposes them via worksheet._images,
+            # each with an anchor cell telling us its approximate row, so the OCR'd
+            # text can be inserted next to the row-range chunk it actually belongs to
+            # instead of being silently dropped. .xls (legacy binary Excel) isn't
+            # supported by openpyxl at all, so this only runs for real .xlsx files.
+            if xlsx_ext == "xlsx":
+                try:
+                    if hasattr(f, "seek"):
+                        f.seek(0)
+                    xlsx_bytes = f.read()
+                    if hasattr(f, "seek"):
+                        f.seek(0)
+                    import io as _xlsx_io
+                    import openpyxl
+                    wb = openpyxl.load_workbook(_xlsx_io.BytesIO(xlsx_bytes))
+                    for ws in wb.worksheets:
+                        images = getattr(ws, "_images", None) or []
+                        for image in images:
+                            try:
+                                anchor_from = getattr(image.anchor, "_from", None)
+                                anchor_row = (anchor_from.row + 1) if anchor_from is not None else None
+                                img_data = image._data()
+                                import PIL.Image
+                                import numpy as np
+                                img = PIL.Image.open(_xlsx_io.BytesIO(img_data))
+                                img_np = _preprocess_image_for_ocr(np.array(img))
+                                reader = get_ocr_reader()
+                                res = reader.readtext(img_np, detail=0)
+                                if not res:
+                                    continue
+                                ocr_text = " ".join(res)
+                                img_chunk = (
+                                    f"[Embedded Image OCR]: {ocr_text}",
+                                    {
+                                        "source_file": xlsx_fname,
+                                        "source_type": xlsx_src_type,
+                                        "sheet_name": ws.title,
+                                        "start_row": anchor_row,
+                                        "end_row": anchor_row,
+                                        "chunk_id": ""
+                                    }
+                                )
+                                # Insert right after the row-range chunk this image's
+                                # anchor row falls inside, so it stays positioned near
+                                # the data it was actually pasted next to.
+                                insert_at = len(xlsx_chunks)
+                                if anchor_row is not None:
+                                    for idx, (_, meta) in enumerate(xlsx_chunks):
+                                        if (meta.get("sheet_name") == ws.title
+                                                and meta.get("start_row") is not None
+                                                and meta["start_row"] <= anchor_row <= meta["end_row"]):
+                                            insert_at = idx + 1
+                                            break
+                                xlsx_chunks.insert(insert_at, img_chunk)
+                            except Exception:
+                                pass  # unreadable/unsupported embedded image -- skip
+                except Exception as xlsx_img_err:
+                    print(f"[XLSX IMAGE WARNING] Failed to extract embedded images: {xlsx_img_err}", flush=True)
+
             _ingested_chunks_cache[f.name] = xlsx_chunks
             return "\n\n".join(sheets_text)
         except Exception as e:
@@ -701,7 +810,7 @@ def extract_text(f):
             paragraphs_data = []
             current_section = "HTML Content"
             
-            for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "tr", "li"]):
+            for element in soup.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "p", "div", "tr", "li", "img"]):
                 if element.name in ["h1", "h2", "h3", "h4", "h5", "h6"]:
                     heading_text = element.get_text(strip=True)
                     if heading_text:
@@ -712,6 +821,31 @@ def extract_text(f):
                     if cells:
                         row_str = " | ".join(cells)
                         paragraphs_data.append((row_str, current_section))
+                elif element.name == "img":
+                    # Only base64-embedded images (data: URIs) -- this tool is
+                    # offline-first, so fetching external/relative image URLs over
+                    # the network is out of scope (and would just fail in an
+                    # air-gapped deployment anyway). find_all already returns
+                    # elements in document order, so this stays correctly
+                    # positioned relative to the surrounding text automatically.
+                    src = element.get("src", "")
+                    if src.startswith("data:image"):
+                        try:
+                            import base64
+                            import io as _html_io
+                            import PIL.Image
+                            import numpy as np
+                            b64_payload = src.split(",", 1)[1]
+                            img_bytes = base64.b64decode(b64_payload)
+                            img = PIL.Image.open(_html_io.BytesIO(img_bytes))
+                            img_np = _preprocess_image_for_ocr(np.array(img))
+                            reader = get_ocr_reader()
+                            res = reader.readtext(img_np, detail=0)
+                            if res:
+                                ocr_text = " ".join(res)
+                                paragraphs_data.append((f"[Embedded Image OCR]: {ocr_text}", current_section))
+                        except Exception:
+                            pass  # not a decodable/OCR-able embedded image -- skip
                 else:
                     text = element.get_text(strip=True)
                     if text and len(text.split()) >= 3 and not element.find_all(["h1", "h2", "h3", "h4", "h5", "h6", "tr", "p", "div", "li"]):
@@ -747,6 +881,10 @@ def extract_text(f):
                 if not ole.exists("WordDocument"):
                     return f"[Error parsing file {f.name}: no WordDocument stream found]"
                 stream_bytes = ole.openstream("WordDocument").read()
+                # No dedicated picture stream in legacy .doc the way .ppt has one --
+                # "Data" is the closest equivalent; best-effort, may miss some/all
+                # embedded images depending on how the document embedded them.
+                image_blobs = _extract_ole_embedded_images_heuristic(ole, "Data")
             finally:
                 ole.close()
             doc_text = _extract_ole_text_heuristic(stream_bytes)
@@ -758,6 +896,27 @@ def extract_text(f):
                     "source_type": "doc",
                     "chunk_id": ""
                 }))
+            # Legacy .doc's own text extraction is already a flat, position-agnostic
+            # heuristic scan (no real paragraph structure to interleave against), so
+            # images are appended at the end -- same tier DOCX had before its fix,
+            # not true positional interleaving, but nothing stays invisible either.
+            for blob in image_blobs:
+                try:
+                    import PIL.Image
+                    import numpy as np
+                    img = PIL.Image.open(io.BytesIO(blob))
+                    img_np = _preprocess_image_for_ocr(np.array(img))
+                    reader = get_ocr_reader()
+                    res = reader.readtext(img_np, detail=0)
+                    if res:
+                        ocr_text = " ".join(res)
+                        doc_chunks.append((f"[Embedded Image OCR]: {ocr_text}", {
+                            "source_file": doc_fname,
+                            "source_type": "doc",
+                            "chunk_id": ""
+                        }))
+                except Exception:
+                    pass  # not a real/decodable image -- skip
             _ingested_chunks_cache[f.name] = doc_chunks
             return "[Best-effort extraction from legacy .doc format -- formatting/tables not preserved]\n" + doc_text
         except Exception as e:
@@ -779,6 +938,9 @@ def extract_text(f):
                 if not ole.exists("PowerPoint Document"):
                     return f"[Error parsing file {f.name}: no PowerPoint Document stream found]"
                 stream_bytes = ole.openstream("PowerPoint Document").read()
+                # PowerPoint 97-2003 concatenates all embedded pictures into a
+                # dedicated "Pictures" stream -- more reliable target than .doc has.
+                image_blobs = _extract_ole_embedded_images_heuristic(ole, "Pictures")
             finally:
                 ole.close()
             ppt_text = _extract_ole_text_heuristic(stream_bytes)
@@ -790,6 +952,26 @@ def extract_text(f):
                     "source_type": "ppt",
                     "chunk_id": ""
                 }))
+            # Slide structure isn't preserved by this format's text extraction either
+            # (see comment above the return string), so same as .doc: images are
+            # appended at the end rather than tied to a specific slide.
+            for blob in image_blobs:
+                try:
+                    import PIL.Image
+                    import numpy as np
+                    img = PIL.Image.open(io.BytesIO(blob))
+                    img_np = _preprocess_image_for_ocr(np.array(img))
+                    reader = get_ocr_reader()
+                    res = reader.readtext(img_np, detail=0)
+                    if res:
+                        ocr_text = " ".join(res)
+                        ppt_chunks.append((f"[Embedded Image OCR]: {ocr_text}", {
+                            "source_file": ppt_fname,
+                            "source_type": "ppt",
+                            "chunk_id": ""
+                        }))
+                except Exception:
+                    pass  # not a real/decodable image -- skip
             _ingested_chunks_cache[f.name] = ppt_chunks
             return "[Best-effort extraction from legacy .ppt format -- slide structure not preserved]\n" + ppt_text
         except Exception as e:
@@ -800,18 +982,24 @@ def extract_text(f):
             import zipfile
             import io as _io
             from docx import Document
-            
+            from docx.oxml.ns import qn
+
             # Reset seek position of f if possible, and read all bytes
             if hasattr(f, "seek"):
                 f.seek(0)
             file_bytes = f.read()
             if hasattr(f, "seek"):
                 f.seek(0)
-            
+
             doc = Document(_io.BytesIO(file_bytes))
             paragraphs_data = []
-            
-            # 1. Paragraphs with heading detection
+            processed_media_names = set()  # basenames already OCR'd inline -- skip in the ZIP fallback pass below
+
+            # 1. Paragraphs with heading detection, plus any inline/anchored images
+            # embedded directly in that paragraph's runs -- OCR'd and inserted right
+            # here, so an image and the text around it stay together in the same
+            # position, instead of every image in the file being batched at the end
+            # regardless of which paragraph it actually appeared next to.
             current_section = ""
             for p in doc.paragraphs:
                 p_text = p.text.strip()
@@ -819,6 +1007,32 @@ def extract_text(f):
                     if p.style and p.style.name and p.style.name.startswith("Heading"):
                         current_section = p_text
                     paragraphs_data.append((p_text, current_section))
+
+                for run in p.runs:
+                    for drawing in run._element.findall(qn("w:drawing")):
+                        for blip in drawing.findall(".//" + qn("a:blip")):
+                            embed_id = blip.get(qn("r:embed"))
+                            if not embed_id:
+                                continue
+                            try:
+                                image_part = doc.part.related_parts[embed_id]
+                                img_data = image_part.blob
+                                img_name = os.path.basename(image_part.partname)
+                                import PIL.Image
+                                import numpy as np
+                                img = PIL.Image.open(_io.BytesIO(img_data))
+                                img_np = _preprocess_image_for_ocr(np.array(img))
+                                reader = get_ocr_reader()
+                                res = reader.readtext(img_np, detail=0)
+                                if res:
+                                    ocr_text = " ".join(res)
+                                    paragraphs_data.append((
+                                        f"[Embedded Image OCR ({img_name})]: {ocr_text}",
+                                        current_section or "[Embedded Image Content]"
+                                    ))
+                                processed_media_names.add(img_name)
+                            except Exception:
+                                pass  # not a rasterizable image (e.g. a chart) or unreadable -- skip
             
             # 2. Extract tables
             for table in doc.tables:
@@ -834,10 +1048,16 @@ def extract_text(f):
                             row_text = " | ".join(deduped_cells)
                             paragraphs_data.append((row_text, "[Table Data]"))
             
-            # 3. Extract and OCR images from ZIP
+            # 3. Fallback: OCR any image still not covered by the per-paragraph pass
+            # above (e.g. images in headers/footers, or anything the run-walk missed) --
+            # skips anything already processed_media_names to avoid duplicate OCR/content.
             try:
                 with zipfile.ZipFile(_io.BytesIO(file_bytes)) as zf:
-                    media_files = [n for n in zf.namelist() if n.startswith("word/media/") and n.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".tiff", ".bmp"))]
+                    media_files = [
+                        n for n in zf.namelist()
+                        if n.startswith("word/media/") and n.lower().endswith((".png", ".jpg", ".jpeg", ".gif", ".tiff", ".bmp"))
+                        and os.path.basename(n) not in processed_media_names
+                    ]
                     if media_files:
                         for name in sorted(media_files):
                             try:
