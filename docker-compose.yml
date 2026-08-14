@@ -1,7 +1,7 @@
 ﻿services:
   shakthidb:
     build: .
-    image: aicyberauditbox-shakthidb:1.0
+    image: aicyberauditbox-shakthidb:2.1
     container_name: shakthidb_service
     environment:
       - POSTGRES_PASSWORD=ShakthiDB@2026
@@ -37,7 +37,7 @@
     build:
       context: .
       dockerfile: Dockerfile.llm
-    image: aicyberauditbox-llm:1.0
+    image: aicyberauditbox-llm:2.1
     container_name: aicyberauditbox_llm
     environment:
       - LLM_MODE=completion
@@ -51,7 +51,7 @@
     build:
       context: .
       dockerfile: Dockerfile.llm
-    image: aicyberauditbox-llm-embed:1.0
+    image: aicyberauditbox-llm-embed:2.1
     container_name: aicyberauditbox_llm_embed
     environment:
       - LLM_MODE=embedding

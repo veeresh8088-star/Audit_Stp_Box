@@ -122,7 +122,7 @@ def _vec_store_embedding(chunk_db_id, vector, engine):
             vec_str = "[" + ",".join(str(v) for v in vector) + "]"
             with engine["engine"].begin() as conn:
                 conn.execute(text("""
-                    INSERT INTO pg_vec_chunks (chunk_id, embedding) VALUES (:cid, :emb::vector)
+                    INSERT INTO pg_vec_chunks (chunk_id, embedding) VALUES (:cid, CAST(:emb AS vector))
                     ON CONFLICT (chunk_id) DO UPDATE SET embedding = EXCLUDED.embedding
                 """), {"cid": chunk_db_id, "emb": vec_str})
     except Exception:
@@ -158,12 +158,12 @@ def _vec_native_search(query_vector, filenames, top_k, engine):
             from sqlalchemy import text
             vec_str = "[" + ",".join(str(v) for v in query_vector) + "]"
             if filenames:
-                sql = text("SELECT pvc.chunk_id, 1-(pvc.embedding <=> :vec_str::vector) AS sim "
+                sql = text("SELECT pvc.chunk_id, 1-(pvc.embedding <=> CAST(:vec_str AS vector)) AS sim "
                            "FROM pg_vec_chunks pvc JOIN document_chunks dc ON dc.id=pvc.chunk_id "
                            "WHERE dc.filename = ANY(:fn_list) ORDER BY sim DESC LIMIT :top_k_val")
                 params = {"vec_str": vec_str, "fn_list": list(filenames), "top_k_val": top_k * 4}
             else:
-                sql = text("SELECT chunk_id, 1-(embedding <=> :vec_str::vector) AS sim "
+                sql = text("SELECT chunk_id, 1-(embedding <=> CAST(:vec_str AS vector)) AS sim "
                            "FROM pg_vec_chunks ORDER BY sim DESC LIMIT :top_k_val")
                 params = {"vec_str": vec_str, "top_k_val": top_k * 4}
             with engine["engine"].begin() as conn:
@@ -466,12 +466,23 @@ def _get_ollama_embedding(text, model="nomic-embed-text", url=None):
     return None
 
 def _cosine_similarity(v1, v2):
-    dot_product = sum(x * y for x, y in zip(v1, v2))
-    norm_v1 = sum(x * x for x in v1) ** 0.5
-    norm_v2 = sum(x * x for x in v2) ** 0.5
-    if norm_v1 == 0 or norm_v2 == 0:
+    if v1 is None or v2 is None:
         return 0.0
-    return dot_product / (norm_v1 * norm_v2)
+    # Defensively flatten list of lists if passed
+    if isinstance(v1, list) and len(v1) > 0 and isinstance(v1[0], list):
+        v1 = v1[0]
+    if isinstance(v2, list) and len(v2) > 0 and isinstance(v2[0], list):
+        v2 = v2[0]
+    try:
+        dot_product = sum(x * y for x, y in zip(v1, v2))
+        norm_v1 = sum(x * x for x in v1) ** 0.5
+        norm_v2 = sum(x * x for x in v2) ** 0.5
+        if norm_v1 == 0 or norm_v2 == 0:
+            return 0.0
+        return dot_product / (norm_v1 * norm_v2)
+    except Exception as e:
+        print(f"[COSINE ERROR] Failed to compute similarity: {e}. v1_type={type(v1)}, v2_type={type(v2)}", flush=True)
+        return 0.0
 
 def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, KEYWORD_SYNONYMS):
     """Production RAG retrieval engine.

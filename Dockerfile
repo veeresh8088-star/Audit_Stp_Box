@@ -1,4 +1,4 @@
-FROM postgres:latest
+FROM pgvector/pgvector:pg16
 
 # Set environment variables
 ENV POSTGRES_PASSWORD=ShakthiDB@2026

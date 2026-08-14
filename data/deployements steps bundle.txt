@@ -1,12 +1,12 @@
-AICyberAuditBox Enterprise v2.0 - Customer Deployment Guide
+AICyberAuditBox Enterprise v2.1 - Customer Deployment Guide
 ================================================================
 
 1. Copy both files into a single deployment folder:
-   - aicyberauditbox_bundle_v2.0.tar
+   - aicyberauditbox_bundle_v2.1.tar
    - docker-compose.customer.yml
 
 2. Open a terminal in that folder and run:
-   docker load -i aicyberauditbox_bundle_v2.0.tar
+   docker load -i aicyberauditbox_bundle_v2.1.tar
    docker compose -f docker-compose.customer.yml up -d
 
 

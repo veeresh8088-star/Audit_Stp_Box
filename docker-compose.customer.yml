@@ -3,14 +3,14 @@
 # Unlike docker-compose.yml (the dev version, which builds images from
 # source), this one only references pre-built images -- no `build:` section
 # anywhere. Pair this file with the exported image bundle
-# (aicyberauditbox_bundle_v2.0.tar): the customer loads that bundle first
-# (`docker load -i aicyberauditbox_bundle_v2.0.tar`), then runs this file.
+# (aicyberauditbox_bundle_v2.1.tar): the customer loads that bundle first
+# (`docker load -i aicyberauditbox_bundle_v2.1.tar`), then runs this file.
 
 # No internet access, no separate installs, nothing to build.
 
 services:
   shakthidb:
-    image: aicyberauditbox-shakthidb:1.0
+    image: aicyberauditbox-shakthidb:2.1
     container_name: shakthidb_service
     environment:
       - POSTGRES_PASSWORD=ShakthiDB@2026
@@ -43,7 +43,7 @@ services:
     restart: always
 
   llm:
-    image: aicyberauditbox-llm:1.0
+    image: aicyberauditbox-llm:2.1
     container_name: aicyberauditbox_llm
     environment:
       - LLM_MODE=completion
@@ -54,7 +54,7 @@ services:
     restart: always
 
   llm-embed:
-    image: aicyberauditbox-llm-embed:1.0
+    image: aicyberauditbox-llm-embed:2.1
     container_name: aicyberauditbox_llm_embed
     environment:
       - LLM_MODE=embedding

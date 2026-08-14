@@ -232,6 +232,8 @@ def get_embedding(text, model="nomic-embed-text"):
             elif isinstance(res_data, dict):
                 emb = res_data.get("embedding")
                 if emb:
+                    if isinstance(emb, list) and len(emb) > 0 and isinstance(emb[0], list):
+                        return emb[0]
                     return emb
     except Exception as e_emb:
         if not in_docker():
@@ -246,7 +248,10 @@ def get_embedding(text, model="nomic-embed-text"):
         if r.status_code == 200:
             data = r.json().get("data")
             if data and isinstance(data, list) and len(data) > 0:
-                return data[0].get("embedding")
+                emb = data[0].get("embedding")
+                if isinstance(emb, list) and len(emb) > 0 and isinstance(emb[0], list):
+                    return emb[0]
+                return emb
     except Exception as e:
         print(f"[LLM CLIENT ERROR] Failed to query llama-server.exe embeddings: {e}")
     return None

@@ -75,6 +75,10 @@ RUN mkdir -p /app/data
 RUN chown -R appuser:appuser /app
 USER appuser
 
+# Pre-download doctr OCR and SentenceTransformer Reranker models during build time
+# so they are baked into the image cache for 100% offline air-gapped operation.
+RUN python -c "from doctr.models import ocr_predictor; ocr_predictor(pretrained=True); from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); CrossEncoder('BAAI/bge-reranker-base')"
+
 EXPOSE 8000
 
 # 1. Generate/reuse a persisted JWT_SECRET (docker/generate_secrets.sh).
