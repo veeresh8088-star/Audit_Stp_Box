@@ -328,7 +328,7 @@ YOUR ONLY JOBS ARE:
    You MUST NOT return "N/A" as an evidence excerpt.
 
 ORIGINAL AUDIT CHECK QUESTION: {checklist_question}
-
+{column_source_hint}
 CORE AUDIT PRINCIPLE: evaluate POLICY and EVIDENCE separately within these pre-extracted paragraphs.
 STATUS (was it found in the text below) is different from ASSESSMENT (does it actually satisfy the
 requirement). FOUND does NOT mean COMPLIANT. Policy = a documented requirement/procedure. Evidence =

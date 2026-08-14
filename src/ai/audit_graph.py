@@ -55,6 +55,13 @@ class AuditState(TypedDict):
     # The LLM acts as a judge-only on the pre-extracted context (Phase 2).
     locked_filenames: Optional[List[str]]     # locked file(s) from Excel checklist
     checklist_question: Optional[str]         # original Excel audit check question
+    # Which of the locked files (if any) came from a Policy-named vs an
+    # Evidence-named column on the sheet, so the LLM can be told the auditor's
+    # own intent instead of re-deriving the policy/evidence split blind from
+    # undifferentiated locked text. Both empty when the sheet has no such
+    # column-level distinction (e.g. a single generic "File name" column).
+    policy_locked_filenames: Optional[List[str]]
+    evidence_locked_filenames: Optional[List[str]]
 
 
 # Synonyms dictionary used in retrieval
@@ -222,7 +229,25 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
             f"(locked: {locked_filenames})",
             flush=True
         )
-    
+
+    # ── Column-source hint: tell the LLM which locked file(s) the auditor put
+    # in a Policy-named vs Evidence-named column, instead of leaving it to
+    # re-derive that split blind from undifferentiated locked text. Empty when
+    # the sheet has no such column-level distinction.
+    policy_locked = state.get("policy_locked_filenames") or []
+    evidence_locked = state.get("evidence_locked_filenames") or []
+    column_source_hint = ""
+    if policy_locked or evidence_locked:
+        parts = []
+        if policy_locked:
+            parts.append(f"The auditor's checklist lists {', '.join(policy_locked)} under the POLICY column.")
+        if evidence_locked:
+            parts.append(f"The auditor's checklist lists {', '.join(evidence_locked)} under the EVIDENCE column.")
+        column_source_hint = (
+            "\nAUDITOR COLUMN SOURCE (strong prior, not proof — still verify the actual content "
+            "supports the objective before marking COMPLIANT):\n" + " ".join(parts) + "\n"
+        )
+
     try:
         result_holder = {}
         def _run():
@@ -232,6 +257,7 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
                     result_holder["draft"] = generator_chain.invoke({
                         "locked_filenames": ", ".join(locked_filenames),
                         "checklist_question": checklist_question,
+                        "column_source_hint": column_source_hint,
                         "condensed_context": state["retrieved_context"],
                         "control_id": state["control_id"],
                         "control_label": state["control_label"],

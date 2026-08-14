@@ -37,16 +37,19 @@ _DIRECT_KEYWORD_CONTROL_MAP = [
     # Keywords in question text               -> control use_case string
     (["ntp", "clock", "synchroni", "time server"], "8.17 Clock Synchronization"),
     (["fraud analytics"], "5.1 Policies for Information Security"),
-    (["multifactor", "mfa", "multi-factor", "2fa", "two-factor"], "5.17 Authentication Information"),
-    (["pam", "privileged access", "pim", "idam"], "5.15 Access Control"),
+    (["multifactor", "mfa", "multi-factor", "2fa", "two-factor"], "8.5 Secure Authentication"),
+    (["pam", "privileged access", "pim", "idam"], "8.2 Privileged Access Rights"),
     (["access control policy", "access control"], "5.15 Access Control"),
-    # NOTE: control 5.17 is literally named "Authentication Information" — this must
-    # point there, not at 5.15 (physical/logical Access Control). Bare "auth" was
-    # removed: as a substring match it also fired on "authorization"/"author" and
-    # could out-rank the more specific "access control" entry above depending on
-    # list order, misrouting an Access Control row's evidence file into 5.17's
-    # (or vice versa) whenever both keywords co-occurred in a question.
-    (["authentication", "how is the auth"], "5.17 Authentication Information"),
+    # NOTE: control 8.5 is literally named "Secure Authentication" -- MFA and general
+    # "how is authentication done" questions are about the authentication *mechanism*,
+    # which is 8.5's scope, not 5.17 (which covers password/credential *lifecycle*
+    # management -- issuance, storage, revocation -- see the password/credential/secret
+    # entry further down, which correctly stays on 5.17). Bare "auth" was removed: as a
+    # substring match it also fired on "authorization"/"author" and could out-rank the
+    # more specific "access control" entry above depending on list order, misrouting an
+    # Access Control row's evidence file into 8.5's (or vice versa) whenever both
+    # keywords co-occurred in a question.
+    (["authentication", "how is the auth"], "8.5 Secure Authentication"),
     # Bare "register" removed: as a substring it also matched "risk register",
     # misrouting risk-assessment questions into Asset Inventory.
     (["asset management policy", "asset management", "asset inventory"], "5.9 Inventory of Information and Other Associated Assets"),
@@ -257,6 +260,29 @@ def _detect_file_columns(header_row: list) -> List[int]:
     return file_col_indices
 
 
+def _get_file_column_roles(header_row: list, file_cols: List[int]) -> Dict[int, str]:
+    """
+    Classifies each detected file column as 'policy', 'evidence', or 'generic' based
+    on its header text (e.g. 'Policy (source-grounded)' -> 'policy', 'File name' ->
+    'generic'). Lets downstream code tell the LLM which locked file(s) the auditor
+    intended as policy proof vs operational evidence proof, instead of locking both
+    into one undifferentiated blob and making the LLM re-derive the split blind.
+    """
+    roles = {}
+    for idx in file_cols:
+        cell_norm = _normalize(str(header_row[idx]) if idx < len(header_row) else "")
+        if "policy" in cell_norm:
+            roles[idx] = "policy"
+        elif "evidence" in cell_norm:
+            roles[idx] = "evidence"
+        else:
+            roles[idx] = "generic"
+    return roles
+
+
+_ROW_NUMBER_HEADER_LABELS = {"s no", "sno", "sl no", "sl", "no", "sr no", "srno", "#", "row", "row no", "index", ""}
+
+
 def _detect_question_column(header_row: list) -> int:
     """
     Auto-detect which column holds the audit check question/control name.
@@ -266,15 +292,40 @@ def _detect_question_column(header_row: list) -> int:
         "audit", "check", "question", "control", "policy", "observation",
         "item", "objective", "requirement", "whether", "sl", "no"
     }
-    # Column 0 is often S.No / row number — skip it
     for idx, cell in enumerate(header_row):
-        if idx == 0:
-            continue
         cell_norm = _normalize(str(cell) if cell is not None else "")
+        # Column 0 is often S.No / row number -- skip ONLY if its header text
+        # specifically looks like a row-index label. A real question column that
+        # happens to be first (e.g. "Audit check" as literal column 0, which some
+        # real checklists use with no separate S.No column) must NOT be skipped --
+        # a blanket "always skip column 0" previously caused column detection to
+        # fail entirely on that layout, matching nothing and silently defaulting
+        # to the wrong column with zero evidence files attached to any control.
+        if idx == 0 and cell_norm in _ROW_NUMBER_HEADER_LABELS:
+            continue
         for kw in question_keywords:
             if kw in cell_norm:
                 return idx
     return 1  # Default: second column
+
+
+def _detect_supplementary_name_column(header_row: list, question_col: int) -> Optional[int]:
+    """
+    Some checklists split control identification across two columns, e.g. a short
+    "Control" ID column plus a separate "Control Name" column. Detects that second
+    column so its text can be combined with the primary question column -- this
+    matters when a row has a blank Control ID but a filled Control Name (or vice
+    versa): without combining them, a row with the primary column blank looks like
+    an empty row and gets silently dropped, even though the other column has
+    everything needed to resolve the control.
+    """
+    for idx, cell in enumerate(header_row):
+        if idx == question_col:
+            continue
+        cell_norm = _normalize(str(cell) if cell is not None else "")
+        if "name" in cell_norm and ("control" in cell_norm or "audit" in cell_norm or "check" in cell_norm):
+            return idx
+    return None
 
 
 def parse_excel_scoping_checklist(
@@ -350,16 +401,20 @@ def parse_excel_scoping_checklist(
 
         # ── Auto-detect columns ────────────────────────────────────────────────────
         question_col = _detect_question_column(header_row)
+        name_col = _detect_supplementary_name_column(header_row, question_col)
         file_cols = _detect_file_columns(header_row)
 
         # A column cannot be BOTH the question column and a file column.
         # This happens when the header is just "Policy Name" (matches both sets of keywords).
         # In that case, treat it as question-only (no file columns).
-        file_cols = [c for c in file_cols if c != question_col]
+        file_cols = [c for c in file_cols if c != question_col and c != name_col]
+        file_col_roles = _get_file_column_roles(header_row, file_cols)
 
         print(f"[EXCEL PARSER] Sheet: '{target_sheet.title}' | "
               f"Question col: {question_col} ('{header_row[question_col]}') | "
-              f"File cols: {file_cols} ({[header_row[c] for c in file_cols]})",
+              f"Name col: {name_col} ({header_row[name_col] if name_col is not None else None}) | "
+              f"File cols: {file_cols} ({[header_row[c] for c in file_cols]}) | "
+              f"Roles: {file_col_roles}",
               flush=True)
 
         use_cases = _load_use_cases()
@@ -371,34 +426,60 @@ def parse_excel_scoping_checklist(
             if not any(c is not None and str(c).strip() for c in row):
                 continue
 
-            # Extract question text
+            # Extract question text -- combine the primary column with the
+            # supplementary name column (if any) so a row is still resolvable
+            # and non-empty when only one of the two is filled in (e.g. a
+            # blank Control ID but a filled Control Name, or vice versa).
             q_cell = row[question_col] if question_col < len(row) else None
-            question = str(q_cell).strip() if q_cell is not None else ""
+            q_text = str(q_cell).strip() if q_cell is not None else ""
+            name_text = ""
+            if name_col is not None and name_col < len(row) and row[name_col] is not None:
+                name_text = str(row[name_col]).strip()
+            resolution_text = " ".join(t for t in [q_text, name_text] if t)
+            question = name_text or q_text  # prefer the more descriptive text for display
 
             # Skip header-like rows (e.g., "Audit check" appearing mid-sheet)
-            if not question or _normalize(question) in {
-                "audit check", "question", "control", "sl no", "s.no", "sno"
+            if not resolution_text or _normalize(resolution_text) in {
+                "audit check", "question", "control", "sl no", "s.no", "sno",
+                "control control name", "control name"
             }:
                 continue
 
-            # Extract filenames from all detected file columns
-            raw_files = []
+            # Extract filenames from all detected file columns, split by the
+            # column's role (policy/evidence/generic) so the split can be
+            # preserved downstream instead of collapsing into one blob.
+            raw_files, raw_policy_files, raw_evidence_files = [], [], []
             for fc in file_cols:
                 if fc < len(row) and row[fc] is not None:
                     val = str(row[fc]).strip()
                     if val and val.lower() not in {"file name", "file", "filename", "n/a", "na", "-", ""}:
                         raw_files.append(val)
+                        role = file_col_roles.get(fc, "generic")
+                        if role == "policy":
+                            raw_policy_files.append(val)
+                        elif role == "evidence":
+                            raw_evidence_files.append(val)
 
             # Fuzzy-match raw file names to actually uploaded files
             matched_files = _match_filenames(raw_files, uploaded_filenames or [])
+            matched_policy_files = _match_filenames(raw_policy_files, uploaded_filenames or [])
+            matched_evidence_files = _match_filenames(raw_evidence_files, uploaded_filenames or [])
 
-            # Resolve ISO control from question/control text
-            ctrl_info = _resolve_control(question, use_cases)
+            # Resolve ISO control from the combined text (ID regex needs the raw
+            # "5.15"-style value if present; name-keyword/embedding fallback needs
+            # the descriptive text if the ID is blank) -- either source alone may
+            # be missing for a given row, so both are passed together.
+            ctrl_info = _resolve_control(resolution_text, use_cases)
 
             items.append({
                 "row_index":         row_idx,
                 "question":          question,
                 "files":             matched_files,
+                # Role-split view of the same files, when the sheet has separately
+                # named Policy/Evidence columns -- both empty for a generic single
+                # "File name" column, since there's no column-level signal to split.
+                "policy_files":      matched_policy_files,
+                "evidence_files":    matched_evidence_files,
                 "raw_file_refs":     raw_files,   # original Excel values (for debugging)
                 "control_id":        ctrl_info["control_id"],
                 "control_label":     ctrl_info["control_label"],
@@ -417,58 +498,103 @@ def parse_excel_scoping_checklist(
 
 
 
+_FILENAME_EXT_RE = re.compile(r'\.(docx?|pdf|xlsx?|csv|pptx?|txt|png|jpe?g|zip)\b', re.IGNORECASE)
+_CITATION_SPLIT_RE = re.compile(r'\s*;\s*|\n')
+_CITATION_LEADING_TAG_RE = re.compile(r'^\[[^\]]+\]\s*')
+
+
+def _looks_like_filename_reference(segment: str) -> bool:
+    """
+    A segment is only treated as a candidate file citation (matched against
+    uploads, or kept as an unresolved reference) if it's filename-shaped -- has
+    a recognized extension, or is short enough to plausibly be a citation like
+    "Some Policy V17.0 -- p.2." rather than a full prose sentence describing
+    what a policy says. Long narrative text with no extension is never kept as
+    a fake "locked filename" -- that silently breaks retrieval later, since no
+    real file will ever match it.
+    """
+    if _FILENAME_EXT_RE.search(segment):
+        return True
+    return len(segment) <= 80
+
+
+def _split_citation_segments(raw_ref: str) -> List[str]:
+    """
+    A single cell may cite multiple files at once (e.g. "A.docx; B.pdf -- p.2."),
+    or bracket-tag a citation (e.g. "[Published] Some Policy.docx"). Splits on
+    ';' / newlines and strips leading bracket tags so each file gets matched
+    independently instead of the whole cell being treated as one reference.
+    """
+    parts = [p.strip() for p in _CITATION_SPLIT_RE.split(raw_ref) if p.strip()]
+    cleaned = [_CITATION_LEADING_TAG_RE.sub('', p).strip() for p in parts]
+    cleaned = [p for p in cleaned if p]
+    return cleaned or [raw_ref]
+
+
 def _match_filenames(
     raw_refs: List[str],
     uploaded_filenames: List[str]
 ) -> List[str]:
     """
     Fuzzy-match raw Excel file references to actual uploaded filenames.
-    
-    Strategy:
-    1. Exact match (case-insensitive, no extension needed)
-    2. Partial match (raw ref is contained in uploaded name, or vice versa)
-    3. If no match found, keep the raw ref as-is (auditor can see it)
+
+    Each raw reference may cite multiple files in one cell, or be pure
+    narrative text with no file reference at all -- both are handled by first
+    splitting into citation segments (see _split_citation_segments), then
+    matching each segment independently.
+
+    Strategy per segment:
+    1. Exact match (case-insensitive, extension-stripped)
+    2. Partial match -- checks BOTH the full uploaded filename and its
+       extension-stripped stem as a substring, since citation text doesn't
+       always repeat the file extension (e.g. "...Policy V17.0 -- p.2." cites
+       "...Policy V17.0.pdf" without ever writing ".pdf")
+    3. If nothing matches, keep the segment only if it's filename-shaped (see
+       _looks_like_filename_reference) so the auditor can see an expected file
+       that hasn't been uploaded yet. Pure narrative segments are dropped
+       instead of being kept as a fake filename reference.
     """
-    if not uploaded_filenames:
-        # No uploaded files to match against — return raw refs as-is
-        return raw_refs
+    def _resolve_segment(seg: str) -> Optional[str]:
+        seg_norm = _normalize(seg)
+
+        # Step 1: exact match (extension-stripped)
+        for upl in uploaded_filenames:
+            upl_stem_norm = _normalize(os.path.splitext(upl)[0])
+            if seg_norm == upl_stem_norm or seg_norm == _normalize(upl):
+                return upl
+
+        # Step 2: partial match -- try both the full filename and its
+        # extension-stripped stem, since citations often omit the extension
+        best_match, best_len = None, 0
+        for upl in uploaded_filenames:
+            for candidate in (_normalize(upl), _normalize(os.path.splitext(upl)[0])):
+                if not candidate:
+                    continue
+                if candidate in seg_norm and len(candidate) > best_len:
+                    best_len, best_match = len(candidate), upl
+                elif seg_norm in candidate and len(seg_norm) > best_len:
+                    best_len, best_match = len(seg_norm), upl
+        return best_match
 
     matched = []
     for ref in raw_refs:
-        ref_norm = _normalize(ref)
-        # Step 1: Exact match (strip extension for comparison)
-        exact = None
-        for upl in uploaded_filenames:
-            upl_norm = _normalize(os.path.splitext(upl)[0])
-            if ref_norm == upl_norm or ref_norm == _normalize(upl):
-                exact = upl
-                break
-        if exact:
-            matched.append(exact)
-            continue
+        for seg in _split_citation_segments(ref):
+            resolved = _resolve_segment(seg) if uploaded_filenames else None
+            if resolved:
+                matched.append(resolved)
+            elif _looks_like_filename_reference(seg):
+                # Step 3: keep as an unresolved-but-plausible reference
+                matched.append(seg)
 
-        # Step 2: Partial / substring match
-        partial = None
-        best_len = 0
-        for upl in uploaded_filenames:
-            upl_norm = _normalize(upl)
-            # Check how many chars of ref_norm appear in upl_norm
-            if ref_norm in upl_norm:
-                if len(ref_norm) > best_len:
-                    best_len = len(ref_norm)
-                    partial = upl
-            elif upl_norm in ref_norm:
-                if len(upl_norm) > best_len:
-                    best_len = len(upl_norm)
-                    partial = upl
-
-        if partial:
-            matched.append(partial)
-        else:
-            # Step 3: Keep raw ref — auditor will see it
-            matched.append(ref)
-
-    return matched
+    # Deduplicate while preserving order -- the same file can legitimately be
+    # cited twice (e.g. once in the Policy column, once in Evidence)
+    seen = set()
+    result = []
+    for f in matched:
+        if f not in seen:
+            seen.add(f)
+            result.append(f)
+    return result
 
 
 def get_locked_filenames_for_control(

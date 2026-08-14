@@ -232,6 +232,14 @@ def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
                 files_str = ", ".join(files) if isinstance(files, list) else str(files)
                 primary_file = files[0] if (files and isinstance(files, list) and len(files) > 0) else files_str
 
+                # Role-split file lists, when the sheet has separately named
+                # Policy/Evidence columns (both empty for a generic "File name"
+                # column) -- carried through so the LLM can be told which locked
+                # file(s) the auditor intended as policy proof vs evidence proof,
+                # instead of re-deriving the split blind from undifferentiated text.
+                policy_files = item.get("policy_files") or []
+                evidence_files = item.get("evidence_files") or []
+
                 controls.append({
                     "control": f"{ctrl_full_label} — {q_text}",
                     "control_id": ctrl_full_label,
@@ -247,6 +255,8 @@ def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
                     # scoping block below to lock retrieval to every file actually listed
                     # against this row, not only file[0], when a single row names multiple.
                     "evidence_source_files_all": files_str,
+                    "policy_source_files_all": ", ".join(policy_files) if policy_files else "",
+                    "evidence_only_source_files_all": ", ".join(evidence_files) if evidence_files else "",
                 })
             return controls
 
@@ -754,6 +764,8 @@ Return format: ["topic1", "topic2", ...]"""
         control_context = context
         control_file_names = file_names_list
         target_evidence_files = []   # Track which specific evidence files this control maps to
+        matched_policy_files = []    # Locked files that came from a Policy-named column
+        matched_evidence_only_files = []  # Locked files that came from an Evidence-named column
 
         def _match_control_key(c_id, docs_source):
             if not c_id or not docs_source: return None
@@ -824,22 +836,33 @@ Return format: ["topic1", "topic2", ...]"""
             # stripped), which pulled in the wrong file. Per-ref matching also
             # tries an EXACT normalized match before falling back to substring
             # containment, which avoids that same prefix collision.
-            target_refs = [r.strip() for r in str(target_doc_name).split(",") if r.strip()]
-            matched_files = []
-            for ref in target_refs:
-                norm_ref = _norm_fn(ref)
-                if not norm_ref:
-                    continue
-                exact_hit = next((fname for fname in file_names_list if _norm_fn(fname) == norm_ref), None)
-                if exact_hit:
-                    if exact_hit not in matched_files:
-                        matched_files.append(exact_hit)
-                    continue
-                for fname in file_names_list:
-                    norm_fname = _norm_fn(fname)
-                    if norm_fname and (norm_ref in norm_fname or norm_fname in norm_ref):
-                        if fname not in matched_files:
-                            matched_files.append(fname)
+            def _match_refs(refs_str):
+                refs = [r.strip() for r in str(refs_str or "").split(",") if r.strip()]
+                out = []
+                for ref in refs:
+                    norm_ref = _norm_fn(ref)
+                    if not norm_ref:
+                        continue
+                    exact_hit = next((fname for fname in file_names_list if _norm_fn(fname) == norm_ref), None)
+                    if exact_hit:
+                        if exact_hit not in out:
+                            out.append(exact_hit)
+                        continue
+                    for fname in file_names_list:
+                        norm_fname = _norm_fn(fname)
+                        if norm_fname and (norm_ref in norm_fname or norm_fname in norm_ref):
+                            if fname not in out:
+                                out.append(fname)
+                return out
+
+            matched_files = _match_refs(target_doc_name)
+
+            # ── Column-source split (which locked files came from a Policy-named
+            # column vs an Evidence-named column on the sheet, if any) -- lets the
+            # LLM be told the auditor's own intent instead of re-deriving the
+            # policy/evidence split blind from undifferentiated locked text.
+            matched_policy_files = _match_refs(c.get("policy_source_files_all"))
+            matched_evidence_only_files = _match_refs(c.get("evidence_only_source_files_all"))
 
             reg_source = file_registry if file_registry is not None else {}
 
@@ -912,6 +935,11 @@ Return format: ["topic1", "topic2", ...]"""
             # checklist_question is the original Excel audit check question text.
             "locked_filenames": target_evidence_files if target_evidence_files else [],
             "checklist_question": c.get("checklist_question") or c["label"],
+            # Which of the locked files (if any) came from a Policy-named vs an
+            # Evidence-named column on the sheet -- lets generate_node tell the LLM
+            # the auditor's own intent instead of re-deriving the split blind.
+            "policy_locked_filenames": matched_policy_files,
+            "evidence_locked_filenames": matched_evidence_only_files,
         }
         
         try:

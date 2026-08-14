@@ -53,20 +53,51 @@ def load_dataset():
     return data.get("cases", [])
 
 
+def load_prior_results():
+    """Resume support: reuse successful results from a previous (possibly
+    interrupted) run instead of re-running every case from scratch. Only
+    error-free results are trusted -- an errored case is retried."""
+    if not os.path.exists(RESULTS_JSON_PATH):
+        return {}
+    try:
+        with open(RESULTS_JSON_PATH, "r", encoding="utf-8") as f:
+            prior = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+    return {r["id"]: r for r in prior.get("results", []) if "error" not in r}
+
+
+def save_partial(results, dataset_total):
+    """Writes results/report after every case so a laptop shutdown or process
+    kill only loses the in-flight case, not the whole run."""
+    metrics = compute_metrics(results)
+    metrics["dataset_total"] = dataset_total
+    with open(RESULTS_JSON_PATH, "w", encoding="utf-8") as f:
+        json.dump({"results": results, "metrics": metrics}, f, indent=2)
+    write_markdown_report(results, metrics)
+    return metrics
+
+
 def run_case(case, control_templates):
     control_id = case["control_id"]
     ctrl = control_templates.get(control_id)
     if not ctrl:
         return {"id": case["id"], "error": f"Control {control_id} not found in USE_CASES"}
 
-    doc_name = case["document_name"]
-    doc_text = case["document_text"]
+    # Multi-document cases (a "documents" list) ingest each file separately
+    # under its own filename, so retrieval has to aggregate across files --
+    # single-document cases keep the original document_name/document_text shape.
+    docs = case.get("documents") or [{"name": case["document_name"], "text": case["document_text"]}]
 
-    clean_db_for_file(doc_name)
-    _ingested_chunks_cache[doc_name] = [
-        (doc_text, {"source_file": doc_name, "source_type": "docx", "section_heading": "", "chunk_id": "chunk_gd"})
-    ]
-    save_document_chunks(doc_name, doc_text)
+    for doc in docs:
+        clean_db_for_file(doc["name"])
+        _ingested_chunks_cache[doc["name"]] = [
+            (doc["text"], {"source_file": doc["name"], "source_type": "docx", "section_heading": "", "chunk_id": "chunk_gd"})
+        ]
+        save_document_chunks(doc["name"], doc["text"])
+
+    doc_text = "\n\n".join(d["text"] for d in docs)
+    file_names_list = [d["name"] for d in docs]
 
     state = {
         "control_id": ctrl["use_case"],
@@ -79,7 +110,7 @@ def run_case(case, control_templates):
         "keywords": CONTROL_KEYWORDS.get(ctrl["use_case"], {}),
 
         "document_text": doc_text,
-        "file_names_list": [doc_name],
+        "file_names_list": file_names_list,
         "llm_model": "gemma4:e4b",
         "summary_text": f"Golden eval case {case['id']}",
 
@@ -204,16 +235,31 @@ def main():
         cid = c["use_case"].split(" ")[0]
         control_templates[cid] = c
 
+    prior_results = load_prior_results()
+    if prior_results:
+        print(f"Resuming: found {len(prior_results)} completed case(s) from a prior run, will skip those.")
+
     results = []
     for case in cases:
-        print(f"\n--- {case['id']}: control {case['control_id']} ({case.get('source', 'unlabeled source')}) ---")
-        result = run_case(case, control_templates)
-        results.append(result)
-        if "error" in result:
-            print(f"ERROR: {result['error']}")
+        prior = prior_results.get(case["id"])
+        if prior:
+            print(f"\n--- {case['id']}: control {case['control_id']} (SKIPPED -- reusing prior result) ---")
+            print(f"Expected={prior['expected']} Actual={prior['actual']} Match={prior['match']} "
+                  f"RetrievalRecall={prior['retrieval_recall']} Time={prior['elapsed_sec']}s")
+            results.append(prior)
         else:
-            print(f"Expected={result['expected']} Actual={result['actual']} Match={result['match']} "
-                  f"RetrievalRecall={result['retrieval_recall']} Time={result['elapsed_sec']}s")
+            print(f"\n--- {case['id']}: control {case['control_id']} ({case.get('source', 'unlabeled source')}) ---")
+            result = run_case(case, control_templates)
+            results.append(result)
+            if "error" in result:
+                print(f"ERROR: {result['error']}")
+            else:
+                print(f"Expected={result['expected']} Actual={result['actual']} Match={result['match']} "
+                      f"RetrievalRecall={result['retrieval_recall']} Time={result['elapsed_sec']}s")
+
+        # Checkpoint after every case -- a kill/shutdown mid-run only loses
+        # the in-flight case, not the whole dataset's progress.
+        save_partial(results, dataset_total=len(cases))
 
     metrics = compute_metrics(results)
 
@@ -223,12 +269,8 @@ def main():
           f"Recall: {metrics['recall']:.1%} | F1: {metrics['f1']:.1%}")
     print(f"FP: {metrics['false_positives']} | FN: {metrics['false_negatives']} | Errors: {metrics['errors']}")
     print("=" * 80)
-
-    with open(RESULTS_JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump({"results": results, "metrics": metrics}, f, indent=2)
     print(f"Saved JSON results to {RESULTS_JSON_PATH}")
-
-    write_markdown_report(results, metrics)
+    print(f"Saved markdown report to {RESULTS_MD_PATH}")
 
 
 if __name__ == "__main__":
