@@ -740,7 +740,7 @@ def api_undo_delete_evidence_file(req: UndoDeleteEvidenceRequest, request: Reque
 
 @router.post("/start")
 def api_start_audit(req: StartAuditRequest, request: Request):
-    _require_auth(request)
+    auth_user = _require_auth(request)
     bg_key = req.session_id
     print(f"🚀 [API] /audit/start received for session {req.session_id} with {len(req.selected_sls)} controls (mode: {req.audit_mode})", flush=True)
 
@@ -757,9 +757,16 @@ def api_start_audit(req: StartAuditRequest, request: Request):
     elif _mem["status"] == "WARNING":
         log_system_event("RESOURCE_GUARD_WARNING", "WARNING", f"RAM pressure warning: {_mem['reason']}", session_id=req.session_id, actor=req.username or "Auditor")
 
-    # Extract auditor identity from session_id (format: auditor-<username>-<timestamp>)
-    # Fall back to first 16 chars if format differs
-    auditor_id = req.session_id.split("-")[0] if "-" in req.session_id else req.session_id[:16]
+    # Auditor identity for the per-auditor concurrency limit below. Previously
+    # parsed from session_id assuming an "auditor-<username>-<timestamp>" format,
+    # but api_create_session actually generates session_id as uuid4().hex -- no
+    # dashes, ever -- so this always fell back to session_id[:16], the first 16
+    # chars of a random per-session UUID. That's unique to each session, so the
+    # limit never actually grouped sessions by auditor; it silently never
+    # triggered no matter how many concurrent audits one real auditor started.
+    # Use the authenticated identity instead, which is stable across a real
+    # auditor's sessions.
+    auditor_id = auth_user.get("username") or (req.session_id.split("-")[0] if "-" in req.session_id else req.session_id[:16])
 
     with _bg_lock:
         if bg_key in _bg_running:

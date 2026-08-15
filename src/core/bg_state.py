@@ -21,6 +21,9 @@ _bg_lock = _bg_store["lock"]
 _bg_stop_flags: dict = {}
 
 # Per-auditor session tracking: auditor_id -> set of active session_ids
-# Limits how many concurrent audits one auditor can run simultaneously
+# Limits how many concurrent audits one auditor can run simultaneously.
+# The resource guard (src/core/resource_guard.py) is the real RAM safety net --
+# this exists to stop accidental pile-up (double-clicks, multiple tabs) rather
+# than to be a hard resource budget, so it's kept low.
 _auditor_sessions: dict = defaultdict(set)  # {auditor_id: {session_id, ...}}
-MAX_AUDITS_PER_AUDITOR = int(__import__('os').environ.get("MAX_AUDITS_PER_AUDITOR", "100"))
+MAX_AUDITS_PER_AUDITOR = int(__import__('os').environ.get("MAX_AUDITS_PER_AUDITOR", "2"))
