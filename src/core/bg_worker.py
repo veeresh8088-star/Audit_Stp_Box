@@ -464,29 +464,35 @@ def _checkpoint_finish(session_id, status="completed"):
             db.close()
 
 def get_resumable_checkpoint(session_id):
-    db = SessionLocal()
-    try:
-        return db.query(AuditCheckpoint).filter(
-            AuditCheckpoint.session_id == session_id,
-            AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
-        ).order_by(AuditCheckpoint.created_at.desc()).first()
-    except Exception as e:
-        print(f"[checkpoint] Failed to get checkpoint: {e}", flush=True)
-        return None
-    finally:
-        db.close()
+    # force_master() for read-after-write consistency -- this is checked right after
+    # a checkpoint write (crash detection on restart), and without pinning to master
+    # a lagging replica read could report "nothing to resume" even though the
+    # checkpoint was just committed, defeating the one scenario this exists for.
+    with force_master():
+        db = SessionLocal()
+        try:
+            return db.query(AuditCheckpoint).filter(
+                AuditCheckpoint.session_id == session_id,
+                AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
+            ).order_by(AuditCheckpoint.created_at.desc()).first()
+        except Exception as e:
+            print(f"[checkpoint] Failed to get checkpoint: {e}", flush=True)
+            return None
+        finally:
+            db.close()
 
 def get_global_resumable_checkpoint():
-    db = SessionLocal()
-    try:
-        return db.query(AuditCheckpoint).filter(
-            AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
-        ).order_by(AuditCheckpoint.created_at.desc()).first()
-    except Exception as e:
-        print(f"[checkpoint] Failed to get global checkpoint: {e}", flush=True)
-        return None
-    finally:
-        db.close()
+    with force_master():
+        db = SessionLocal()
+        try:
+            return db.query(AuditCheckpoint).filter(
+                AuditCheckpoint.status.in_(["in_progress", "failed", "paused", "interrupted"])
+            ).order_by(AuditCheckpoint.created_at.desc()).first()
+        except Exception as e:
+            print(f"[checkpoint] Failed to get global checkpoint: {e}", flush=True)
+            return None
+        finally:
+            db.close()
 
 def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None):
     os.environ["RAG_RERANK_MODE"] = "quick" if "quick" in str(audit_mode).lower() else "deep"
@@ -679,11 +685,58 @@ Return format: ["topic1", "topic2", ...]"""
         return [], all_results
 
     all_results = []
+    # ── RESUME: restore already-completed results from the checkpoint ─────────
+    # Without this, resuming correctly SKIPS re-running already-done controls
+    # (see _already_done_set below) but their prior results were never re-added
+    # to all_results, so the final saved report only ever contained controls
+    # processed after the resume point -- the pre-crash work vanished from the
+    # output even though it was never actually lost from the checkpoint itself.
+    if already_done_ids and checkpoint_session_id:
+        try:
+            with force_master():
+                _resume_session = SessionLocal()
+                _resume_chk = (
+                    _resume_session.query(AuditCheckpoint)
+                    .filter(AuditCheckpoint.session_id == checkpoint_session_id)
+                    .order_by(AuditCheckpoint.created_at.desc())
+                    .first()
+                )
+                _resume_session.close()
+            if _resume_chk and _resume_chk.partial_results_json:
+                restored = json.loads(_resume_chk.partial_results_json)
+                if isinstance(restored, list):
+                    all_results = restored
+                    print(
+                        f"[RESUME] Restored {len(all_results)} already-completed result(s) "
+                        f"from checkpoint for session {checkpoint_session_id}.",
+                        flush=True
+                    )
+        except Exception as e:
+            print(f"[RESUME] Failed to restore partial results from checkpoint: {e}", flush=True)
     total = len(controls)
     overall_start_time = time.time()
     _audit_real_prompt_toks = 0
     _audit_real_comp_toks = 0
-    
+
+    # ── Busy-system notice (warning only, never blocks) ────────────────────────
+    # Measured directly: 2 concurrent audits on a 12-core machine ran ~1.7-2x
+    # slower each (still genuinely parallel, not queued -- see
+    # qa/checkpointing/test_concurrent_sessions.py). At 2+ already running,
+    # tell the auditor to expect a slower run instead of leaving them guessing
+    # why it's taking longer than usual.
+    try:
+        from src.core.redis_metrics import get_running_session_count
+        _running_now = get_running_session_count()
+    except Exception:
+        _running_now = 0
+    # _running_now includes this audit itself (session_start() already ran for
+    # it before this point), so "other" audits = _running_now - 1.
+    _other_running = max(0, _running_now - 1)
+    _busy_warning = (
+        f"⚠️ System is busy — {_other_running} other audit(s) running, this may take longer than usual."
+        if _other_running >= 1 else None
+    )
+
     msg = f"[AUDIT START] Starting LangGraph ISO 27001 Audit for {total} controls (Model: {model_choice}, Mode: {audit_mode})"
     print(f"\n[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
     log_dev_latency(msg)
@@ -1029,7 +1082,8 @@ Return format: ["topic1", "topic2", ...]"""
             with _bg_lock:
                 _bg_store["progress"][bg_key] = {
                     "text": f"Scanning: {idx + 1}/{total} controls...",
-                    "percent": pct
+                    "percent": pct,
+                    "warning": _busy_warning,
                 }
 
         # Legacy batch checkpoint for backward compat (kept but superseded by per-control)

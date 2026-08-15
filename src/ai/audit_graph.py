@@ -176,21 +176,8 @@ def _calculate_adaptive_timeout() -> int:
     - If Redis is down: falls back to checking Python in-memory _bg_running set.
     - Instant exit: t.join() exits sub-second as soon as LLM generation finishes.
     """
-    active_cnt = 1
-    try:
-        from src.core.redis_metrics import get_live_metrics
-        m = get_live_metrics()
-        if m.get("redis_available"):
-            active_cnt = max(1, len(m.get("active_sessions", [])))
-        else:
-            from src.core.bg_state import _bg_running
-            active_cnt = max(1, len(_bg_running))
-    except Exception:
-        try:
-            from src.core.bg_state import _bg_running
-            active_cnt = max(1, len(_bg_running))
-        except Exception:
-            active_cnt = 1
+    from src.core.redis_metrics import get_running_session_count
+    active_cnt = max(1, get_running_session_count())
 
     return max(600, active_cnt * 180)
 
@@ -279,8 +266,10 @@ def generate_node(state: AuditState) -> Dict[str, Any]:
                 result_holder["error"] = str(ex)
         t = threading.Thread(target=_run, daemon=True)
         t.start()
-        # 1800s (30 min) limit — supports multi-auditor queuing across concurrent sessions
-        _timeout = 1800
+        # Adaptive: scales with active session count (600s floor, +180s per active
+        # session) so heavier concurrent load gets more time before giving up,
+        # instead of a flat ceiling that starts producing real timeouts under load.
+        _timeout = _calculate_adaptive_timeout()
         # ── Heartbeat: update progress every 15s so UI never shows stuck 0% ──
         _elapsed = 0
         _heartbeat_interval = 15
@@ -337,28 +326,49 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
             ctrl_code = state.get("control_id") or ""
             prompt_hint = state.get("prompt_hint") or ""
 
-            if has_retrieved:
+            # ── Honest fallback: this path means the LLM never actually produced
+            # a parseable finding -- distinguish WHY (genuine timeout vs. some
+            # other generation failure) using the real reason already sitting in
+            # validation_error, instead of synthesizing plausible-sounding
+            # "evidence was identified" text that reads like real analysis
+            # happened when nothing was actually evaluated.
+            _prior_error = str(state.get("validation_error") or "")
+            _is_timeout = "timed out" in _prior_error.lower()
+
+            if _is_timeout:
+                finding_text = (
+                    f"SYSTEM TIMEOUT: Control {ctrl_code} ({ctrl_name}) was NOT evaluated. "
+                    f"The LLM did not respond within the time limit, likely due to high concurrent "
+                    f"system load. This is not a compliance assessment -- re-run this control once "
+                    f"system load decreases."
+                )
+                gap_text = f"Control {ctrl_code} was not evaluated due to a system timeout ({_prior_error}). Re-run required."
+                rec_text = "Re-run this control -- it was not evaluated due to a system timeout, not a documented compliance gap."
+                review_note = "SYSTEM TIMEOUT -- not a real evaluation. Re-run required, do not treat as a genuine finding."
+            elif has_retrieved:
                 finding_text = f"Evidence context was identified for Control {ctrl_code} ({ctrl_name}), demonstrating partial alignment with governance requirements. However, complete operational logs or formal approval sign-offs remain unverified."
                 gap_text = f"Context identified for {ctrl_code}, but complete evidence verification requires auditor sign-off. Context excerpt: {ev_snippet[:200]}..."
                 rec_text = state.get("recommendation") or f"Formally document, review, and maintain operational evidence logs for Control {ctrl_code} ({ctrl_name})."
+                review_note = "Evaluated with control-specific governance synthesis."
             else:
                 finding_text = f"The control objective for Control {ctrl_code} ({ctrl_name}) requires documented policies and implementation evidence ({prompt_hint[:90]}...). No supporting evidence was identified in the uploaded package."
                 gap_text = f"No documentation or evidence identified for Control {ctrl_code}."
                 rec_text = state.get("recommendation") or f"Establish, document, and formally approve procedures to satisfy Control {ctrl_code} ({ctrl_name})."
+                review_note = "Evaluated with control-specific governance synthesis."
 
             fallback = {
-                "status": "PARTIAL" if has_retrieved else "NON_COMPLIANT",
-                "policy_present": "Found" if has_retrieved else "Not Found",
-                "evidence_present": "Found" if has_retrieved else "Not Found",
-                "hallucination_check": "FAIL_FALLBACK",
+                "status": "NON_COMPLIANT" if _is_timeout else ("PARTIAL" if has_retrieved else "NON_COMPLIANT"),
+                "policy_present": "Not Found" if _is_timeout else ("Found" if has_retrieved else "Not Found"),
+                "evidence_present": "Not Found" if _is_timeout else ("Found" if has_retrieved else "Not Found"),
+                "hallucination_check": "SYSTEM_TIMEOUT" if _is_timeout else "FAIL_FALLBACK",
                 "requires_human_review": True,
                 "requires_review": True,
-                "review_note": "Evaluated with control-specific governance synthesis.",
+                "review_note": review_note,
                 "control_id": state["control_id"],
                 "control": state["control_label"],
                 "severity": "P3 Medium",
-                "evidence_quote": ev_quote,
-                "evidence_snippet": ev_snippet,
+                "evidence_quote": "NOT_EVALUATED" if _is_timeout else ev_quote,
+                "evidence_snippet": "" if _is_timeout else ev_snippet,
                 "finding": finding_text,
                 "gap_description": gap_text,
                 "reasoning": finding_text,
@@ -513,8 +523,8 @@ def reflection_node(state: AuditState) -> Dict[str, Any]:
                 result_holder["error"] = str(ex)
         t = threading.Thread(target=_run_reflect, daemon=True)
         t.start()
-        # 300s (5 min) hard limit per reflection pass — same reason as generate_node
-        _ref_timeout = 1800
+        # Adaptive, same formula as generate_node's timeout above.
+        _ref_timeout = _calculate_adaptive_timeout()
         # ── Heartbeat: keep progress moving between 85%→95% during reflection ──
         _ref_elapsed = 0
         _ref_hb = 15

@@ -1231,7 +1231,38 @@ class NativeOllamaChain:
                 
         prompt = active_template.format(**input_dict)
 
-        
+        # ── Final real backstop ──────────────────────────────────────────────
+        # _calculate_dynamic_context_budget() (retrieval.py) already sizes evidence
+        # to fit, but that's a calculation done BEFORE this exact prompt is
+        # assembled -- verify the REAL, fully-built prompt against the actual
+        # tokenizer here, and trim evidence further if it's still somehow over,
+        # instead of trusting the earlier estimate and risking the server's
+        # "exceed_context_size_error" 400 response.
+        try:
+            from src.core.llm_client import count_tokens
+            MAX_PROMPT_TOKENS = 16384 - 4096 - 300  # same worst-case completion reserve as retrieval.py, minus a small buffer
+            _trim_attempts = 0
+            while count_tokens(prompt) > MAX_PROMPT_TOKENS and _trim_attempts < 10:
+                ctx = input_dict.get("condensed_context") or ""
+                if not ctx:
+                    break  # nothing left to trim
+                # Cut the lowest-priority tail (chunks were assembled best-first) --
+                # remove 20% of what's left each pass rather than a fixed amount, so
+                # it converges quickly regardless of how far over budget it started.
+                new_len = max(0, int(len(ctx) * 0.8))
+                input_dict["condensed_context"] = ctx[:new_len]
+                prompt = active_template.format(**input_dict)
+                _trim_attempts += 1
+            if _trim_attempts > 0:
+                print(
+                    f"[TOKEN BUDGET] Trimmed evidence {_trim_attempts}x for control "
+                    f"{input_dict.get('control_id', 'unknown')} to fit the real context size "
+                    f"(final: {count_tokens(prompt)} tokens).",
+                    flush=True
+                )
+        except Exception as e:
+            print(f"[TOKEN BUDGET] Final backstop check failed, proceeding without it: {e}", flush=True)
+
         print(f"[LLM CHAIN] Querying '{self.model_name}' for {input_dict.get('control_id', 'unknown')}...", flush=True)
         try:
             from src.core.llm_client import query_llm

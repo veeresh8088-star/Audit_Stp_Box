@@ -324,6 +324,30 @@ def get_live_metrics(limit: int = 500) -> dict:
         }
 
 
+def get_running_session_count() -> int:
+    """
+    Counts audits that are GENUINELY running right now, not the mixed
+    running+recently-done list get_live_metrics() returns for the admin
+    dashboard's display. Shared by the adaptive timeout (audit_graph.py) and
+    the "system busy" warning (bg_worker.py) so both use one tested source of
+    truth instead of duplicating the Redis-vs-in-memory fallback logic.
+
+    Falls back to the in-memory _bg_running set if Redis is unavailable.
+    """
+    try:
+        m = get_live_metrics()
+        if m.get("redis_available"):
+            running = [s for s in m.get("active_sessions", []) if s.get("status") == "running"]
+            return len(running)
+    except Exception:
+        pass
+    try:
+        from src.core.bg_state import _bg_running
+        return len(_bg_running)
+    except Exception:
+        return 0
+
+
 def _fetch_db_completed_sessions(seen_sids: set, limit: int = 500) -> list:
     """Helper to query completed AuditReports from ShaktiDB / SQLite when Redis buffer is empty."""
     db_rows = []

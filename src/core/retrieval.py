@@ -523,16 +523,109 @@ def _cosine_similarity(v1, v2):
         print(f"[COSINE ERROR] Failed to compute similarity: {e}. v1_type={type(v1)}, v2_type={type(v2)}", flush=True)
         return 0.0
 
+# Cache the fixed prompt template's own token cost -- measured once via the
+# real tokenizer, not guessed. Only needs recomputing if the template text
+# changes, which requires a process restart anyway, so a simple in-memory
+# cache (not a TTL) is correct here.
+_template_token_cache = {}
+
+
+def _get_template_fixed_tokens(mode="standard"):
+    """Real, measured token cost of a prompt template's fixed boilerplate
+    (with {placeholder} markers stripped, since those are filled with real
+    content at runtime and measured separately). Cached after first call."""
+    if mode in _template_token_cache:
+        return _template_token_cache[mode]
+    try:
+        from src.core.llm_client import count_tokens
+        from src.ai.audit_chains import GENERATOR_PROMPT_TEMPLATE, EXCEL_SCOPING_JUDGE_PROMPT_TEMPLATE
+        template = EXCEL_SCOPING_JUDGE_PROMPT_TEMPLATE if mode == "excel_scoping" else GENERATOR_PROMPT_TEMPLATE
+        stripped = re.sub(r'\{[a-zA-Z_]+\}', '', template)
+        tokens = count_tokens(stripped)
+    except Exception as e:
+        print(f"[TOKEN BUDGET] Failed to measure template cost, using safe fallback: {e}", flush=True)
+        tokens = 4000  # conservative fallback -- larger than either real measured template
+    _template_token_cache[mode] = tokens
+    return tokens
+
+
+def _calculate_dynamic_context_budget(controls_batch, mode="standard"):
+    """
+    Calculates the real evidence token budget for THIS specific control, instead
+    of a fixed guess -- measures the actual fixed template cost (cached), the
+    actual control fields for this call, and the actual accumulated knowledge-loop
+    feedback for this control_id (which grows over time and was previously
+    unaccounted for), then reserves worst-case completion room (4096, matching
+    llm_client.py's real retry ceiling) plus a safety margin.
+
+    Falls back to the previous fixed 3000/5000 defaults if anything fails, or if
+    TARGET_CONTEXT_TOKENS/HARD_MAX_CONTEXT_TOKENS are explicitly set via env var
+    (manual override always wins).
+    """
+    env_target = os.environ.get("TARGET_CONTEXT_TOKENS")
+    env_hard_max = os.environ.get("HARD_MAX_CONTEXT_TOKENS")
+    if env_target or env_hard_max:
+        return (
+            int(env_target) if env_target else 3000,
+            int(env_hard_max) if env_hard_max else 5000,
+        )
+
+    FALLBACK_TARGET, FALLBACK_HARD_MAX = 3000, 5000
+    CHAT_WRAPPER_TOKENS = 26          # measured: Gemma's <start_of_turn>... wrapper
+    COMPLETION_RESERVE_TOKENS = 4096  # worst case -- llm_client.py retries at this size if truncated
+    SAFETY_MARGIN_TOKENS = 500        # absorbs the chunk-selection char/4 estimate's imprecision
+
+    try:
+        from src.core.llm_client import count_tokens
+        num_ctx = 16384  # matches audit_chains.py's get_num_ctx() for the llama.cpp backend
+
+        template_tokens = _get_template_fixed_tokens(mode)
+
+        ctrl = (controls_batch or [{}])[0]
+        control_id = ctrl.get("control", "")
+        fields_text = (
+            f"{control_id}\n{ctrl.get('label','')}\n{ctrl.get('expected','')}\n{ctrl.get('prompt_hint','')}"
+        )
+        fields_tokens = count_tokens(fields_text)
+
+        feedback_tokens = 0
+        if control_id:
+            try:
+                from src.ai.knowledge_loop import get_auditor_feedback_few_shot
+                code = control_id.split(" ")[0] if control_id else ""
+                feedback_text = get_auditor_feedback_few_shot([code]) if code else ""
+                feedback_tokens = count_tokens(feedback_text)
+            except Exception as e:
+                print(f"[TOKEN BUDGET] Failed to measure feedback size for '{control_id}': {e}", flush=True)
+
+        overhead = (
+            template_tokens + CHAT_WRAPPER_TOKENS + fields_tokens + feedback_tokens
+            + COMPLETION_RESERVE_TOKENS + SAFETY_MARGIN_TOKENS
+        )
+        hard_max = max(FALLBACK_HARD_MAX, num_ctx - overhead)
+        target = int(hard_max * 0.7)
+
+        print(
+            f"[TOKEN BUDGET] control={control_id!r} template={template_tokens} fields={fields_tokens} "
+            f"feedback={feedback_tokens} overhead_total={overhead} -> target={target} hard_max={hard_max}",
+            flush=True
+        )
+        return target, hard_max
+    except Exception as e:
+        print(f"[TOKEN BUDGET] Dynamic calculation failed, using fallback {FALLBACK_TARGET}/{FALLBACK_HARD_MAX}: {e}", flush=True)
+        return FALLBACK_TARGET, FALLBACK_HARD_MAX
+
+
 def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, KEYWORD_SYNONYMS, audit_mode=None):
     """Production RAG retrieval engine.
     Phase 3: Multi-document evidence aggregation — searches ALL uploaded files simultaneously.
     Phase 4: Pipeline: keyword scoring -> exact dedup -> Jaccard near-dedup -> diversity -> rank.
-    Phase 5: Token-budget accumulation: TARGET=4000 tokens, HARD_MAX=5000 tokens.
+    Phase 5: Token-budget accumulation -- dynamic per-control budget, see
+        _calculate_dynamic_context_budget() (was a fixed TARGET=3000/HARD_MAX=5000
+        that left most of the real 16k context budget unused).
     Phase 8: Returns retrieved_chunk_metas for evidence source provenance.
     """
-    # Token budget: dynamically configurable via env vars (defaults: 3000 / 5000 tokens)
-    TARGET_CONTEXT_TOKENS = int(os.environ.get("TARGET_CONTEXT_TOKENS", "3000"))
-    HARD_MAX_CONTEXT_TOKENS = int(os.environ.get("HARD_MAX_CONTEXT_TOKENS", "5000"))
+    TARGET_CONTEXT_TOKENS, HARD_MAX_CONTEXT_TOKENS = _calculate_dynamic_context_budget(controls_batch)
 
     # Deep mode (the default/thorough audit mode) gets more retrieval candidates and the
     # stronger reranker; Quick mode keeps the leaner original behavior. Anything other

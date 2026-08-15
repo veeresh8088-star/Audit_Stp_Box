@@ -109,6 +109,25 @@ def _ensure_llama_server_running(port=11434):
         print(f"[AUTO-START LLM] Auto-start error on port {port}: {e}", flush=True)
     return False
 
+def count_tokens(text, host=None, timeout=10):
+    """
+    Real token count via llama-server's own /tokenize endpoint -- ground truth,
+    not an estimate. Falls back to a chars/4 approximation if the server is
+    briefly unreachable, so a dynamic budget calculation never blocks an audit
+    over a monitoring failure (same fail-open philosophy as resource_guard.py).
+    """
+    if not text:
+        return 0
+    try:
+        url = f"{(host or _resolve_host())}/tokenize"
+        r = requests.post(url, json={"content": text}, timeout=timeout)
+        if r.status_code == 200:
+            return len(r.json().get("tokens", []))
+    except Exception:
+        pass
+    return len(text) // 4
+
+
 def query_llm(prompt, model, format=None, num_ctx=16384, temperature=0.0, num_thread=None, timeout=None, stop=None, session_id=None, token_stats=None):
     """Sends a non-streaming prompt completion request exclusively to llama-server.exe."""
     if timeout is None or timeout in (1800, 600):
