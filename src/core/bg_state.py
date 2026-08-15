@@ -27,3 +27,15 @@ _bg_stop_flags: dict = {}
 # than to be a hard resource budget, so it's kept low.
 _auditor_sessions: dict = defaultdict(set)  # {auditor_id: {session_id, ...}}
 MAX_AUDITS_PER_AUDITOR = int(__import__('os').environ.get("MAX_AUDITS_PER_AUDITOR", "2"))
+
+# Global cap across ALL auditors combined -- was previously set as an env var
+# in run_all.bat (MAX_CONCURRENT_AUDITS) but never actually read anywhere, so
+# it did nothing. llama-server's own request queue (via --cont-batching) has
+# no size limit of its own: past LLM_SLOTS truly-parallel slots, every
+# further request just queues silently with growing wait times, and a
+# client's own request timeout can fire before its turn ever comes. This is
+# the real backstop -- reject the (LLM_SLOTS*2 + 1)th+ request at the API
+# level with a clear "system busy" message instead of letting it queue
+# indefinitely toward a confusing timeout. Default of 16 assumes 8 LLM_SLOTS
+# (8 truly concurrent + 8 queued as buffer); adjust if LLM_SLOTS changes.
+MAX_CONCURRENT_AUDITS = int(__import__('os').environ.get("MAX_CONCURRENT_AUDITS", "16"))

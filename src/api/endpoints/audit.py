@@ -21,7 +21,7 @@ from src.db.database import (
     AuditorFeedback,
     force_master
 )
-from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg_stop_flags, _auditor_sessions, MAX_AUDITS_PER_AUDITOR
+from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg_stop_flags, _auditor_sessions, MAX_AUDITS_PER_AUDITOR, MAX_CONCURRENT_AUDITS
 from src.core.bg_worker import (
     _run_ollama_bg,
     _run_fast_technical_vapt_bg,
@@ -785,6 +785,22 @@ def api_start_audit(req: StartAuditRequest, request: Request):
                        f"Maximum allowed is {MAX_AUDITS_PER_AUDITOR} concurrent audits per auditor. "
                        f"Please wait for an existing audit to complete before starting a new one."
             )
+        # ── Global Concurrent Limit (across ALL auditors combined) ─────────────────
+        # llama-server's own request queue (--cont-batching) has no size limit of
+        # its own -- past LLM_SLOTS truly-parallel slots, everything past that
+        # just queues silently with growing wait times, and a client's own
+        # request timeout can fire before its turn ever comes. Reject here with a
+        # clear message instead of letting that happen invisibly.
+        global_active_count = len(_bg_running)
+        if global_active_count >= MAX_CONCURRENT_AUDITS:
+            raise HTTPException(
+                status_code=429,
+                detail=f"The system is at capacity: {global_active_count} audits are currently running or "
+                       f"queued across all auditors (limit {MAX_CONCURRENT_AUDITS}). Please wait for one to "
+                       f"finish before starting a new one."
+            )
+        # ─────────────────────────────────────────────────────────────────────────
+
         _auditor_sessions[auditor_id].add(bg_key)
         # ─────────────────────────────────────────────────────────────────────────
 

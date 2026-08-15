@@ -58,7 +58,7 @@ if %EMBED_THREADS% LSS 1 set EMBED_THREADS=4
 :: so more slots = more concurrent audits but less context room per slot. Formula:
 :: Physical Cores / 2 (e.g. 10 Physical Cores -> 5 Slots) keeps each slot's context
 :: large enough for a full audit document + multi-evidence findings without truncating.
-if "%LLM_SLOTS%"=="" set LLM_SLOTS=24
+if "%LLM_SLOTS%"=="" set LLM_SLOTS=8
 
 
 
@@ -93,7 +93,9 @@ set EMBEDDING_HOST=http://127.0.0.1:11435
 set OLLAMA_KEEP_ALIVE=24h
 set OLLAMA_NUM_PARALLEL=4
 set OLLAMA_MAX_LOADED_MODELS=3
-set MAX_CONCURRENT_AUDITS=%LLM_SLOTS%
+:: 2x LLM_SLOTS: LLM_SLOTS truly-parallel + the same again as a queue buffer,
+:: rejected clearly past that instead of queuing indefinitely at the LLM server.
+set /a MAX_CONCURRENT_AUDITS=%LLM_SLOTS%*2
 set REDIS_URL=redis://127.0.0.1:6380/0
 :: JWT_SECRET intentionally not set here -- that hardcoded value was a real,
 :: exploitable credential (forge any session, including admin) once committed
