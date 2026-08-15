@@ -980,6 +980,157 @@ def _is_stale_no_action_recommendation(rec_lower: str) -> bool:
     return any(phrase in rec_lower for phrase in _STALE_NO_ACTION_PHRASES)
 
 
+# ── Date grounding & deterministic freshness/validity ──────────────────────────
+# The LLM's own evidence_date / policy_*_date and evidence_freshness /
+# policy_validity fields were previously trusted unverified -- unlike the main
+# evidence quote, which is grounding-checked against the source text, a claimed
+# date could be entirely fabricated (never appeared anywhere in the document)
+# and still get labeled CURRENT, or a genuinely old-but-real date could get
+# labeled CURRENT because LLMs are unreliable at date arithmetic. Both were
+# observed on a real audit run: a claimed 2026 date with no date anywhere in
+# the source text, and real 2024 backup dates labeled CURRENT during a 2026
+# audit.
+
+_STALENESS_KEYWORDS = [
+    "expired", "deprecated", "decommissioned", "no longer valid", "no longer used",
+    "no longer in use", "superseded", "obsolete", "discontinued", "retired",
+    "end of life", "end-of-life", "sunset", "not in use",
+]
+
+
+def _has_staleness_language(text):
+    """Explicit staleness signal in the text itself, independent of any date --
+    catches documents that say they're outdated even when no parseable date
+    exists to compare, or overrides a stale document that happens to carry a
+    misleadingly recent-looking date."""
+    if not text:
+        return False
+    t = text.lower()
+    return any(kw in t for kw in _STALENESS_KEYWORDS)
+
+
+def _extract_date_tokens(date_str):
+    import re
+    return re.findall(r"\d+", date_str or "")
+
+
+def check_date_grounding(date_str, *texts):
+    """
+    Verifies a claimed date has real support in the source text(s), the same
+    principle as check_grounding() for evidence quotes -- don't trust a date
+    the LLM output unless the document actually contains it. Loosely matches
+    on numeric tokens (a 4-digit year plus at least one day/month-sized token)
+    rather than requiring an exact string match, since dates get reformatted
+    between the LLM's output and whatever format the source document used.
+    """
+    if not date_str:
+        return False
+    tokens = _extract_date_tokens(date_str)
+    if not tokens:
+        return False
+    year_tokens = [t for t in tokens if len(t) == 4]
+    other_tokens = [t for t in tokens if len(t) in (1, 2)]
+    haystack = " ".join(t for t in texts if t).lower()
+    if not haystack:
+        return False
+    year_ok = any(t in haystack for t in year_tokens) if year_tokens else True
+    other_ok = any(t in haystack for t in other_tokens) if other_tokens else True
+    return year_ok and other_ok
+
+
+def _parse_loose_date(date_str):
+    """Best-effort parse of a date string in whatever format the LLM/document used."""
+    if not date_str:
+        return None
+    from datetime import datetime
+    formats = [
+        "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%B %d, %Y", "%d %B %Y",
+        "%b %d, %Y", "%d %b %Y", "%Y/%m/%d", "%d-%b-%Y", "%d.%m.%Y",
+    ]
+    s = date_str.strip()
+    for fmt in formats:
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def resolve_evidence_freshness(finding, document_text, db_chunks=None):
+    """
+    Replaces the LLM's raw, unverified evidence_freshness self-rating with a
+    grounded, conservative determination:
+      - evidence_date must actually appear in the source text, or it's wiped
+        and freshness forced to UNKNOWN (never trust an ungrounded date).
+      - Evidence has no documented required-recency in this system (unlike
+        policy, which can carry its own stated review/expiry dates) -- so a
+        grounded-but-old date does NOT get auto-flipped to STALE; that would
+        be inventing a cadence requirement that was never actually stated
+        anywhere. Freshness stays UNKNOWN, but the real grounded date is kept
+        and shown, so a human auditor can judge the age themselves instead of
+        being told (wrongly) that it's current.
+      - Explicit staleness language in the evidence text itself (e.g.
+        "decommissioned", "no longer in use") overrides to STALE regardless
+        of any date, since that's a real, checkable textual signal.
+    """
+    chunks_text = " ".join(c.content for c in db_chunks if getattr(c, "content", None)) if db_chunks else ""
+    evidence_date = str(finding.get("evidence_date") or "").strip()
+    evidence_quote = str(finding.get("evidence_quote") or finding.get("evidence_snippet") or "")
+
+    if evidence_date and not check_date_grounding(evidence_date, document_text or "", chunks_text, evidence_quote):
+        finding["evidence_date"] = ""
+        evidence_date = ""
+
+    if _has_staleness_language(evidence_quote) or _has_staleness_language(document_text or ""):
+        finding["evidence_freshness"] = "STALE"
+    elif not evidence_date:
+        finding["evidence_freshness"] = "UNKNOWN"
+    else:
+        # Grounded date exists but no stated recency requirement to compare
+        # against -- keep it visible, don't assert a verdict it can't support.
+        finding["evidence_freshness"] = "UNKNOWN"
+
+    return finding
+
+
+def resolve_policy_validity(finding, document_text, db_chunks=None):
+    """
+    Same grounding principle as resolve_evidence_freshness(), but policy DOES
+    have an explicit requirement to compare against when the document states
+    one: its own effective/review/expiry dates. When those are grounded and
+    parseable, validity is computed deterministically against today's real
+    date instead of trusting the LLM's own arithmetic.
+    """
+    chunks_text = " ".join(c.content for c in db_chunks if getattr(c, "content", None)) if db_chunks else ""
+    policy_text = str(finding.get("policy_finding") or "") + " " + str(finding.get("policy_clause") or "")
+
+    for field in ("policy_effective_date", "policy_review_date", "policy_expiry_date"):
+        val = str(finding.get(field) or "").strip()
+        if val and not check_date_grounding(val, document_text or "", chunks_text, policy_text):
+            finding[field] = ""
+
+    if _has_staleness_language(policy_text) or _has_staleness_language(document_text or ""):
+        finding["policy_validity"] = "EXPIRED"
+        return finding
+
+    from datetime import datetime
+    today = datetime.now()
+
+    expiry = _parse_loose_date(finding.get("policy_expiry_date"))
+    if expiry:
+        finding["policy_validity"] = "EXPIRED" if expiry < today else "CURRENT"
+        return finding
+
+    review = _parse_loose_date(finding.get("policy_review_date"))
+    if review:
+        finding["policy_validity"] = "REVIEW_OVERDUE" if review < today else "CURRENT"
+        return finding
+
+    # No grounded, parseable date to compare against -- don't invent a verdict.
+    finding["policy_validity"] = "UNKNOWN"
+    return finding
+
+
 def post_process(finding, document_text, expected_evidence_map=None, db_chunks=None):
     """
     Applies post-processing policies to a single finding.
@@ -1025,6 +1176,12 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
     # FALSE_POSITIVE (control doesn't apply) is a different concept entirely and is
     # left untouched rather than being forced into this formula.
     if finding.get("status") != "FALSE_POSITIVE":
+        # Replace the LLM's raw, unverified date/freshness self-ratings with a
+        # grounded, deterministic determination before the formula below reads
+        # them -- see resolve_evidence_freshness/resolve_policy_validity for why.
+        finding = resolve_evidence_freshness(finding, document_text, db_chunks)
+        finding = resolve_policy_validity(finding, document_text, db_chunks)
+
         policy_status = str(finding.get("policy_status") or "NOT_FOUND").strip().upper()
         policy_assessment = str(finding.get("policy_assessment") or "NON_COMPLIANT").strip().upper()
         policy_validity = str(finding.get("policy_validity") or "UNKNOWN").strip().upper()
