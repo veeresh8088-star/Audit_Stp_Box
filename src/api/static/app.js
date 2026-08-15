@@ -2603,7 +2603,7 @@ function renderBenchmarkRowsHTML(sessions) {
         // File types badges
         const fts = s.file_types_summary || {};
         const ftsPills = Object.keys(fts).length
-            ? Object.entries(fts).map(([ext, cnt]) => `<span style="font-size:0.68rem; padding:1px 5px; border-radius:3px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); margin-right:3px;">${ext.toUpperCase()}:${cnt}</span>`).join("")
+            ? Object.entries(fts).map(([ext, cnt]) => `<span style="font-size:0.68rem; padding:1px 5px; border-radius:3px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); margin-right:3px;">${escapeHtml(String(ext).toUpperCase())}:${escapeHtml(String(cnt))}</span>`).join("")
             : `<span style="color:#94a3b8;">${filesCnt} files</span>`;
 
         return `
@@ -4438,11 +4438,11 @@ async function loadSystemEvents() {
                 else if (e.severity === "CRITICAL") color = "#f43f5e";
 
                 tr.innerHTML = `
-                    <td style="color:#64748b; font-family:var(--font-mono);">${e.created_at.slice(0, 19)}</td>
-                    <td><b>${e.event_type}</b></td>
-                    <td>${e.actor}</td>
-                    <td><span style="color:${color}; font-weight:700;">${e.severity}</span></td>
-                    <td style="color:#94a3b8; font-size:0.75rem;">${e.meta || '—'}</td>
+                    <td style="color:#64748b; font-family:var(--font-mono);">${escapeHtml(e.created_at.slice(0, 19))}</td>
+                    <td><b>${escapeHtml(e.event_type)}</b></td>
+                    <td>${escapeHtml(e.actor)}</td>
+                    <td><span style="color:${color}; font-weight:700;">${escapeHtml(e.severity)}</span></td>
+                    <td style="color:#94a3b8; font-size:0.75rem;">${escapeHtml(e.meta) || '—'}</td>
                 `;
                 tbody.appendChild(tr);
             });
