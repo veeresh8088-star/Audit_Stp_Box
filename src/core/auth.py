@@ -10,6 +10,7 @@ import re
 import os
 import secrets
 import string
+import bcrypt
 import pyotp
 from src.db.database import SessionLocal, User, force_master
 
@@ -29,8 +30,28 @@ def _generate_iso_compliant_password(length: int = 20) -> str:
 
 
 def _hash_pw(pw: str) -> str:
-    """Returns SHA256 hash of a plain text password."""
+    """Returns a salted bcrypt hash of a plain text password."""
+    return bcrypt.hashpw(pw.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+
+def _hash_pw_sha256_legacy(pw: str) -> str:
+    """Legacy unsalted SHA256 hash -- kept only to verify passwords hashed
+    before the bcrypt migration. Never used to hash new passwords."""
     return hashlib.sha256(pw.encode('utf-8')).hexdigest()
+
+
+def _verify_pw(pw: str, stored_hash: str) -> bool:
+    """Verifies a password against either a bcrypt hash or a legacy SHA256
+    hash. Bcrypt hashes always start with "$2"; anything else is treated as
+    a legacy SHA256 hex digest."""
+    if not stored_hash:
+        return False
+    if stored_hash.startswith("$2"):
+        try:
+            return bcrypt.checkpw(pw.encode('utf-8'), stored_hash.encode('utf-8'))
+        except ValueError:
+            return False
+    return secrets.compare_digest(_hash_pw_sha256_legacy(pw), stored_hash)
 
 def validate_username(username: str) -> tuple[bool, str]:
     """
@@ -108,21 +129,29 @@ def seed_default_admin():
         db.close()
 
 def authenticate_user(username: str, password: str):
-    """Authenticates user credentials and returns user details if valid."""
+    """Authenticates user credentials and returns user details if valid.
+
+    Transparently upgrades a legacy SHA256 password hash to bcrypt on
+    successful login, so hashes get stronger over time without requiring
+    a mass password reset."""
     with force_master():
         db = SessionLocal()
-        user = db.query(User).filter(
-            User.username == username,
-            User.password_hash == _hash_pw(password)
-        ).first()
+        user = db.query(User).filter(User.username == username).first()
+        if not user or not _verify_pw(password, user.password_hash):
+            db.close()
+            return None
+
+        if not user.password_hash.startswith("$2"):
+            user.password_hash = _hash_pw(password)
+            db.commit()
+
+        result = {
+            "username": user.username,
+            "role": user.role,
+            "totp_secret": user.totp_secret
+        }
         db.close()
-        if user:
-            return {
-                "username": user.username,
-                "role": user.role,
-                "totp_secret": user.totp_secret
-            }
-        return None
+        return result
 
 def register_user(username: str, password: str, role: str):
     """Registers a new user in database with Gmail username and ISO 27001 password verification."""

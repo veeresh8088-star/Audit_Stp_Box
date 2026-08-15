@@ -18,6 +18,7 @@ python-docx
 python-pptx
 fpdf2
 pyotp
+bcrypt
 qrcode
 pydantic>=2.0
 langchain>=0.1.0

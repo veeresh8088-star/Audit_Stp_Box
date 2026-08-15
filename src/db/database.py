@@ -625,6 +625,46 @@ def reconcile_schemas(engine):
                     except Exception as drop_err:
                         print(f"[SCHEMA RECONCILIATION WARNING] Failed to drop table {table_name}: {drop_err}")
 
+def _resolve_bootstrap_admin_credentials():
+    """
+    Resolves the password hash and TOTP secret used to seed the default admin
+    account the first time the users table is empty. This runs at module
+    import time (before src.core.auth.seed_default_admin ever gets a chance
+    to run), so it must not defer to that function -- doing so here would
+    create a circular import against this module. The logic is intentionally
+    duplicated in a minimal, self-contained form instead.
+
+    Never falls back to a hardcoded password or TOTP secret -- both were once
+    literal strings in source control ("admin123" and a fixed TOTP secret),
+    which is a full authentication bypass for anyone who reads the repo.
+    """
+    import bcrypt
+    import secrets
+    import string
+    import pyotp
+
+    password = os.environ.get("ADMIN_DEFAULT_PASSWORD", "").strip()
+    if not password:
+        upper, lower, digit = string.ascii_uppercase, string.ascii_lowercase, string.digits
+        special = "!@#$%^&*()_+-="
+        required = [secrets.choice(upper), secrets.choice(lower), secrets.choice(digit), secrets.choice(special)]
+        pool = upper + lower + digit + special
+        chars = required + [secrets.choice(pool) for _ in range(16)]
+        secrets.SystemRandom().shuffle(chars)
+        password = "".join(chars)
+        print(
+            "=" * 70 + "\n"
+            "[INIT DB] ADMIN_DEFAULT_PASSWORD not set -- generated a random admin "
+            f"password:\n\n    {password}\n\n"
+            "SAVE THIS NOW, it will not be shown again. Set ADMIN_DEFAULT_PASSWORD "
+            "explicitly for future deployments.\n" + "=" * 70,
+            flush=True
+        )
+    pw_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    totp_secret = os.environ.get("ADMIN_TOTP_SECRET", "").strip() or pyotp.random_base32()
+    return pw_hash, totp_secret
+
+
 def init_db():
     global engine_master, engine_slave1, engine_slave2, db_label
     
@@ -715,21 +755,25 @@ def init_db():
             
         # Seed default admin if missing or if totp_secret is empty
         try:
-            import hashlib
-            admin_pw_hash = hashlib.sha256(b"admin123").hexdigest()
             admin_seeded_or_updated = False
             with eng_m.begin() as conn:
                 admin = conn.execute(text("SELECT id, totp_secret FROM users WHERE username = 'admin'")).first()
                 if not admin:
+                    admin_pw_hash, admin_totp_secret = _resolve_bootstrap_admin_credentials()
                     conn.execute(
-                        text("INSERT INTO users (username, password_hash, role, totp_secret) VALUES ('admin', :pw_hash, 'admin', 'ADMI2FASHRDSECRT')"),
-                        {"pw_hash": admin_pw_hash}
+                        text("INSERT INTO users (username, password_hash, role, totp_secret) VALUES ('admin', :pw_hash, 'admin', :totp_secret)"),
+                        {"pw_hash": admin_pw_hash, "totp_secret": admin_totp_secret}
                     )
                     admin_seeded_or_updated = True
                     print("[INIT DB] Seeded default admin user with TOTP secret.")
                 elif not admin[1]:  # admin.totp_secret is index 1
+                    admin_totp_secret = os.environ.get("ADMIN_TOTP_SECRET", "").strip()
+                    if not admin_totp_secret:
+                        import pyotp as _pyotp
+                        admin_totp_secret = _pyotp.random_base32()
                     conn.execute(
-                        text("UPDATE users SET totp_secret = 'ADMI2FASHRDSECRT' WHERE username = 'admin'")
+                        text("UPDATE users SET totp_secret = :totp_secret WHERE username = 'admin'"),
+                        {"totp_secret": admin_totp_secret}
                     )
                     admin_seeded_or_updated = True
                     print("[INIT DB] Updated default admin user with TOTP secret.")
@@ -764,14 +808,13 @@ def init_db():
         db_label = "SQLite (Fallback)"
         
         try:
-            import hashlib
-            admin_pw_hash = hashlib.sha256(b"admin123").hexdigest()
             with eng_sqlite.begin() as conn:
                 admin = conn.execute(text("SELECT id FROM users WHERE username = 'admin'")).first()
                 if not admin:
+                    admin_pw_hash, admin_totp_secret = _resolve_bootstrap_admin_credentials()
                     conn.execute(
-                        text("INSERT INTO users (username, password_hash, role, totp_secret) VALUES ('admin', :pw_hash, 'admin', 'ADMI2FASHRDSECRT')"),
-                        {"pw_hash": admin_pw_hash}
+                        text("INSERT INTO users (username, password_hash, role, totp_secret) VALUES ('admin', :pw_hash, 'admin', :totp_secret)"),
+                        {"pw_hash": admin_pw_hash, "totp_secret": admin_totp_secret}
                     )
                     print("[INIT DB SQLite] Seeded default admin user with TOTP secret in SQLite fallback.", flush=True)
         except Exception as seed_err:
