@@ -1391,27 +1391,31 @@ def api_deliver_report(
         username = auth_user.get("username")
     db = SessionLocal()
     try:
-        report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
-        if not report:
-            raise HTTPException(status_code=404, detail="Session not found.")
-            
-        auditor_user = db.query(User).filter(User.username == username).first()
-        auditor_id = auditor_user.id if auditor_user else None
-        
-        # Parse target auditee user safely
-        target_user = None
-        raw_target = str(auditee_id).strip()
-        if raw_target.startswith("auditee:"):
-            uname = raw_target.replace("auditee:", "")
-            target_user = db.query(User).filter(User.username == uname).first()
-        elif raw_target.isdigit():
-            target_user = db.query(User).filter(User.id == int(raw_target)).first()
-        else:
-            target_user = db.query(User).filter(User.username == raw_target).first()
-            
-        target_uid = target_user.id if target_user else None
-
         with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found.")
+
+            auditor_user = db.query(User).filter(User.username == username).first()
+            auditor_id = auditor_user.id if auditor_user else None
+
+            # Parse target auditee user safely. Reading this on the master (not a
+            # possibly-lagging read replica) matters here specifically -- a newly
+            # registered auditee account delivered to immediately afterward could
+            # otherwise silently resolve to no user, leaving auditee_id unset while
+            # the API still reports success.
+            target_user = None
+            raw_target = str(auditee_id).strip()
+            if raw_target.startswith("auditee:"):
+                uname = raw_target.replace("auditee:", "")
+                target_user = db.query(User).filter(User.username == uname).first()
+            elif raw_target.isdigit():
+                target_user = db.query(User).filter(User.id == int(raw_target)).first()
+            else:
+                target_user = db.query(User).filter(User.username == raw_target).first()
+
+            target_uid = target_user.id if target_user else None
+
             db.add(AuditRecord(
                 report_id=report.id,
                 auditor_id=auditor_id,
@@ -1425,7 +1429,10 @@ def api_deliver_report(
             
         log_system_event("REPORT_DELIVERED", "INFO", f"Report delivered to auditee '{target_user.username if target_user else raw_target}'", session_id=session_id, actor=username)
         return {"success": True, "message": f"Report successfully delivered to auditee '{target_user.username if target_user else raw_target}'."}
-    except Exception:
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[DELIVER ERROR] session={session_id} | {e}", flush=True)
         raise HTTPException(status_code=500, detail="Operation failed. Please try again.")
     finally:
         db.close()
@@ -2352,6 +2359,7 @@ def api_restore_doc_to_finding(finding_id: int, req: dict, request: Request):
             current_docs = [s.strip() for s in (finding.source_files or '').split(',') if s.strip()]
             if doc_name not in current_docs:
                 current_docs.append(doc_name)
+            finding.source_files = ', '.join(current_docs)
             db.commit()
             return {'success': True, 'message': f'Document {doc_name} restored.', 'remaining_source_files': finding.source_files}
     except HTTPException:
