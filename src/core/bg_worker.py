@@ -38,7 +38,7 @@ def log_system_event(event_type, severity, details, session_id=None, actor="rk1@
         print(f"[SYSTEM EVENT LOG ERROR] {_e}", flush=True)
 from src.core.controls_data import USE_CASES
 from src.core.control_keywords import CONTROL_KEYWORDS
-from src.core.input_guardrail import scan_file_security
+from src.core.input_guardrail import scan_document
 from src.core.parsers.doc_parsers import extract_text
 from src.core.retrieval import save_document_chunks
 from src.core.bg_state import _bg_store, _bg_results, _bg_running, _bg_lock, _bg_stop_flags
@@ -1289,7 +1289,9 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             file_bytes = f_data["bytes"]
             f_like = io.BytesIO(file_bytes)
             f_like.name = name
-            is_clean, reason = scan_file_security(f_like)
+            # Full 4-layer scan — text is already extracted at this point (unlike the
+            # upload-time scan), so Layer 4 (null-byte/oversized text) is also covered.
+            is_clean, reason = scan_document(name, file_bytes, f_data.get("text") or "")
             if not is_clean:
                 print(f"[_run_ollama_bg] Security alert! Malware scan failed for file {name}: {reason}", flush=True)
                 log_system_event("MALWARE_BLOCKED", "CRITICAL", f"File blocked by security scan: {name} ({reason})", session_id=_sid)

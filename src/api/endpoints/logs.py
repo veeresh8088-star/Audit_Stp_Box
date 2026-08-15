@@ -113,7 +113,8 @@ def api_get_developer_logs(request: Request):
             logs = f.read()
         return {"success": True, "logs": logs}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read developer log file: {e}")
+        print(f"[LOG READ ERROR] {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Failed to read developer log file.")
 
 @router.delete("/developer")
 def api_clear_developer_logs(request: Request):

@@ -28,7 +28,7 @@ from src.core.bg_worker import (
     get_resumable_checkpoint,
     log_system_event
 )
-from src.core.input_guardrail import scan_file_security
+from src.core.input_guardrail import scan_document
 from src.core.parsers.doc_parsers import extract_text
 from src.core.retrieval import save_document_chunks
 from src.core.llm_client import query_llm
@@ -182,7 +182,8 @@ def api_create_session(
             log_system_event("SESSION_CREATED", "INFO", f"Session '{session_title}' created (framework: {framework})", session_id=session_id, actor=username)
             return {"success": True, "session_id": session_id, "session_title": session_title}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create session: {e}")
+        print(f"[CREATE SESSION ERROR] {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Failed to create session. Please try again.")
     finally:
         db.close()
 
@@ -447,8 +448,10 @@ async def api_upload_evidence(
                 f_like = io.BytesIO(sub_bytes)
                 f_like.name = sub_name
 
-                # Security Scan
-                is_clean, reason = scan_file_security(f_like)
+                # Security Scan — full 4-layer scan (magic bytes, VBA macros, zip-bomb
+                # ratio/size, embedded dangerous extensions). Text isn't extracted yet
+                # at upload time, so Layer 4 (text-content checks) is a no-op here.
+                is_clean, reason = scan_document(sub_name, sub_bytes, "")
                 if not is_clean:
                     continue  # Skip infected sub-file silently
 
@@ -831,7 +834,8 @@ def api_start_audit(req: StartAuditRequest, request: Request):
         log_system_event("AUDIT_STARTED", "INFO", f"Audit started (mode: {_mode_label}, controls: {len(req.selected_sls)}, files: {len(files_data)})", session_id=req.session_id, actor=req.username or "Auditor")
         return {"success": True, "status": "started", "message": "Background RAG scan initialized."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Scoping failed: {e}")
+        print(f"[START AUDIT ERROR] session={req.session_id} | {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Failed to start audit scan. Please try again.")
     finally:
         db.close()
 
@@ -1144,7 +1148,8 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest, request: Requ
             log_system_event("FINDING_UPDATED", "INFO", f"Finding #{finding_id} updated to '{req.status}' (control: {finding.control_id})", session_id=str(finding.report_id))
             return {"success": True, "message": "Finding successfully updated and saved to Shakthi DB."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database update failed: {e}")
+        print(f"[UPDATE FINDING ERROR] finding_id={finding_id} | {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Database update failed. Please try again.")
     finally:
         db.close()
 
@@ -1242,7 +1247,7 @@ def api_commit_session_findings(session_id: str, request: Request, force: bool =
     except Exception as e:
         import traceback
         print(f"[COMMIT SESSION EXCEPTION ERROR] {e}\n{traceback.format_exc()}", flush=True)
-        raise HTTPException(status_code=500, detail=f"Commit to Shakthi DB failed: {e}")
+        raise HTTPException(status_code=500, detail="Commit to Shakthi DB failed. Please try again.")
     finally:
         db.close()
 
@@ -1699,7 +1704,8 @@ def api_upload_company_logo(request: Request, file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Logo upload failed: {e}")
+        print(f"[LOGO UPLOAD ERROR] {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Logo upload failed. Please try again.")
 
 @router.delete("/upload-logo")
 def api_reset_company_logo(request: Request):
@@ -2171,7 +2177,8 @@ def api_deliver_report_v2(req: DeliverReportRequest, request: Request):
             }
         except Exception as e:
             db.rollback()
-            raise HTTPException(status_code=500, detail=str(e))
+            print(f"[DELIVER REPORT ERROR] {e}", flush=True)
+            raise HTTPException(status_code=500, detail="Operation failed. Please try again.")
         finally:
             db.close()
 
@@ -2497,7 +2504,8 @@ def api_resume_checkpoint(req: dict, background_tasks: BackgroundTasks, request:
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Resume checkpoint failed: {e}")
+        print(f"[RESUME CHECKPOINT ERROR] {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Resume checkpoint failed. Please try again.")
     finally:
         db.close()
 
@@ -2519,7 +2527,8 @@ def api_discard_checkpoint(req: dict, request: Request):
             return {"success": True, "message": f"Checkpoint {session_id} discarded"}
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Discard failed: {e}")
+        print(f"[DISCARD CHECKPOINT ERROR] {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Discard failed. Please try again.")
     finally:
         db.close()
 

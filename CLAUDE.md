@@ -127,7 +127,9 @@ lookup table (not LLM-driven — this path is separate from the ISO RAG pipeline
 Word, Excel (all sheets), PowerPoint, CSV, plain text, images, and recursively-extracted ZIP
 folders. `src/core/excel_scoping_parser.py` specifically parses uploaded Excel audit
 checklists to derive the `locked_filenames` used by the two-phase retrieval mode above.
-`src/core/input_guardrail.py::scan_file_security` screens uploads before processing.
+`src/core/input_guardrail.py::scan_document` screens uploads before processing (4 layers: magic-byte
+extension-spoofing check, Office VBA macro detection, ZIP-bomb ratio/size check, null-byte/oversized
+text check).
 `src/core/pii_redactor.py` redacts PII from extracted text.
 
 ### Auth & licensing

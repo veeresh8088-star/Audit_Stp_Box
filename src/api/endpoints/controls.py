@@ -205,6 +205,7 @@ async def api_parse_scope_excel(file: UploadFile = File(...)):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse Excel scope file: {e}")
+        print(f"[EXCEL SCOPE PARSE ERROR] {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Failed to parse Excel scope file. Please check the file format and try again.")
 
 
