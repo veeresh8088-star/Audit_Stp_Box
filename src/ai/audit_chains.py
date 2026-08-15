@@ -820,17 +820,13 @@ and no surrounding text.
 
 def get_num_ctx(model_name: str) -> int:
     import os
+    backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
+    if backend in ("llama.cpp", "llamacpp"):
+        from src.core.llm_client import get_real_num_ctx
+        return get_real_num_ctx()
     env_ctx = os.environ.get("LLM_NUM_CTX", "").strip()
     if env_ctx and env_ctx.isdigit():
         return int(env_ctx)
-    backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
-    if backend in ("llama.cpp", "llamacpp"):
-        return 16384
-    name = model_name.lower()
-    if any(x in name for x in ["3b", "4b", "7b", "8b", "9b", "12b", "14b", "27b"]):
-        return 16384
-    return 16384
-
     return 16384
 
 
@@ -1239,8 +1235,8 @@ class NativeOllamaChain:
         # instead of trusting the earlier estimate and risking the server's
         # "exceed_context_size_error" 400 response.
         try:
-            from src.core.llm_client import count_tokens
-            MAX_PROMPT_TOKENS = 16384 - 4096 - 300  # same worst-case completion reserve as retrieval.py, minus a small buffer
+            from src.core.llm_client import count_tokens, get_real_num_ctx
+            MAX_PROMPT_TOKENS = get_real_num_ctx() - 4096 - 300  # same worst-case completion reserve as retrieval.py, minus a small buffer
             _trim_attempts = 0
             while count_tokens(prompt) > MAX_PROMPT_TOKENS and _trim_attempts < 10:
                 ctx = input_dict.get("condensed_context") or ""

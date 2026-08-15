@@ -576,8 +576,8 @@ def _calculate_dynamic_context_budget(controls_batch, mode="standard"):
     SAFETY_MARGIN_TOKENS = 500        # absorbs the chunk-selection char/4 estimate's imprecision
 
     try:
-        from src.core.llm_client import count_tokens
-        num_ctx = 16384  # matches audit_chains.py's get_num_ctx() for the llama.cpp backend
+        from src.core.llm_client import count_tokens, get_real_num_ctx
+        num_ctx = get_real_num_ctx()  # real per-slot context via /props, matches audit_chains.py's get_num_ctx()
 
         template_tokens = _get_template_fixed_tokens(mode)
 

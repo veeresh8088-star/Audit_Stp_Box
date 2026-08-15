@@ -109,6 +109,50 @@ def _ensure_llama_server_running(port=11434):
         print(f"[AUTO-START LLM] Auto-start error on port {port}: {e}", flush=True)
     return False
 
+_real_num_ctx_cache = {}
+
+
+def get_real_num_ctx(host=None, timeout=10):
+    """
+    Real per-slot context size via llama-server's own /props endpoint --
+    ground truth, not a guess. llama-server is started with -c 0 (auto-detect
+    the model's native context) and -np <slots>, and divides the native
+    context evenly across slots -- so the actual usable context per request
+    is native_context / slots, which can be far smaller than the model's
+    advertised full context (e.g. 5632 with 24 slots on a ~131k-context
+    model), not a fixed 16384 as previously hardcoded here. That mismatch
+    meant the token-budget calculator and its trim backstop (audit_chains.py)
+    were both sizing prompts against a ceiling roughly 3x larger than any
+    slot can actually hold.
+
+    Cached per-host for the process lifetime -- this doesn't change while
+    the server is running. LLM_NUM_CTX env var always wins if set (manual
+    override for backends/setups this can't introspect). Falls back to a
+    conservative 4096 if the query fails, so a monitoring hiccup degrades
+    the budget rather than blocking an audit (same fail-open philosophy as
+    resource_guard.py).
+    """
+    env_ctx = os.environ.get("LLM_NUM_CTX", "").strip()
+    if env_ctx and env_ctx.isdigit():
+        return int(env_ctx)
+
+    resolved_host = host or _resolve_host()
+    if resolved_host in _real_num_ctx_cache:
+        return _real_num_ctx_cache[resolved_host]
+
+    try:
+        r = requests.get(f"{resolved_host}/props", timeout=timeout)
+        if r.status_code == 200:
+            n_ctx = r.json().get("default_generation_settings", {}).get("n_ctx")
+            if isinstance(n_ctx, int) and n_ctx > 0:
+                _real_num_ctx_cache[resolved_host] = n_ctx
+                return n_ctx
+    except Exception as e:
+        print(f"[LLM CLIENT] Could not query real n_ctx from {resolved_host}/props: {e}", flush=True)
+
+    return 4096
+
+
 def count_tokens(text, host=None, timeout=10):
     """
     Real token count via llama-server's own /tokenize endpoint -- ground truth,
