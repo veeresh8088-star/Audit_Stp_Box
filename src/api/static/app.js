@@ -1832,7 +1832,16 @@ async function uploadFiles(files) {
         const data = await response.json();
         if (!response.ok) throw new Error(formatApiError(data.detail, "Upload failed."));
 
-        showToastBanner(`✅ ${files.length} Evidence File(s) successfully uploaded and indexed into RAG memory!`);
+        const processedCount = (data.files || []).length;
+        const blocked = data.blocked || [];
+
+        if (processedCount > 0) {
+            showToastBanner(`✅ ${processedCount} Evidence File(s) successfully uploaded and indexed into RAG memory!`);
+        }
+        if (blocked.length > 0) {
+            const details = blocked.map(b => `• ${b.filename}: ${b.reason}`).join('\n');
+            alert(`🚨 SECURITY ALERT: ${blocked.length} file(s) were blocked by the security scan and were NOT uploaded:\n\n${details}`);
+        }
         await loadEvidenceFileList();
         setTimeout(loadEvidenceFileList, 600);
     } catch (err) {

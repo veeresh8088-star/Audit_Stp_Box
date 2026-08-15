@@ -406,6 +406,7 @@ async def api_upload_evidence(
             report_id = report.id
 
         uploaded_details = []
+        blocked_details = []
         new_evidence_records = []  # Collect all new DB records first
 
         for f in files:
@@ -453,7 +454,10 @@ async def api_upload_evidence(
                 # at upload time, so Layer 4 (text-content checks) is a no-op here.
                 is_clean, reason = scan_document(sub_name, sub_bytes, "")
                 if not is_clean:
-                    continue  # Skip infected sub-file silently
+                    print(f"[UPLOAD BLOCKED] session={session_id} | file={sub_name} | {reason}", flush=True)
+                    log_system_event("MALWARE_BLOCKED", "CRITICAL", f"File blocked by security scan: {sub_name} ({reason})", session_id=session_id, actor=username or "Auditor")
+                    blocked_details.append({"filename": sub_name, "reason": reason})
+                    continue  # Not written to disk or the database
 
                 # Store file on local disk
                 ev_dir = os.path.normpath(os.path.join(os.getcwd(), "data", "evidence", str(report_id)))
@@ -528,7 +532,7 @@ async def api_upload_evidence(
                     time.sleep(backoff_s)
 
         log_system_event("FILE_UPLOAD", "INFO", f"{len(uploaded_details)} file(s) uploaded: {', '.join(d['filename'] for d in uploaded_details)}", session_id=session_id, actor=username or "Auditor")
-        return {"success": True, "files": uploaded_details}
+        return {"success": True, "files": uploaded_details, "blocked": blocked_details}
     except HTTPException:
         raise
     except Exception as e:
