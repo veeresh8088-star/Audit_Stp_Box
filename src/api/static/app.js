@@ -542,7 +542,7 @@ function renderFilteredRecentSessionsList() {
             ? `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:800;">FINAL</span>`
             : `<span style="font-size:0.65rem; padding:1px 6px; border-radius:4px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:800;">OPEN</span>`;
 
-        const shortTitle = s.session_title || `Audit Session (${s.session_id.slice(0, 6)})`;
+        const shortTitle = escapeHtml(s.session_title || `Audit Session (${s.session_id.slice(0, 6)})`);
         const dateStr = s.created_at ? s.created_at.slice(0, 10) : "";
 
         const bg = isActive ? "rgba(37, 99, 235, 0.16)" : "var(--bg-card)";
@@ -1914,8 +1914,8 @@ async function loadEvidenceFileList() {
                     card.innerHTML = `
                         <div class="file-icon-badge ${fileClass}">${fileIconText}</div>
                         <div class="file-details">
-                            <span class="file-title" title="${fn}">${fn}</span>
-                            <span class="file-meta">${f.size_str || 'Ready'}</span>
+                            <span class="file-title" title="${escapeHtml(fn)}">${escapeHtml(fn)}</span>
+                            <span class="file-meta">${escapeHtml(f.size_str || 'Ready')}</span>
                         </div>
                     `;
                     registry.appendChild(card);
@@ -4104,7 +4104,7 @@ async function sendChatMessage() {
     // Append User Message
     const userDiv = document.createElement("div");
     userDiv.className = "chat-bubble user";
-    userDiv.innerHTML = `<p>${msg}</p>`;
+    userDiv.innerHTML = `<p>${escapeHtml(msg)}</p>`;
     feed.appendChild(userDiv);
     feed.scrollTop = feed.scrollHeight;
 
@@ -4132,7 +4132,7 @@ async function sendChatMessage() {
         if (data.success) {
             const aiDiv = document.createElement("div");
             aiDiv.className = "chat-bubble assistant";
-            aiDiv.innerHTML = `<p>${data.response}</p>`;
+            aiDiv.innerHTML = `<p>${escapeHtml(data.response)}</p>`;
             feed.appendChild(aiDiv);
             feed.scrollTop = feed.scrollHeight;
         } else {
@@ -4164,10 +4164,10 @@ async function loadCustomControlsTable() {
                 const tr = document.createElement("tr");
                 const kws = c.keywords.join(", ");
                 tr.innerHTML = `
-                    <td><b>${c.control_id}</b></td>
-                    <td>${c.control_name}</td>
-                    <td><span class="badge-pill">${c.category}</span></td>
-                    <td><code style="color:#60a5fa;">${kws || 'None'}</code></td>
+                    <td><b>${escapeHtml(c.control_id)}</b></td>
+                    <td>${escapeHtml(c.control_name)}</td>
+                    <td><span class="badge-pill">${escapeHtml(c.category)}</span></td>
+                    <td><code style="color:#60a5fa;">${escapeHtml(kws) || 'None'}</code></td>
                     <td>
                         <button class="btn-danger" style="padding: 4px 8px; font-size:11px;" onclick="deleteCustomControl(${c.id})">Delete</button>
                     </td>
@@ -4988,16 +4988,16 @@ async function loadSubmittedReports() {
 
                 card.innerHTML = `
                     <div>
-                        <h4 style="margin: 0 0 6px 0; color: var(--text-main); font-size: 1.05rem; font-weight: 700;">${r.session_title}</h4>
+                        <h4 style="margin: 0 0 6px 0; color: var(--text-main); font-size: 1.05rem; font-weight: 700;">${escapeHtml(r.session_title)}</h4>
                         <div style="font-size: 0.8rem; color: var(--text-muted); display: flex; gap: 16px; align-items: center;">
-                            <span>Standard: <b style="color: #60a5fa;">${r.framework || 'ISO 27001'}</b></span>
-                            <span>Date: <b>${(r.created_at || '').slice(0, 10) || 'Recent'}</b></span>
+                            <span>Standard: <b style="color: #60a5fa;">${escapeHtml(r.framework || 'ISO 27001')}</b></span>
+                            <span>Date: <b>${escapeHtml((r.created_at || '').slice(0, 10) || 'Recent')}</b></span>
                             <span>Compliance Score: <b style="color: #10b981;">${r.score_percent || 0}%</b></span>
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <span class="badge-pill" style="color: ${badgeColor}; border-color: ${badgeBorder}; font-weight: 700;">${statusStr}</span>
-                        <button class="btn-secondary" style="padding: 6px 14px; font-size: 0.78rem;" onclick="exportReportCSV('${r.session_id}')">📥 Export CSV</button>
+                        <span class="badge-pill" style="color: ${badgeColor}; border-color: ${badgeBorder}; font-weight: 700;">${escapeHtml(statusStr)}</span>
+                        <button class="btn-secondary" style="padding: 6px 14px; font-size: 0.78rem;" onclick="exportReportCSV('${escapeHtml(r.session_id).replace(/'/g, "\\'")}')">📥 Export CSV</button>
                     </div>
                 `;
                 container.appendChild(card);
@@ -5010,6 +5010,18 @@ async function loadSubmittedReports() {
     }
 }
 
+// Neutralizes CSV/formula injection (CWE-1236): a cell value starting with
+// =, +, -, @, tab, or CR is interpreted as a formula by Excel/Sheets when the
+// exported file is opened, which is a real risk here since finding text can
+// originate from an uploaded document's content, not just the auditor.
+function csvSafeCell(val) {
+    let s = (val === null || val === undefined) ? "" : String(val);
+    if (/^[=+\-@\t\r]/.test(s)) {
+        s = "'" + s;
+    }
+    return s.replace(/"/g, '""');
+}
+
 async function exportReportCSV(sessId) {
     try {
         const response = await authFetch(`${API_BASE}/audit/findings?session_id=${sessId}`);
@@ -5017,10 +5029,10 @@ async function exportReportCSV(sessId) {
         if (data.success && data.findings.length > 0) {
             let csv = "Control ID,Name,Severity,Status,Description,Recommendation,Reasoning,Files\n";
             data.findings.forEach(f => {
-                const desc = `"${(f.description || '').replace(/"/g, '""')}"`;
-                const rec = `"${(f.recommendation || '').replace(/"/g, '""')}"`;
-                const reason = `"${(f.reasoning || '').replace(/"/g, '""')}"`;
-                csv += `${f.control_id},"${f.control_name}",${f.severity},${f.status},${desc},${rec},${reason},"${f.source_files}"\n`;
+                const desc = `"${csvSafeCell(f.description)}"`;
+                const rec = `"${csvSafeCell(f.recommendation)}"`;
+                const reason = `"${csvSafeCell(f.reasoning)}"`;
+                csv += `"${csvSafeCell(f.control_id)}","${csvSafeCell(f.control_name)}","${csvSafeCell(f.severity)}","${csvSafeCell(f.status)}",${desc},${rec},${reason},"${csvSafeCell(f.source_files)}"\n`;
             });
 
             const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -5110,12 +5122,13 @@ async function loadChatSessions() {
                 item.className = `chat-session-item ${s.session_id === activeSessionId ? 'active' : ''}`;
                 item.onclick = () => selectChatSession(s.session_id);
 
+                const safeSessTitle = escapeHtml(s.session_title || "");
                 item.innerHTML = `
                     <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">
                         <span>💬</span>
-                        <span title="${s.session_title}">${s.session_title.slice(0, 18)}${s.session_title.length > 18 ? '...' : ''}</span>
+                        <span title="${safeSessTitle}">${safeSessTitle.slice(0, 18)}${safeSessTitle.length > 18 ? '...' : ''}</span>
                     </div>
-                    <button style="background:none; border:none; color:var(--text-muted); font-size:0.75rem; cursor:pointer;" onclick="clearChatSession('${s.session_id}', event)">🗑️</button>
+                    <button style="background:none; border:none; color:var(--text-muted); font-size:0.75rem; cursor:pointer;" onclick="clearChatSession('${escapeHtml(s.session_id).replace(/'/g, "\\'")}', event)">🗑️</button>
                 `;
                 sidebar.appendChild(item);
             });
@@ -5163,7 +5176,7 @@ async function selectChatSession(sessionId) {
                 if (m.role === "findings_snapshot") return; // skip internal snapshots
                 const bubble = document.createElement("div");
                 bubble.className = `chat-bubble ${m.role === 'user' ? 'user' : 'assistant'}`;
-                bubble.innerHTML = `<p>${m.content}</p>`;
+                bubble.innerHTML = `<p>${escapeHtml(m.content)}</p>`;
                 feed.appendChild(bubble);
             });
             feed.scrollTop = feed.scrollHeight;
@@ -5333,15 +5346,15 @@ async function exportFindingsCSV() {
 
         findings.forEach(f => {
             const row = [
-                `"${(f.control_id || '').replace(/"/g, '""')}"`,
-                `"${(f.control_name || '').replace(/"/g, '""')}"`,
-                `"${(f.status || '').replace(/"/g, '""')}"`,
-                `"${(f.severity || '').replace(/"/g, '""')}"`,
-                `"${(f.policy_present || '').replace(/"/g, '""')}"`,
-                `"${(f.evidence_present || '').replace(/"/g, '""')}"`,
-                `"${(f.description || f.gap_detected || '').replace(/"/g, '""')}"`,
-                `"${(f.recommendation || '').replace(/"/g, '""')}"`,
-                `"${(f.source_files || '').replace(/"/g, '""')}"`
+                `"${csvSafeCell(f.control_id)}"`,
+                `"${csvSafeCell(f.control_name)}"`,
+                `"${csvSafeCell(f.status)}"`,
+                `"${csvSafeCell(f.severity)}"`,
+                `"${csvSafeCell(f.policy_present)}"`,
+                `"${csvSafeCell(f.evidence_present)}"`,
+                `"${csvSafeCell(f.description || f.gap_detected)}"`,
+                `"${csvSafeCell(f.recommendation)}"`,
+                `"${csvSafeCell(f.source_files)}"`
             ];
             rows.push(row.join(","));
         });
@@ -6322,20 +6335,23 @@ async function loadAuditeeDocumentHistory() {
             const isDel = item.is_deleted;
             const rowBg = isDel ? "rgba(239, 68, 68, 0.06)" : "transparent";
             const fileIcon = item.filename.endsWith(".pdf") ? "📄" : item.filename.endsWith(".zip") ? "📦" : "📝";
-            const auditorBadge = `<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 700;">👤 ${item.assigned_auditor}</span>`;
+            const safeFilename = escapeHtml(item.filename);
+            const safeFilenameForClick = safeFilename.replace(/'/g, "\\'");
+            const safeSessionIdForClick = escapeHtml(item.session_id).replace(/'/g, "\\'");
+            const auditorBadge = `<span style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); padding: 3px 8px; border-radius: 6px; font-size: 0.76rem; font-weight: 700;">👤 ${escapeHtml(item.assigned_auditor)}</span>`;
             const statusBadge = isDel
                 ? `<span style="color: #ef4444; font-weight: 700; background: rgba(239, 68, 68, 0.12); padding: 2px 8px; border-radius: 4px;">Deleted (Soft)</span>`
-                : `<span style="color: #10b981; font-weight: 700; background: rgba(16, 185, 129, 0.12); padding: 2px 8px; border-radius: 4px;">${item.status}</span>`;
+                : `<span style="color: #10b981; font-weight: 700; background: rgba(16, 185, 129, 0.12); padding: 2px 8px; border-radius: 4px;">${escapeHtml(item.status)}</span>`;
 
             const actionBtn = isDel
-                ? `<button type="button" onclick="undoDeleteEvidenceFile('${item.session_id}', ${item.id}, '${item.filename}')" style="background: #2563eb; color: #fff; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.78rem; font-weight: 700;">↩️ Undo Delete</button>`
-                : `<button type="button" onclick="deleteServerEvidenceFile('${item.session_id}', ${item.id}, '${item.filename}')" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.78rem;">🗑️ Delete</button>`;
+                ? `<button type="button" onclick="undoDeleteEvidenceFile('${safeSessionIdForClick}', ${item.id}, '${safeFilenameForClick}')" style="background: #2563eb; color: #fff; border: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; font-size: 0.78rem; font-weight: 700;">↩️ Undo Delete</button>`
+                : `<button type="button" onclick="deleteServerEvidenceFile('${safeSessionIdForClick}', ${item.id}, '${safeFilenameForClick}')" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 0.78rem;">🗑️ Delete</button>`;
 
             html += `
                 <tr style="border-bottom: 1px solid var(--border-color); background: ${rowBg}; opacity: ${isDel ? 0.7 : 1};">
-                    <td style="padding: 10px 12px; font-weight: 600; text-decoration: ${isDel ? 'line-through' : 'none'};">${fileIcon} ${item.filename}</td>
-                    <td style="padding: 10px 12px; color: var(--text-muted);">${item.size_str}</td>
-                    <td style="padding: 10px 12px; color: var(--text-muted);">${item.uploaded_at}</td>
+                    <td style="padding: 10px 12px; font-weight: 600; text-decoration: ${isDel ? 'line-through' : 'none'};">${fileIcon} ${safeFilename}</td>
+                    <td style="padding: 10px 12px; color: var(--text-muted);">${escapeHtml(item.size_str)}</td>
+                    <td style="padding: 10px 12px; color: var(--text-muted);">${escapeHtml(item.uploaded_at)}</td>
                     <td style="padding: 10px 12px;">${auditorBadge}</td>
                     <td style="padding: 10px 12px;">${statusBadge}</td>
                     <td style="padding: 10px 12px; text-align: right;">${actionBtn}</td>
