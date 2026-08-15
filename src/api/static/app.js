@@ -2,7 +2,7 @@
 var API_BASE = window.location.origin + "/api";
 
 var currentUser = typeof currentUser !== "undefined" ? currentUser : null;
-var selectedRole = typeof selectedRole !== "undefined" ? selectedRole : "admin";
+var selectedRole = typeof selectedRole !== "undefined" ? selectedRole : "auditor";
 var activeTab = typeof activeTab !== "undefined" ? activeTab : "";
 var activeSessionId = typeof activeSessionId !== "undefined" ? activeSessionId : "";
 var activeSessionTitle = typeof activeSessionTitle !== "undefined" ? activeSessionTitle : "";
@@ -44,11 +44,11 @@ document.addEventListener("DOMContentLoaded", () => {
     updateHeaderClock();
 
     // Default render tabs & framework controls on page load so they are never blank
-    setupTabs(selectedRole || "admin");
+    setupTabs(selectedRole || "auditor");
     loadFrameworkControls();
 
     // Sync role selection UI and auto-fill credentials for the default role
-    selectRole(selectedRole || "admin");
+    selectRole(selectedRole || "auditor");
 
     // Auth selectors
     const loginForm = document.getElementById("login-form");
@@ -710,7 +710,7 @@ async function checkCrashResilienceCheckpoint() {
     if (!banner || !activeSessionId) return;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/progress?session_id=${encodeURIComponent(activeSessionId)}`);
+        const response = await authFetch(`${API_BASE}/audit/progress?session_id=${encodeURIComponent(activeSessionId)}`);
         const data = await response.json();
 
         if (data.checkpoint && data.checkpoint.completed_batches > 0 && data.status !== "completed") {
@@ -742,7 +742,7 @@ async function discardCheckpointAndReset() {
     if (!activeSessionId) return;
 
     try {
-        await fetch(`${API_BASE}/audit/discard-checkpoint`, {
+        await authFetch(`${API_BASE}/audit/discard-checkpoint`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_id: activeSessionId })
@@ -1030,7 +1030,7 @@ async function handleResumeInterruptedSession() {
 
         showToastBanner(`RESUMING AUDIT SCAN: "${activeSessionTitle}"`);
 
-        const resp = await fetch(`${API_BASE}/audit/resume-checkpoint`, {
+        const resp = await authFetch(`${API_BASE}/audit/resume-checkpoint`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_id: sid })
@@ -1055,7 +1055,7 @@ async function handleDiscardInterruptedSession() {
 
     try {
         const sid = currentInterruptedSession.session_id;
-        await fetch(`${API_BASE}/audit/discard-checkpoint`, {
+        await authFetch(`${API_BASE}/audit/discard-checkpoint`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_id: sid })
@@ -1153,7 +1153,7 @@ async function processEvidenceFiles(files) {
                 formData.append("is_auditor_uploaded", "true");
                 formData.append("username", currentUser ? currentUser.username : "");
 
-                fetch(`${API_BASE}/audit/upload`, {
+                authFetch(`${API_BASE}/audit/upload`, {
                     method: "POST",
                     body: formData
                 }).catch(e => console.warn("Background upload notice:", e));
@@ -1824,7 +1824,7 @@ async function uploadFiles(files) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/audit/upload`, {
+        const response = await authFetch(`${API_BASE}/audit/upload`, {
             method: "POST",
             body: body
         });
@@ -1884,7 +1884,7 @@ async function loadEvidenceFileList() {
     const requestSessionId = activeSessionId;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/evidence?session_id=${encodeURIComponent(requestSessionId)}`);
+        const response = await authFetch(`${API_BASE}/audit/evidence?session_id=${encodeURIComponent(requestSessionId)}`);
         const data = await response.json();
 
         // Session guard: if active session changed while request was in-flight, ignore response
@@ -1972,7 +1972,7 @@ async function triggerAuditAnalysis() {
     const mode = isVaptFramework ? "VAPT validation" : (modeEl ? modeEl.value : "Deep");
 
     try {
-        const response = await fetch(`${API_BASE}/audit/start`, {
+        const response = await authFetch(`${API_BASE}/audit/start`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2069,6 +2069,14 @@ async function pollAuditProgress() {
                 }
                 window._lastResourceStatus = resStatus;
             }
+
+            // ── Busy-system notice — other audits already running. Warning only,
+            // never blocks; same "only on state change" debouncing as above.
+            const busyWarning = p.warning || null;
+            if (busyWarning !== window._lastBusyWarning) {
+                if (busyWarning) showToastBanner(busyWarning);
+                window._lastBusyWarning = busyWarning;
+            }
         } else if (data.status === "completed") {
             clearInterval(progressInterval);
             progressInterval = null;
@@ -2161,7 +2169,7 @@ async function stopAuditAnalysis() {
     }
 
     try {
-        const res = await fetch(`${API_BASE}/audit/stop/${activeSessionId}`, { method: "POST" });
+        const res = await authFetch(`${API_BASE}/audit/stop/${activeSessionId}`, { method: "POST" });
         const data = await res.json();
 
         showToast("⛔ Stop signal sent — ending scan gracefully.", "warning");
@@ -2280,7 +2288,7 @@ async function commitSessionToShaktiDB(force = false) {
     }
     try {
         const auditorName = currentUser ? currentUser.username : "Lead Auditor";
-        const response = await fetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}?force=${force}&auditor_user=${encodeURIComponent(auditorName)}`, {
+        const response = await authFetch(`${API_BASE}/audit/findings/commit-session/${activeSessionId}?force=${force}&auditor_user=${encodeURIComponent(auditorName)}`, {
             method: "PUT"
         });
         if (!response.ok) {
@@ -2607,7 +2615,7 @@ async function loadBenchmarkSessionsData() {
     tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:16px; color:#94a3b8;">Loading audit session telemetry...</td></tr>`;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/benchmark/sessions`);
+        const response = await authFetch(`${API_BASE}/audit/benchmark/sessions`);
         const data = await response.json();
         if (data.success && data.sessions && data.sessions.length > 0) {
             window.allBenchmarkSessionsCache = data.sessions;
@@ -2634,7 +2642,7 @@ async function loadAdminOverridesData() {
     if (!tbody) return;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/admin-logs`);
+        const response = await authFetch(`${API_BASE}/audit/admin-logs`);
         const data = await response.json();
         if (data.success && data.logs && data.logs.length > 0) {
             tbody.innerHTML = data.logs.map(log => `
@@ -2679,7 +2687,7 @@ window.aggregateSelectedAuditSessions = async function () {
     summaryBox.innerHTML = `<div style="text-align:center; color:#818cf8; font-weight:600; padding:10px;">⚡ Combining and aggregating benchmark metrics across ${sids.length || 'all'} auditor sessions...</div>`;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/benchmark/aggregate`, {
+        const response = await authFetch(`${API_BASE}/audit/benchmark/aggregate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ session_ids: sids.length ? sids : null })
@@ -2806,7 +2814,7 @@ async function handleCompanyLogoUpload(event) {
     try {
         const formData = new FormData();
         formData.append("file", file);
-        const resp = await fetch(`${API_BASE}/audit/upload-logo`, {
+        const resp = await authFetch(`${API_BASE}/audit/upload-logo`, {
             method: "POST",
             body: formData
         });
@@ -2825,7 +2833,7 @@ async function handleCompanyLogoUpload(event) {
 async function resetCompanyLogo(event) {
     if (event) event.stopPropagation();
     try {
-        await fetch(`${API_BASE}/audit/upload-logo`, { method: "DELETE" });
+        await authFetch(`${API_BASE}/audit/upload-logo`, { method: "DELETE" });
     } catch (e) { }
 
     const preview = document.getElementById("meta-logo-preview");
@@ -2855,7 +2863,7 @@ async function renderAuditReportPreview() {
     try {
         const userRole = currentUser ? currentUser.role : (selectedRole || "auditor");
         // CRITICAL REQUIREMENT: Query saved_only=true so ONLY findings saved to Shakthi DB appear in PDF Exporter Review & Download!
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${userRole}&saved_only=true`);
+        const response = await authFetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}&role=${userRole}&saved_only=true`);
         const data = await response.json();
 
         const findings = (data.success && data.findings) ? data.findings : [];
@@ -3802,7 +3810,7 @@ async function rejectSingleDocCard(findingId, docName, controlId) {
     if (reason === null) return; // Cancelled
 
     try {
-        const response = await fetch(`${API_BASE}/audit/findings/${findingId}/reject-doc`, {
+        const response = await authFetch(`${API_BASE}/audit/findings/${findingId}/reject-doc`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ doc_name: docName, control_id: controlId, reason: reason || "" })
@@ -3834,7 +3842,7 @@ async function rejectSingleDocCard(findingId, docName, controlId) {
 
 async function restoreFindingCard(findingId) {
     try {
-        const response = await fetch(`${API_BASE}/audit/findings/${findingId}`, {
+        const response = await authFetch(`${API_BASE}/audit/findings/${findingId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status: "COMPLIANT" })
@@ -3854,7 +3862,7 @@ async function restoreFindingCard(findingId) {
 
 async function updateFindingWorkflowStatus(id, status) {
     try {
-        const response = await fetch(`${API_BASE}/audit/findings/${id}`, {
+        const response = await authFetch(`${API_BASE}/audit/findings/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ status })
@@ -3880,7 +3888,7 @@ async function rejectDocFromFinding(findingId, docName, controlId) {
     if (reason === null) return; // User cancelled
 
     try {
-        const response = await fetch(`${API_BASE}/audit/findings/${findingId}/reject-doc`, {
+        const response = await authFetch(`${API_BASE}/audit/findings/${findingId}/reject-doc`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ doc_name: docName, control_id: controlId, reason: reason || "" })
@@ -3910,7 +3918,7 @@ async function rejectDocFromFinding(findingId, docName, controlId) {
 
 async function restoreDocToFinding(findingId, docName) {
     try {
-        const response = await fetch(`${API_BASE}/audit/findings/${findingId}/restore-doc`, {
+        const response = await authFetch(`${API_BASE}/audit/findings/${findingId}/restore-doc`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ doc_name: docName })
@@ -4066,7 +4074,7 @@ async function handleEditFindingSubmit(e) {
     };
 
     try {
-        const response = await fetch(`${API_BASE}/audit/findings/${id}`, {
+        const response = await authFetch(`${API_BASE}/audit/findings/${id}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(body)
@@ -4107,7 +4115,7 @@ async function sendChatMessage() {
     const model = document.getElementById("llm-model-select").value;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/chats/send`, {
+        const response = await authFetch(`${API_BASE}/audit/chats/send`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -4467,7 +4475,7 @@ async function triggerDeleteAllRecords() {
     if (!confirm("🚨 WARNING: Wiping all database records is irreversible and clears everything. Continue?")) return;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/clear-records`, {
+        const response = await authFetch(`${API_BASE}/audit/clear-records`, {
             method: "DELETE"
         });
         const data = await response.json();
@@ -4492,7 +4500,7 @@ async function loadAuditeeSessionsList() {
         if (currentUser) {
             url += `?username=${encodeURIComponent(currentUser.username)}`;
         }
-        const response = await fetch(url);
+        const response = await authFetch(url);
         const data = await response.json();
 
         if (data.success && data.sessions && data.sessions.length > 0) {
@@ -4531,7 +4539,7 @@ async function loadAuditeeEvidenceDocs() {
         const optText = selectedOpt ? selectedOpt.innerText : "";
         const auditeeName = optText.split(" — ")[0] || "Auditee Client";
 
-        const response = await fetch(`${API_BASE}/audit/evidence?session_id=${sessId}`);
+        const response = await authFetch(`${API_BASE}/audit/evidence?session_id=${sessId}`);
         const data = await response.json();
 
         const files = (data.success && data.files) ? data.files : [];
@@ -4626,7 +4634,7 @@ async function loadSidebarAuditeeFiles() {
         if (currentUser) {
             url += `?username=${encodeURIComponent(currentUser.username)}`;
         }
-        const res = await fetch(url);
+        const res = await authFetch(url);
         const data = await res.json();
         if (data.success && data.sessions && data.sessions.length > 0) {
             sessionSelect.innerHTML = `<option value="">— Select Auditee Account —</option>`;
@@ -4656,7 +4664,7 @@ async function loadSidebarAuditeeFiles() {
     fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">Loading...</div>`;
 
     try {
-        const res = await fetch(`${API_BASE}/audit/evidence?session_id=${sessId}`);
+        const res = await authFetch(`${API_BASE}/audit/evidence?session_id=${sessId}`);
         const data = await res.json();
         const files = (data.success && data.files) ? data.files : [];
 
@@ -4795,7 +4803,7 @@ async function handleScopingUpload(event) {
     body.append("file", file);
 
     try {
-        const response = await fetch(`${API_BASE}/audit/upload-scope-excel`, {
+        const response = await authFetch(`${API_BASE}/audit/upload-scope-excel`, {
             method: "POST",
             body: body
         });
@@ -4865,7 +4873,7 @@ async function handleSidebarUpload(event) {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/audit/upload`, {
+        const response = await authFetch(`${API_BASE}/audit/upload`, {
             method: "POST",
             body: body
         });
@@ -4897,7 +4905,7 @@ async function deliverReportToAuditee() {
     body.append("username", currentUser ? currentUser.username : "auditor@24");
 
     try {
-        const response = await fetch(`${API_BASE}/audit/deliver`, {
+        const response = await authFetch(`${API_BASE}/audit/deliver`, {
             method: "POST",
             body: body
         });
@@ -4928,7 +4936,7 @@ async function loadSubmittedReports() {
             url += `?role=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username)}`;
         }
 
-        const response = await fetch(url);
+        const response = await authFetch(url);
         const data = await response.json();
 
         if (data.success && data.sessions.length > 0) {
@@ -5004,7 +5012,7 @@ async function loadSubmittedReports() {
 
 async function exportReportCSV(sessId) {
     try {
-        const response = await fetch(`${API_BASE}/audit/findings?session_id=${sessId}`);
+        const response = await authFetch(`${API_BASE}/audit/findings?session_id=${sessId}`);
         const data = await response.json();
         if (data.success && data.findings.length > 0) {
             let csv = "Control ID,Name,Severity,Status,Description,Recommendation,Reasoning,Files\n";
@@ -5032,7 +5040,7 @@ async function exportReportCSV(sessId) {
 
 async function exportFeedbackBackup() {
     try {
-        const response = await fetch(`${API_BASE}/audit/feedback/export`);
+        const response = await authFetch(`${API_BASE}/audit/feedback/export`);
         const data = await response.json();
 
         if (response.ok) {
@@ -5066,7 +5074,7 @@ async function importFeedbackBackup(event) {
     body.append("file", file);
 
     try {
-        const response = await fetch(`${API_BASE}/audit/feedback/import`, {
+        const response = await authFetch(`${API_BASE}/audit/feedback/import`, {
             method: "POST",
             body: body
         });
@@ -5087,7 +5095,7 @@ async function loadChatSessions() {
     sidebar.innerHTML = "<div style='font-size:11px;color:var(--text-muted);padding:8px;'>Loading history...</div>";
 
     try {
-        const response = await fetch(`${API_BASE}/audit/chats/sessions?role=${currentUser.role}&username=${encodeURIComponent(currentUser.username || '')}`);
+        const response = await authFetch(`${API_BASE}/audit/chats/sessions?role=${currentUser.role}&username=${encodeURIComponent(currentUser.username || '')}`);
         const data = await response.json();
 
         if (data.success) {
@@ -5137,7 +5145,7 @@ async function selectChatSession(sessionId) {
     feed.innerHTML = "<div class='empty-state'>Loading conversation...</div>";
 
     try {
-        const response = await fetch(`${API_BASE}/audit/chats/history?session_id=${sessionId}&username=${encodeURIComponent(currentUser.username || '')}`);
+        const response = await authFetch(`${API_BASE}/audit/chats/history?session_id=${sessionId}&username=${encodeURIComponent(currentUser.username || '')}`);
         const data = await response.json();
 
         if (data.success) {
@@ -5176,7 +5184,7 @@ async function startNewChatSession() {
     body.append("username", currentUser.username);
 
     try {
-        const response = await fetch(`${API_BASE}/audit/sessions`, {
+        const response = await authFetch(`${API_BASE}/audit/sessions`, {
             method: "POST",
             body: body
         });
@@ -5204,7 +5212,7 @@ async function clearChatSession(sessionId, event) {
     if (currentUser && currentUser.username) body.append("username", currentUser.username);
 
     try {
-        const response = await fetch(`${API_BASE}/audit/chats/clear`, {
+        const response = await authFetch(`${API_BASE}/audit/chats/clear`, {
             method: "POST",
             body: body
         });
@@ -5246,7 +5254,7 @@ async function downloadFileWithLoader(buttonId, textId, defaultText, exportUrl, 
     showToast(`⚙️ Compiling ${labelType} report... This takes ~2-3 seconds.`, "info");
 
     try {
-        const response = await fetch(exportUrl);
+        const response = await authFetch(exportUrl);
         if (!response.ok) throw new Error(`Server returned status ${response.status}`);
         const blob = await response.blob();
 
@@ -5311,7 +5319,7 @@ async function exportFindingsCSV() {
     showToast("⚙️ Preparing CSV Audit Dataset...", "info");
 
     try {
-        const response = await fetch(exportUrl);
+        const response = await authFetch(exportUrl);
         const data = await response.json();
         const findings = (data.success && data.findings) ? data.findings : [];
 
@@ -5493,7 +5501,7 @@ async function sendCopilotMessage() {
 
     try {
         let activeContext = `[Context: Active Tab = ${activeTab}, Session = ${activeSessionId}]`;
-        const response = await fetch(`${API_BASE}/audit/chats/send`, {
+        const response = await authFetch(`${API_BASE}/audit/chats/send`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -5568,7 +5576,7 @@ async function loadRecentSessionsList() {
         if (currentUser) {
             url += `?role=${encodeURIComponent(currentUser.role)}&username=${encodeURIComponent(currentUser.username)}`;
         }
-        const response = await fetch(url);
+        const response = await authFetch(url);
         const data = await response.json();
 
         if (data.success && data.sessions.length > 0) {
@@ -5839,7 +5847,7 @@ async function selectRecentSessionScope() {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/audit/sessions`);
+        const response = await authFetch(`${API_BASE}/audit/sessions`);
         const data = await response.json();
 
         if (data.success && data.sessions && data.sessions.length > 0) {
@@ -5854,7 +5862,7 @@ async function selectRecentSessionScope() {
             if (wsTitle) wsTitle.innerText = activeSessionTitle;
 
             // Load evidence files for this recent session
-            const evRes = await fetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
+            const evRes = await authFetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
             const evData = await evRes.json();
             let loadedCount = 0;
             if (evData.success && evData.files) {
@@ -5869,7 +5877,7 @@ async function selectRecentSessionScope() {
             }
 
             // Load recent audit findings
-            const fRes = await fetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}`);
+            const fRes = await authFetch(`${API_BASE}/audit/findings?session_id=${activeSessionId}`);
             const fData = await fRes.json();
             let findingsCount = 0;
             if (fData.success && fData.findings) {
@@ -6067,7 +6075,7 @@ async function populateBenchmarkSessionSelector() {
     if (!select) return;
 
     try {
-        const response = await fetch(`${API_BASE}/audit/benchmark/sessions`);
+        const response = await authFetch(`${API_BASE}/audit/benchmark/sessions`);
         const data = await response.json();
         if (data.success && data.sessions && data.sessions.length > 0) {
             select.innerHTML = `
@@ -6224,7 +6232,7 @@ async function loadRegisteredAuditors() {
     if (!selector) return;
 
     try {
-        const res = await fetch(`${API_BASE}/audit/users/auditors`);
+        const res = await authFetch(`${API_BASE}/audit/users/auditors`);
         const data = await res.json();
         if (!res.ok || !data.success) return;
 
@@ -6238,7 +6246,7 @@ async function loadRegisteredAuditors() {
 
         // Pre-select if active session has an assigned auditor
         if (activeSessionId) {
-            const sessRes = await fetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
+            const sessRes = await authFetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
             const sessData = await sessRes.json();
             if (sessData.files && sessData.files.length > 0 && sessData.files[0].assigned_auditor) {
                 selector.value = sessData.files[0].assigned_auditor;
@@ -6257,7 +6265,7 @@ async function assignTargetAuditorToActiveSession() {
     if (!assignedAuditor) return;
 
     try {
-        const res = await fetch(`${API_BASE}/audit/assign-auditor`, {
+        const res = await authFetch(`${API_BASE}/audit/assign-auditor`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -6281,7 +6289,7 @@ async function loadAuditeeDocumentHistory() {
 
     try {
         const username = currentUser ? currentUser.username : "";
-        const res = await fetch(`${API_BASE}/audit/auditee/document-history?username=${encodeURIComponent(username)}`);
+        const res = await authFetch(`${API_BASE}/audit/auditee/document-history?username=${encodeURIComponent(username)}`);
         const data = await res.json();
         if (!res.ok || !data.success) {
             container.innerHTML = `<div class="empty-state">Unable to load document history.</div>`;
@@ -6348,7 +6356,7 @@ async function loadAuditeeDocumentHistory() {
 
 async function deleteServerEvidenceFile(sessionId, fileId, filename) {
     try {
-        const res = await fetch(`${API_BASE}/audit/evidence/delete`, {
+        const res = await authFetch(`${API_BASE}/audit/evidence/delete`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -6370,7 +6378,7 @@ async function deleteServerEvidenceFile(sessionId, fileId, filename) {
 
 async function undoDeleteEvidenceFile(sessionId, fileId, filename) {
     try {
-        const res = await fetch(`${API_BASE}/audit/evidence/undo-delete`, {
+        const res = await authFetch(`${API_BASE}/audit/evidence/undo-delete`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({

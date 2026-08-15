@@ -32,6 +32,7 @@ from src.core.input_guardrail import scan_file_security
 from src.core.parsers.doc_parsers import extract_text
 from src.core.retrieval import save_document_chunks
 from src.core.llm_client import query_llm
+from src.api.endpoints.auth import _require_auth
 
 def retrieve_chat_context(db, session_id: str, query_text: str, top_k: int = 5) -> str:
     """Retrieves pointwise RAG context chunks from ShaktiDB document chunks."""
@@ -149,10 +150,18 @@ class UndoDeleteEvidenceRequest(BaseModel):
 
 @router.post("/sessions")
 def api_create_session(
+    request: Request,
     session_title: str = Form(...),
     framework: str = Form("All Standards"),
     username: str = Form("admin")
 ):
+    auth_user = _require_auth(request)
+    # The caller-supplied username field previously decided who a session was
+    # created for with no verification -- any authenticated user could create
+    # a session "as admin" or anyone else just by setting this form field.
+    # Trust the verified JWT identity instead unless the caller is admin.
+    if username != auth_user.get("username") and auth_user.get("role") != "admin":
+        username = auth_user.get("username")
     session_id = uuid.uuid4().hex
     db = SessionLocal()
     try:
@@ -208,10 +217,13 @@ def _enforce_max_sessions_limit(db, username: str, max_sessions: int = 50):
         print(f"[Session Auto-Purge Warning]: {e}", flush=True)
 
 @router.get("/sessions")
-def api_get_sessions(username: Optional[str] = None):
+def api_get_sessions(request: Request, username: Optional[str] = None):
     """Returns sessions strictly scoped to the requesting user."""
+    auth_user = _require_auth(request)
     if not username or not username.strip():
         return {"success": True, "sessions": []}
+    if username != auth_user.get("username") and auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. You can only view your own sessions.")
 
     db = SessionLocal()
     try:
@@ -262,7 +274,7 @@ def api_get_sessions(username: Optional[str] = None):
         db.close()
 
 @router.get("/auditee-sessions")
-def api_get_auditee_sessions(username: Optional[str] = None):
+def api_get_auditee_sessions(request: Request, username: Optional[str] = None):
     """Returns sessions scoped to the requesting user's role.
 
     Auditee callers see their own submitted sessions (created_by == them, or
@@ -271,8 +283,13 @@ def api_get_auditee_sessions(username: Optional[str] = None):
     own auditor-run sessions, which have no auditee attached and would
     otherwise get mislabeled here as if the auditor were the auditee.
     """
+    auth_user = _require_auth(request)
     if not username or not username.strip():
         return {"success": True, "sessions": []}
+    # Only the account owner, or an auditor/admin (who legitimately browse
+    # auditee submissions), may trigger a lookup for a given username.
+    if username != auth_user.get("username") and auth_user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied.")
 
     db = SessionLocal()
     try:
@@ -360,6 +377,7 @@ def _bg_extract_and_chunk(filename: str, file_bytes: bytes):
 
 @router.post("/upload")
 async def api_upload_evidence(
+    request: Request,
     session_id: str = Form(...),
     is_auditor_uploaded: bool = Form(True),
     files: List[UploadFile] = File(...),
@@ -373,6 +391,7 @@ async def api_upload_evidence(
     instead of 8 separate lock events per user.
     Exponential backoff retry (max 3 attempts) → no infinite hang on DB lock.
     """
+    _require_auth(request)
     import time
     import random
     import re
@@ -516,8 +535,9 @@ async def api_upload_evidence(
         db.close()
 
 @router.get("/users/auditors")
-def api_get_registered_auditors():
+def api_get_registered_auditors(request: Request):
     """Returns list of real registered users with auditor or admin role."""
+    _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
@@ -534,8 +554,11 @@ def api_get_registered_auditors():
         db.close()
 
 @router.post("/assign-auditor")
-def api_assign_auditor(req: AssignAuditorRequest):
+def api_assign_auditor(req: AssignAuditorRequest, request: Request):
     """Assigns an audit session and its files to a specific real Auditor user."""
+    auth_user = _require_auth(request)
+    if auth_user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied. Only auditors/admins can assign sessions.")
     db = SessionLocal()
     try:
         with force_master():
@@ -556,8 +579,11 @@ def api_assign_auditor(req: AssignAuditorRequest):
         db.close()
 
 @router.get("/auditee/document-history")
-def api_get_auditee_document_history(username: Optional[str] = None):
+def api_get_auditee_document_history(request: Request, username: Optional[str] = None):
     """Returns all evidence files uploaded by the auditee across sessions."""
+    auth_user = _require_auth(request)
+    if username and username != auth_user.get("username") and auth_user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied.")
     db = SessionLocal()
     try:
         with force_master():
@@ -598,8 +624,9 @@ def api_get_auditee_document_history(username: Optional[str] = None):
         db.close()
 
 @router.get("/evidence")
-def api_get_session_evidence(session_id: str):
+def api_get_session_evidence(session_id: str, request: Request):
     """Returns list of active (non-deleted) uploaded evidence files for the given session ID."""
+    _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
@@ -635,8 +662,9 @@ def api_get_session_evidence(session_id: str):
         db.close()
 
 @router.post("/evidence/delete")
-def api_delete_evidence_file(req: DeleteEvidenceRequest):
+def api_delete_evidence_file(req: DeleteEvidenceRequest, request: Request):
     """Soft deletes an evidence file for 1-click Undo capability."""
+    _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
@@ -659,8 +687,9 @@ def api_delete_evidence_file(req: DeleteEvidenceRequest):
         db.close()
 
 @router.post("/evidence/undo-delete")
-def api_undo_delete_evidence_file(req: UndoDeleteEvidenceRequest):
+def api_undo_delete_evidence_file(req: UndoDeleteEvidenceRequest, request: Request):
     """Restores a soft-deleted evidence file."""
+    _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
@@ -682,7 +711,8 @@ def api_undo_delete_evidence_file(req: UndoDeleteEvidenceRequest):
         db.close()
 
 @router.post("/start")
-def api_start_audit(req: StartAuditRequest):
+def api_start_audit(req: StartAuditRequest, request: Request):
+    _require_auth(request)
     bg_key = req.session_id
     print(f"🚀 [API] /audit/start received for session {req.session_id} with {len(req.selected_sls)} controls (mode: {req.audit_mode})", flush=True)
 
@@ -806,8 +836,9 @@ def api_start_audit(req: StartAuditRequest):
         db.close()
 
 @router.post("/stop/{session_id}")
-def api_stop_audit(session_id: str):
+def api_stop_audit(session_id: str, request: Request):
     """Signal the background audit thread to stop and unblock session execution."""
+    _require_auth(request)
     bg_key = f"bg_{session_id}"
     _bg_stop_flags[session_id] = True
     _bg_stop_flags[bg_key] = True
@@ -821,7 +852,8 @@ def api_stop_audit(session_id: str):
 
 
 @router.get("/status/{session_id}")
-def api_get_status(session_id: str):
+def api_get_status(session_id: str, request: Request):
+    _require_auth(request)
     with _bg_lock:
         is_running = session_id in _bg_running
         progress = _bg_store["progress"].get(session_id)
@@ -891,16 +923,17 @@ def api_get_status(session_id: str):
 
 
 @router.get("/progress")
-def api_get_progress(session_id: str):
+def api_get_progress(session_id: str, request: Request):
     """
     Alias for /status/{session_id} using query parameter instead of path parameter.
     Frontend calls /api/audit/progress?session_id=... — this endpoint handles that.
     Previously returned 404 because only /status/{session_id} existed.
     """
-    return api_get_status(session_id)
+    return api_get_status(session_id, request)
 
 @router.get("/findings")
-def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bool = False, include_info: bool = False):
+def api_get_findings(request: Request, session_id: str, role: Optional[str] = None, saved_only: bool = False, include_info: bool = False):
+    _require_auth(request)
     db = SessionLocal()
     try:
         from src.core.controls_data import USE_CASES
@@ -1041,7 +1074,8 @@ def api_get_findings(session_id: str, role: Optional[str] = None, saved_only: bo
 
 
 @router.put("/findings/{finding_id}")
-def api_update_finding(finding_id: int, req: UpdateFindingRequest):
+def api_update_finding(finding_id: int, req: UpdateFindingRequest, request: Request):
+    _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
@@ -1115,8 +1149,9 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest):
         db.close()
 
 @router.put("/findings/commit-session/{session_id}")
-def api_commit_session_findings(session_id: str, force: bool = False, auditor_user: str = "Lead Auditor"):
+def api_commit_session_findings(session_id: str, request: Request, force: bool = False, auditor_user: str = "Lead Auditor"):
     """Commits and finalizes all findings for a session into Shakthi DB, with unreviewed controls warning & admin logging."""
+    _require_auth(request)
     db = SessionLocal()
     is_force = bool(force) or str(force).lower() in ('true', '1')
     try:
@@ -1212,8 +1247,11 @@ def api_commit_session_findings(session_id: str, force: bool = False, auditor_us
         db.close()
 
 @router.get("/admin-logs")
-def api_get_admin_logs():
+def api_get_admin_logs(request: Request):
     """Retrieves unified admin audit logs: overrides, auditor feedback/rejections, and system events/errors."""
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     db = SessionLocal()
     try:
         from src.db.database import AdminAuditLog, AuditorFeedback, SystemEvent
@@ -1266,8 +1304,9 @@ def api_get_admin_logs():
 
 
 @router.get("/benchmark/sessions")
-def api_get_benchmark_sessions():
+def api_get_benchmark_sessions(request: Request):
     """Retrieves real auditor session telemetry logs recorded during audits."""
+    _require_auth(request)
     try:
         from src.core.token_tracker import get_all_benchmark_records
         records = get_all_benchmark_records()
@@ -1294,8 +1333,9 @@ class AggregateSessionsRequest(BaseModel):
 
 
 @router.post("/benchmark/aggregate")
-def api_aggregate_benchmark_sessions(body: AggregateSessionsRequest = None):
+def api_aggregate_benchmark_sessions(request: Request, body: AggregateSessionsRequest = None):
     """Combines and aggregates metrics across selected real auditor sessions."""
+    _require_auth(request)
     try:
         from src.core.token_tracker import aggregate_audit_sessions
         sids = body.session_ids if body and body.session_ids else None
@@ -1306,8 +1346,9 @@ def api_aggregate_benchmark_sessions(body: AggregateSessionsRequest = None):
 
 
 @router.get("/benchmark/export")
-def api_export_benchmark_excel():
+def api_export_benchmark_excel(request: Request):
     """Downloads styled executive Excel benchmark report."""
+    _require_auth(request)
     try:
         from fastapi.responses import FileResponse
         from src.core.token_tracker import BENCHMARK_EXCEL_PATH, get_all_benchmark_records, generate_excel_benchmark_report
@@ -1332,11 +1373,17 @@ def api_export_benchmark_excel():
 
 @router.post("/deliver")
 def api_deliver_report(
+    request: Request,
     session_id: str = Form(...),
     auditee_id: str = Form(...),
     username: str = Form("admin")
 ):
     """Delivers report session to specified auditee account."""
+    auth_user = _require_auth(request)
+    if auth_user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied. Only auditors/admins can deliver reports.")
+    if username != auth_user.get("username") and auth_user.get("role") != "admin":
+        username = auth_user.get("username")
     db = SessionLocal()
     try:
         report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
@@ -1409,8 +1456,11 @@ def api_clear_all_records(request: Request):
         db.close()
 
 @router.get("/feedback/export")
-def api_export_feedback():
+def api_export_feedback(request: Request):
     """Exports all AuditorFeedback records to JSON safely."""
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     with force_master():
         db = SessionLocal()
         try:
@@ -1433,8 +1483,11 @@ def api_export_feedback():
             db.close()
 
 @router.post("/feedback/import")
-def api_import_feedback(file: UploadFile = File(...)):
+def api_import_feedback(request: Request, file: UploadFile = File(...)):
     """Imports AuditorFeedback records from uploaded JSON file."""
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     with force_master():
         db = SessionLocal()
         try:
@@ -1478,8 +1531,11 @@ def api_import_feedback(file: UploadFile = File(...)):
             db.close()
 
 @router.get("/auditee-sessions")
-def api_get_auditee_submitted_sessions():
+def api_get_auditee_submitted_sessions(request: Request):
     """Retrieves ONLY sessions that have been submitted/delivered to Auditees or created by Auditee accounts."""
+    user = _require_auth(request)
+    if user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied.")
     with force_master():
         db = SessionLocal()
         try:
@@ -1512,10 +1568,13 @@ def api_get_auditee_submitted_sessions():
             db.close()
 
 @router.get("/chats/sessions")
-def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = None):
+def api_get_chat_sessions(request: Request, role: Optional[str] = None, username: Optional[str] = None):
     """Retrieves list of active compliance sessions strictly scoped to the logged-in user."""
+    auth_user = _require_auth(request)
     if not username or not username.strip():
         return {"success": True, "sessions": []}
+    if username != auth_user.get("username") and auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied.")
 
     db = SessionLocal()
     try:
@@ -1571,8 +1630,11 @@ def api_get_chat_sessions(role: Optional[str] = None, username: Optional[str] = 
 
 
 @router.get("/chats/history")
-def api_get_chat_history(session_id: str, username: Optional[str] = None):
+def api_get_chat_history(session_id: str, request: Request, username: Optional[str] = None):
     """Retrieves messages for specified chat session — filtered to the requesting user."""
+    auth_user = _require_auth(request)
+    if username and username != auth_user.get("username") and auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied.")
     db = SessionLocal()
     try:
         query = db.query(ChatMessage).filter(ChatMessage.session_id == session_id)
@@ -1595,8 +1657,11 @@ def api_get_chat_history(session_id: str, username: Optional[str] = None):
         db.close()
 
 @router.post("/chats/clear")
-def api_clear_chat_session(session_id: str = Form(...), username: Optional[str] = Form(None)):
+def api_clear_chat_session(request: Request, session_id: str = Form(...), username: Optional[str] = Form(None)):
     """Clears only the current user's messages for a session."""
+    auth_user = _require_auth(request)
+    if username and username != auth_user.get("username") and auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied.")
     db = SessionLocal()
     try:
         with force_master():
@@ -1613,8 +1678,11 @@ def api_clear_chat_session(session_id: str = Form(...), username: Optional[str] 
 # ── COMPANY LOGO MANAGEMENT ENDPOINTS ──────────────────────────────────────
 
 @router.post("/upload-logo")
-def api_upload_company_logo(file: UploadFile = File(...)):
+def api_upload_company_logo(request: Request, file: UploadFile = File(...)):
     """Saves custom company logo for PDF/Word report exports."""
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     try:
         ext = os.path.splitext(file.filename)[1].lower() or ".png"
         if ext not in (".png", ".jpg", ".jpeg", ".webp", ".svg"):
@@ -1634,8 +1702,11 @@ def api_upload_company_logo(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Logo upload failed: {e}")
 
 @router.delete("/upload-logo")
-def api_reset_company_logo():
+def api_reset_company_logo(request: Request):
     """Resets company logo to default template logo."""
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     try:
         assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "data", "assets"))
         logo_path = os.path.join(assets_dir, "custom_company_logo.png")
@@ -1648,8 +1719,9 @@ def api_reset_company_logo():
 
 @router.get("/export/docx")
 def api_export_docx(
-    session_id: str, 
-    saved_only: bool = False, 
+    request: Request,
+    session_id: str,
+    saved_only: bool = False,
     auditor_logo_path: Optional[str] = None,
     brand_firm: Optional[str] = None,
     brand_auditor: Optional[str] = None,
@@ -1665,6 +1737,7 @@ def api_export_docx(
     client_contact: Optional[str] = None
 ):
     """Exports findings report as DOCX using custom layout templates."""
+    _require_auth(request)
     db = SessionLocal()
     try:
         from fastapi.responses import StreamingResponse
@@ -1764,12 +1837,13 @@ def api_export_docx(
         db.close()
 
 @router.post("/chats/send")
-def api_send_chat_message(req: ChatSendRequest):
+def api_send_chat_message(req: ChatSendRequest, request: Request):
     """
     Real-time AI Compliance Assistant chat endpoint.
     Retrieves real-time session audit findings, evidence policies, and control gaps
     to answer questions in real-time.
     """
+    _require_auth(request)
     db = SessionLocal()
     try:
         session_id = req.session_id
@@ -1905,8 +1979,9 @@ Provide a clear, helpful, professional, and directly relevant answer as an exper
 
 @router.get("/export/pdf")
 def api_export_pdf(
-    session_id: str, 
-    saved_only: bool = False, 
+    request: Request,
+    session_id: str,
+    saved_only: bool = False,
     auditor_logo_path: Optional[str] = None,
     brand_firm: Optional[str] = None,
     brand_auditor: Optional[str] = None,
@@ -1922,6 +1997,7 @@ def api_export_pdf(
     client_contact: Optional[str] = None
 ):
     """Exports findings report as PDF using custom layout templates."""
+    _require_auth(request)
     db = SessionLocal()
     try:
         from fastapi.responses import StreamingResponse
@@ -2066,8 +2142,11 @@ class DeliverReportRequest(BaseModel):
     target_auditee: str
 
 @router.post("/deliver-report")
-def api_deliver_report(req: DeliverReportRequest):
+def api_deliver_report_v2(req: DeliverReportRequest, request: Request):
     """Delivers report session findings to target auditee account and marks status as Pending Review."""
+    user = _require_auth(request)
+    if user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied. Only auditors/admins can deliver reports.")
     with force_master():
         db = SessionLocal()
         try:
@@ -2097,8 +2176,9 @@ def api_deliver_report(req: DeliverReportRequest):
             db.close()
 
 @router.get("/export-token-benchmark")
-def api_export_token_benchmark(session_id: Optional[str] = None):
+def api_export_token_benchmark(request: Request, session_id: Optional[str] = None):
     """Exports Excel spreadsheet containing token consumption, latency, text length, and file size benchmarks."""
+    _require_auth(request)
     import os
     import json
     from starlette.responses import FileResponse
@@ -2212,7 +2292,8 @@ def api_export_token_benchmark(session_id: Optional[str] = None):
 
 
 @router.post('/findings/{finding_id}/reject-doc')
-def api_reject_doc_from_finding(finding_id: int, req: dict):
+def api_reject_doc_from_finding(finding_id: int, req: dict, request: Request):
+    _require_auth(request)
     db = SessionLocal()
     try:
         doc_name = req.get('doc_name', '').strip()
@@ -2250,7 +2331,8 @@ def api_reject_doc_from_finding(finding_id: int, req: dict):
         db.close()
 
 @router.post('/findings/{finding_id}/restore-doc')
-def api_restore_doc_to_finding(finding_id: int, req: dict):
+def api_restore_doc_to_finding(finding_id: int, req: dict, request: Request):
+    _require_auth(request)
     db = SessionLocal()
     try:
         doc_name = req.get('doc_name', '').strip()
@@ -2277,7 +2359,10 @@ def api_restore_doc_to_finding(finding_id: int, req: dict):
 # ── INTERRUPTED AUDIT SCAN RECOVERY ENDPOINTS (ShaktiDB + SQLite Dual Support) ──
 
 @router.get('/interrupted-checkpoints')
-def api_get_interrupted_checkpoints(username: Optional[str] = Query(None)):
+def api_get_interrupted_checkpoints(request: Request, username: Optional[str] = Query(None)):
+    auth_user = _require_auth(request)
+    if username and username != auth_user.get("username") and auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied.")
     db = SessionLocal()
     try:
         # Admin role/user does not conduct audit scans — return empty list immediately
@@ -2317,7 +2402,8 @@ def api_get_interrupted_checkpoints(username: Optional[str] = Query(None)):
 
 
 @router.post('/resume-checkpoint')
-def api_resume_checkpoint(req: dict, background_tasks: BackgroundTasks):
+def api_resume_checkpoint(req: dict, background_tasks: BackgroundTasks, request: Request):
+    _require_auth(request)
     session_id = req.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="Missing session_id")
@@ -2417,7 +2503,8 @@ def api_resume_checkpoint(req: dict, background_tasks: BackgroundTasks):
 
 
 @router.post('/discard-checkpoint')
-def api_discard_checkpoint(req: dict):
+def api_discard_checkpoint(req: dict, request: Request):
+    _require_auth(request)
     session_id = req.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="Missing session_id")

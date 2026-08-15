@@ -22,7 +22,44 @@ from src.core.bg_worker import log_system_event
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 # ── JWT Configuration ─────────────────────────────────────────────────────────
-_JWT_SECRET  = os.environ.get("JWT_SECRET", "aicyberauditbox-change-this-in-production-2026")
+def _resolve_jwt_secret() -> str:
+    """
+    Never falls back to a hardcoded string -- that string was a real, exploitable
+    credential (forge any session, including admin, no password needed) once it
+    sat in source control. If JWT_SECRET isn't set, generate a real random secret
+    and persist it under data/ (already gitignored) so it survives restarts
+    instead of invalidating every session each time the API restarts.
+    """
+    env_secret = os.environ.get("JWT_SECRET", "").strip()
+    if env_secret:
+        return env_secret
+
+    import secrets as _secrets
+    secret_path = os.path.join("data", ".jwt_secret")
+    try:
+        if os.path.exists(secret_path):
+            with open(secret_path, "r", encoding="utf-8") as f:
+                existing = f.read().strip()
+            if existing:
+                return existing
+        os.makedirs(os.path.dirname(secret_path), exist_ok=True)
+        new_secret = _secrets.token_hex(32)
+        with open(secret_path, "w", encoding="utf-8") as f:
+            f.write(new_secret)
+        print(
+            "[AUTH] JWT_SECRET not set -- generated and persisted a random secret to "
+            f"{secret_path}. Set JWT_SECRET explicitly for production/multi-instance deployments.",
+            flush=True
+        )
+        return new_secret
+    except Exception as e:
+        # Last resort: an in-memory-only random secret. Safer than a public
+        # hardcoded string even though it means restarts invalidate sessions.
+        print(f"[AUTH WARNING] Could not persist JWT secret ({e}); using a session-only random secret.", flush=True)
+        return _secrets.token_hex(32)
+
+
+_JWT_SECRET  = _resolve_jwt_secret()
 _JWT_ALGO    = "HS256"
 _JWT_EXPIRY_HOURS = int(os.environ.get("JWT_EXPIRY_HOURS", "8"))
 

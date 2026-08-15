@@ -8,12 +8,25 @@ Decoupled from Streamlit UI.
 import hashlib
 import re
 import os
+import secrets
+import string
 import pyotp
 from src.db.database import SessionLocal, User, force_master
 
-# Admin credentials from environment variables (fallback for first boot only)
-_ADMIN_DEFAULT_PASSWORD = os.environ.get("ADMIN_DEFAULT_PASSWORD", "AuditBox@2026!")
-_ADMIN_TOTP_SECRET = os.environ.get("ADMIN_TOTP_SECRET", pyotp.random_base32())
+
+def _generate_iso_compliant_password(length: int = 20) -> str:
+    """Cryptographically random password guaranteed to pass validate_iso_password()
+    (at least one upper/lower/digit/special char), not just probably does."""
+    upper, lower, digit = string.ascii_uppercase, string.ascii_lowercase, string.digits
+    special = "!@#$%^&*()_+-="
+    required = [secrets.choice(upper), secrets.choice(lower), secrets.choice(digit), secrets.choice(special)]
+    pool = upper + lower + digit + special
+    rest = [secrets.choice(pool) for _ in range(max(0, length - len(required)))]
+    chars = required + rest
+    _rand = secrets.SystemRandom()
+    _rand.shuffle(chars)
+    return "".join(chars)
+
 
 def _hash_pw(pw: str) -> str:
     """Returns SHA256 hash of a plain text password."""
@@ -57,20 +70,40 @@ def validate_iso_password(password: str) -> tuple[bool, str]:
     return True, ""
 
 def seed_default_admin():
-    """Ensures a default admin user exists in database."""
+    """
+    Ensures a default admin user exists in database.
+
+    Never falls back to a hardcoded password -- that string was a real,
+    exploitable credential once it sat in source control. Uses
+    ADMIN_DEFAULT_PASSWORD if explicitly set; otherwise generates a real
+    random one that passes the ISO password policy and prints it once so
+    whoever is standing up this instance can actually log in.
+    """
     with force_master():
         db = SessionLocal()
         admin = db.query(User).filter(User.username == "admin").first()
         if not admin:
+            password = os.environ.get("ADMIN_DEFAULT_PASSWORD", "").strip()
+            if not password:
+                password = _generate_iso_compliant_password()
+                print(
+                    "=" * 70 + "\n"
+                    "[AUTH] ADMIN_DEFAULT_PASSWORD not set -- generated a random admin "
+                    f"password:\n\n    {password}\n\n"
+                    "SAVE THIS NOW, it will not be shown again. Set ADMIN_DEFAULT_PASSWORD "
+                    "explicitly for future deployments.\n" + "=" * 70,
+                    flush=True
+                )
+            totp_secret = os.environ.get("ADMIN_TOTP_SECRET", "").strip() or pyotp.random_base32()
             db.add(User(
                 username="admin",
-                password_hash=_hash_pw(_ADMIN_DEFAULT_PASSWORD),
+                password_hash=_hash_pw(password),
                 role="admin",
-                totp_secret=_ADMIN_TOTP_SECRET
+                totp_secret=totp_secret
             ))
             db.commit()
         elif not admin.totp_secret:
-            admin.totp_secret = _ADMIN_TOTP_SECRET
+            admin.totp_secret = os.environ.get("ADMIN_TOTP_SECRET", "").strip() or pyotp.random_base32()
             db.commit()
         db.close()
 
