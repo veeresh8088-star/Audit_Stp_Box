@@ -216,10 +216,14 @@ def map_finding_to_risk_category(finding: Finding) -> str:
 # CIA IMPACT & PII EXPOSURE EVALUATOR  (100% offline — regex-based)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# PII / sensitive data patterns (reused from src/core/pii_redactor.py logic)
+# PII / sensitive data patterns for the "⚠ PII EXPOSURE DETECTED" report flag.
+# Deliberately does NOT include IPv4 -- a VAPT finding's target host IP is the
+# report's actual content, not personally-identifying data, and every finding
+# mentions one; flagging on it made the badge fire on ~100% of findings and
+# stop carrying any signal. Matches the same IP-is-not-PII call already made
+# for VAPT export redaction (src/core/report_exporter.py, redact_pii(redact_ip=False)).
 _PII_PATTERNS = [
     re.compile(r'[\w.+\-]+@[\w\-]+\.(?:[a-zA-Z]{2,})', re.IGNORECASE),        # Email
-    re.compile(r'\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b'),  # IPv4
     re.compile(r'(?:password|passwd|pwd|secret|api[_\-]?key|token|credential|private[_\-]?key)\s*[:=]\s*\S+', re.IGNORECASE),  # Credentials
     re.compile(r'(?:ssn|social\s+security|credit\s+card|card\s+number|pan\s+number|aadhaar)', re.IGNORECASE),  # PII identifiers
 ]
@@ -316,26 +320,68 @@ _REMEDIATION_TEMPLATES = {
     "file upload": "Validate file types using content inspection (magic bytes), not just extensions. Store uploads outside the web root. Set size limits and scan for malware.",
     "privilege escalation": "Apply principle of least privilege. Validate authorization on every privileged action server-side. Use role-based access control (RBAC).",
     "brute force": "Implement account lockout or rate limiting after failed attempts. Use CAPTCHA. Enforce strong password policies and multi-factor authentication.",
+    "path traversal": "Sanitize file path inputs. Use a whitelist of allowed file paths. Never use user input directly in file system operations.",
+    "session fixation": "Regenerate the session ID immediately after login and on every privilege change. Never accept a session ID supplied by the client before authentication.",
+    "cors": "Restrict `Access-Control-Allow-Origin` to an explicit whitelist of trusted domains. Never reflect the request's `Origin` header or use a wildcard (`*`) alongside `Access-Control-Allow-Credentials: true`.",
+    "self-signed": "Replace the self-signed certificate with one issued by a trusted Certificate Authority. Configure automatic renewal (e.g. via ACME/Let's Encrypt) to prevent future expiry.",
+    "self signed": "Replace the self-signed certificate with one issued by a trusted Certificate Authority. Configure automatic renewal (e.g. via ACME/Let's Encrypt) to prevent future expiry.",
+    "md5": "Replace MD5/SHA-1 with a modern hashing algorithm (SHA-256 or better) for integrity checks, and a dedicated password-hashing function (bcrypt, scrypt, or Argon2) for credential storage.",
+    "sha1": "Replace MD5/SHA-1 with a modern hashing algorithm (SHA-256 or better) for integrity checks, and a dedicated password-hashing function (bcrypt, scrypt, or Argon2) for credential storage.",
+    "request smuggling": "Ensure front-end proxy and back-end server agree on request framing (Content-Length vs. Transfer-Encoding). Disable support for ambiguous/duplicate headers at the proxy layer.",
+    "directory listing": "Disable directory browsing/auto-indexing at the web server configuration level (e.g. `Options -Indexes` in Apache, `autoindex off` in nginx).",
+    "index of": "Disable directory browsing/auto-indexing at the web server configuration level (e.g. `Options -Indexes` in Apache, `autoindex off` in nginx).",
+    "xml external entity": "Disable external entity and DTD processing in the XML parser (e.g. `XMLConstants.FEATURE_SECURE_PROCESSING` in Java, `resolve_entities=False` in lxml). Prefer a data format that doesn't support entities (JSON) where possible.",
+    "xxe": "Disable external entity and DTD processing in the XML parser. Prefer a data format that doesn't support entities (JSON) where possible.",
+    "insecure direct object reference": "Enforce server-side authorization checks on every object reference (verify the requesting user owns/may access the specific record ID), not just authentication. Use indirect reference maps or UUIDs instead of predictable sequential IDs.",
+    "idor": "Enforce server-side authorization checks on every object reference, not just authentication. Use indirect reference maps or UUIDs instead of predictable sequential IDs.",
+    "cleartext": "Enforce TLS for this service/protocol; disable the unencrypted listener entirely if a secure alternative exists (e.g. FTPS/SFTP instead of FTP, HTTPS instead of HTTP).",
+    "unencrypted": "Enforce TLS for this service/protocol; disable the unencrypted listener entirely if a secure alternative exists.",
+    "rate limit": "Implement request throttling per user/IP (e.g. token-bucket or sliding-window) on this endpoint, with a clear `429 Too Many Requests` response and `Retry-After` header.",
 }
 
 def get_actionable_remediation(finding: Finding) -> str:
     """
     Returns developer-actionable remediation guidance based on finding title/description.
     Uses a deterministic local template dictionary — 100% offline, no LLM required.
-    Falls back to the scanner's original remediation text if no template matches.
+
+    When no template matches, this used to just return the scanner's own remediation
+    text verbatim -- which made the exported report's "Developer Actionable Mitigation
+    Steps" section silently disappear for that finding (report_exporter.py only shows
+    it when the actionable text differs from the raw recommendation), since duplicating
+    the same text under two headings has no display value. Any finding whose vulnerability
+    type isn't one of the ~35 hardcoded keywords above -- a large share of real Nessus/
+    Qualys CVE-based findings -- was getting no developer-specific guidance at all. Now
+    builds a genuinely more actionable, structured fallback instead of parroting the
+    scanner text back.
     """
     combined = f"{(finding.title or '').lower()} {(finding.description or '').lower()}"
 
-    # Check each template key against combined text
+    # Check each template key against combined text. Word-boundary matched, not plain
+    # substring containment -- a bare `key in combined` check let short keys like "rce"
+    # match inside unrelated words (enfoRCEd, souRCE, resouRCE, divoRCE...), handing out
+    # wrong/irrelevant remediation guidance for findings that had nothing to do with
+    # remote code execution.
     for key, guidance in _REMEDIATION_TEMPLATES.items():
-        if key in combined:
+        if re.search(rf'\b{re.escape(key)}\b', combined):
             return guidance
 
-    # Fallback: return the scanner's own remediation if available
-    if finding.remediation and finding.remediation.strip():
-        return finding.remediation.strip()
+    # No keyword template matched -- build a structured, genuinely actionable fallback
+    # instead of returning the scanner's raw remediation text unchanged.
+    cve_ref = finding.cve_list[0] if finding.cve_list else None
+    base_remed = (finding.remediation or "").strip()
 
-    return ""
+    if cve_ref:
+        fix_step = f"Apply the vendor-supplied patch addressing {cve_ref} for the affected component."
+    elif base_remed:
+        fix_step = f"Apply the fix: {base_remed}"
+    else:
+        fix_step = f"Apply the vendor-recommended fix for '{finding.title or 'this finding'}'."
+
+    steps = [fix_step, "Verify the fix by re-running the scan against the affected target after remediation."]
+    if not cve_ref and not base_remed:
+        steps.append("If no vendor patch is available yet, apply compensating controls (network segmentation, a WAF rule, or disabling the affected service) until one is released.")
+
+    return " ".join(steps)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

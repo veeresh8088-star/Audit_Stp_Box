@@ -26,3 +26,5 @@ data/
 *.exe
 *.pem
 .tmp-*
+backups/
+logs/

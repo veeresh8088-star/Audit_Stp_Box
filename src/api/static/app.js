@@ -27,6 +27,26 @@ function authFetch(url, options) {
     return fetch(url, options);
 }
 
+// FastAPI's `detail` field on an error response is a plain string for a
+// deliberate HTTPException(detail="..."), but for an automatic 422 validation
+// error it's an ARRAY of {loc, msg, type} objects. Callers that did
+// `throw new Error(data.detail || "...")` and then alert(err.message) got a
+// literal "[object Object]" for every 422, hiding the actual validation
+// problem right when it's most useful to see.
+function formatApiErrorDetail(detail) {
+    if (!detail) return "";
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+        return detail.map(d => {
+            if (typeof d === "string") return d;
+            const field = Array.isArray(d.loc) ? d.loc.slice(-1)[0] : "";
+            return field ? `${field}: ${d.msg}` : (d.msg || JSON.stringify(d));
+        }).join("; ");
+    }
+    if (typeof detail === "object") return detail.msg || JSON.stringify(detail);
+    return String(detail);
+}
+
 // --- EMOJIS & ICONS FOR FRAMEWORK CONTROLS ---
 const DEFAULT_FRAMEWORK_CONTROLS = [
     { sl: 5, use_case: "5.1 Policies for information security", label: "5.1 Security Policies", category: "Organizational" },
@@ -110,14 +130,15 @@ function selectRole(role) {
         }
     }
 
-    // Hide register option for Admin (seeded default is login only)
+    // Hide register option for Admin (seeded default is login only) --
+    // but keep "Forgot Password?" visible, it shares this row with "Create Account".
     const toggleRow = document.getElementById("toggle-auth-row");
+    const toggleActionBtn = document.getElementById("toggle-action-btn");
     if (toggleRow) {
+        toggleRow.style.display = "flex";
+        if (toggleActionBtn) toggleActionBtn.style.display = (role === "admin") ? "none" : "";
         if (role === "admin") {
-            toggleRow.style.display = "none";
             resetAuthActionToLogin();
-        } else {
-            toggleRow.style.display = "flex";
         }
     }
     showError("");
@@ -1027,12 +1048,27 @@ async function checkInterruptedAuditSessions() {
 
         if (data.success && data.interrupted_sessions && data.interrupted_sessions.length > 0) {
             currentInterruptedSession = data.interrupted_sessions[0];
-            checkCrashResilienceCheckpoint();
+            showInterruptedSessionModal(currentInterruptedSession);
         }
 
     } catch (e) {
         console.warn("[Interrupted Checkpoint] Check error:", e);
     }
+}
+
+function showInterruptedSessionModal(session) {
+    const modal = document.getElementById("interrupted-session-modal");
+    if (!modal) return;
+
+    const titleEl = document.getElementById("interrupted-session-title");
+    const progressEl = document.getElementById("interrupted-progress-text");
+    const timeEl = document.getElementById("interrupted-time-text");
+
+    if (titleEl) titleEl.innerText = session.session_title || session.session_id || "Untitled Session";
+    if (progressEl) progressEl.innerText = `${session.completed_controls || 0} / ${session.total_controls || 0} Controls`;
+    if (timeEl) timeEl.innerText = session.updated_at || "—";
+
+    modal.style.display = "flex";
 }
 
 async function handleResumeInterruptedSession() {
@@ -1223,11 +1259,33 @@ function renderUploadedFilesList() {
     });
 }
 
-function deleteEvidenceFile(idx) {
-    if (idx >= 0 && idx < uploadedFilesList.length) {
-        uploadedFilesList.splice(idx, 1);
-        renderUploadedFilesList();
+async function deleteEvidenceFile(idx) {
+    if (idx < 0 || idx >= uploadedFilesList.length) return;
+    const file = uploadedFilesList[idx];
+
+    // This button previously only spliced the local uploadedFilesList array --
+    // the file had already been uploaded to the server in the background the
+    // moment it was dropped (processEvidenceFiles's fire-and-forget POST
+    // /audit/upload), but nothing told the server it was removed. Any later
+    // refresh of this same file list from the server (loadEvidenceFileList(),
+    // which renders into the identical #uploaded-files-registry container)
+    // would still include it, making a "deleted" file reappear once a new
+    // file was added. Soft-delete it server-side first, matching what
+    // deleteServerEvidenceFile() already does elsewhere in the app.
+    if (activeSessionId && file && file.name) {
+        try {
+            await authFetch(`${API_BASE}/audit/evidence/delete`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: activeSessionId, filename: file.name })
+            });
+        } catch (e) {
+            console.warn("Evidence delete (server) failed, removing from local list only:", e);
+        }
     }
+
+    uploadedFilesList.splice(idx, 1);
+    renderUploadedFilesList();
 }
 
 function clearAllUploadedFiles() {
@@ -1933,12 +1991,20 @@ async function loadEvidenceFileList() {
                 files.forEach(f => {
                     const fn = f.filename;
                     const ext = fn.split('.').pop().toLowerCase();
-                    let fileClass = "file-type-xml";
-                    let fileIconText = "XML";
+                    // Was defaulting everything to "XML" unless it matched pdf/doc/xls --
+                    // so png/jpg screenshots, json, txt, html, pptx, zip all showed a
+                    // misleading "XML" badge. Matches the categorization already used in
+                    // processEvidenceFiles() above, so both file-list renderers agree.
+                    let fileClass = "file-type-doc";
+                    let fileIconText = "DOC";
 
                     if (ext === "pdf") { fileClass = "file-type-pdf"; fileIconText = "PDF"; }
                     else if (["doc", "docx"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "DOC"; }
                     else if (["xls", "xlsx", "csv"].includes(ext)) { fileClass = "file-type-xls"; fileIconText = "XLS"; }
+                    else if (["xml", "json", "txt", "html", "htm"].includes(ext)) { fileClass = "file-type-xml"; fileIconText = "XML"; }
+                    else if (["png", "jpg", "jpeg"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "IMG"; }
+                    else if (["ppt", "pptx"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "PPT"; }
+                    else if (ext === "zip") { fileClass = "file-type-doc"; fileIconText = "ZIP"; }
 
                     const card = document.createElement("div");
                     card.className = "modern-file-card";
@@ -2018,7 +2084,7 @@ async function triggerAuditAnalysis() {
         });
 
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Failed to trigger scan.");
+        if (!response.ok) throw new Error(formatApiErrorDetail(data.detail) || "Failed to trigger scan.");
 
         // Start high-frequency progress polling (every 1 second)
         if (progressInterval) clearInterval(progressInterval);
@@ -2496,6 +2562,51 @@ function ensureAdminModalDOM() {
                     </div>
                 </div>
             </div>
+
+            <!-- Export Toolbar -->
+            <div style="padding: 14px 22px; border-top: 1px solid rgba(148,163,184,0.15); background: rgba(15,23,42,0.3);">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+                    <span style="font-size: 0.78rem; color: #94a3b8; font-weight: 600; white-space: nowrap;">👤 Filter Auditor:</span>
+                    <input id="admin-log-auditor-filter"
+                        type="text"
+                        placeholder="e.g. rk1@gmail.com  (leave blank = all)"
+                        style="flex: 1; padding: 7px 12px; font-size: 0.8rem; border-radius: 8px; border: 1px solid rgba(148,163,184,0.3); background: rgba(15,23,42,0.7); color: #f1f5f9; outline: none;">
+                </div>
+                <div style="background: rgba(15,23,42,0.5); border: 1px solid rgba(148,163,184,0.15); border-radius: 10px; padding: 12px; margin-bottom: 10px;">
+                    <div style="font-size: 0.76rem; font-weight: 700; color: #60a5fa; margin-bottom: 9px; display: flex; align-items: center; gap: 6px;">
+                        🛡️ System Event Logs &amp; Error Trail
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button id="btn-download-logs-excel" type="button"
+                            onclick="downloadAdminLogsExport('excel')"
+                            style="flex: 1; min-width: 140px; padding: 8px 14px; background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.4); color: #4ade80; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+                            📥 Download Logs (.xlsx)
+                        </button>
+                        <button id="btn-download-logs-pdf" type="button"
+                            onclick="downloadAdminLogsExport('pdf')"
+                            style="flex: 1; min-width: 140px; padding: 8px 14px; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.35); color: #f87171; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+                            📄 Download Logs (.pdf)
+                        </button>
+                    </div>
+                </div>
+                <div style="background: rgba(15,23,42,0.5); border: 1px solid rgba(148,163,184,0.15); border-radius: 10px; padding: 12px;">
+                    <div style="font-size: 0.76rem; font-weight: 700; color: #a78bfa; margin-bottom: 9px; display: flex; align-items: center; gap: 6px;">
+                        📊 Telemetry &amp; Performance Benchmark Reports
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <button id="btn-download-telemetry-excel" type="button"
+                            onclick="downloadBenchmarkExport('excel')"
+                            style="flex: 1; min-width: 140px; padding: 8px 14px; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.4); color: #a5b4fc; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+                            📥 Download Telemetry (.xlsx)
+                        </button>
+                        <button id="btn-download-telemetry-pdf" type="button"
+                            onclick="downloadBenchmarkExport('pdf')"
+                            style="flex: 1; min-width: 140px; padding: 8px 14px; background: rgba(251,191,36,0.12); border: 1px solid rgba(251,191,36,0.35); color: #fbbf24; border-radius: 8px; font-size: 0.8rem; font-weight: 700; cursor: pointer; transition: all 0.2s;">
+                            📄 Download Telemetry (.pdf)
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
 
@@ -2551,6 +2662,29 @@ async function loadAdminAuditLogs() {
     loadAdminOverridesData();
 }
 
+window._showAllBenchmarkSessions = false;
+
+function toggleShowAllBenchmarkSessions() {
+    window._showAllBenchmarkSessions = !window._showAllBenchmarkSessions;
+    filterBenchmarkSessionsByAuditor();
+}
+
+function renderBenchmarkTableWithLimit(sessions) {
+    const tbody = document.getElementById("benchmark-table-body");
+    if (!tbody) return;
+    const limit = window._showAllBenchmarkSessions ? sessions.length : 10;
+    let html = renderBenchmarkRowsHTML(sessions.slice(0, limit));
+    if (sessions.length > 10) {
+        const label = window._showAllBenchmarkSessions
+            ? "▲ Show Top 10 Sessions Only"
+            : `📂 Show More Sessions (Total ${sessions.length})`;
+        html += `<tr><td colspan="10" style="text-align:center; padding:10px;">
+            <button type="button" class="btn-secondary" style="padding:6px 14px; font-size:0.76rem; font-weight:700;" onclick="toggleShowAllBenchmarkSessions()">${escapeHtml(label)}</button>
+        </td></tr>`;
+    }
+    tbody.innerHTML = html;
+}
+
 function filterBenchmarkSessionsByAuditor() {
     const filterVal = (document.getElementById("benchmark-auditor-filter")?.value || "ALL").toLowerCase();
     const tbody = document.getElementById("benchmark-table-body");
@@ -2569,7 +2703,7 @@ function filterBenchmarkSessionsByAuditor() {
         return;
     }
 
-    tbody.innerHTML = renderBenchmarkRowsHTML(filtered);
+    renderBenchmarkTableWithLimit(filtered);
     updateSelectedBenchmarkSessionsCount();
 }
 
@@ -2659,7 +2793,8 @@ async function loadBenchmarkSessionsData() {
                     uniqueAuditors.map(u => `<option value="${escapeHtml(u.toLowerCase())}">👤 ${escapeHtml(u)}</option>`).join("");
             }
 
-            tbody.innerHTML = renderBenchmarkRowsHTML(data.sessions);
+            window._showAllBenchmarkSessions = false;
+            renderBenchmarkTableWithLimit(data.sessions);
         } else {
             tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:16px; color:#94a3b8;">No real auditor session benchmarks recorded yet. Run an audit to log telemetry.</td></tr>`;
         }
@@ -3630,6 +3765,10 @@ function renderFindingsList() {
             const _poc = String(singleSnip || f.evidence_snippet || f.evidence || "").trim();
             const _desc = String(getCleanFindingDescription(f)).trim();
             const _remed = String(getCleanRecommendation(f)).trim();
+            const _riskCategory = String(f.category || "").trim();
+            const _ciaImpact = String(f.cia_impact || "").trim();
+            const _isPii = !!f.is_pii_exposed;
+            const _remedActionable = String(f.remediation_actionable || f.actionable_remediation || "").trim();
 
             if (_poc) {
                 if (!_target) {
@@ -3719,6 +3858,19 @@ function renderFindingsList() {
                         <span style="font-size:0.78rem; padding:3px 9px; border-radius:6px; background:rgba(99,102,241,0.15); color:#818cf8; border:1px solid rgba(99,102,241,0.3); font-weight:700;">${escapeHtml(owaspCat)}</span>
                     </div>
 
+                    ${_riskCategory ? `
+                    <div class="finding-detail-row" style="margin-bottom: 10px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#f59e0b; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">🏷️ Risk Category</label>
+                        <span style="font-size:0.78rem; padding:3px 9px; border-radius:6px; background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:700;">${escapeHtml(_riskCategory)}</span>
+                    </div>` : ""}
+
+                    ${_ciaImpact ? `
+                    <div class="finding-detail-row" style="margin-bottom: 10px;">
+                        <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">🔒 CIA Impact${_isPii ? " & Data Classification" : ""}</label>
+                        <span style="font-size:0.78rem; padding:3px 9px; border-radius:6px; background:rgba(148,163,184,0.12); color:#cbd5e1; border:1px solid rgba(148,163,184,0.25); font-weight:700;">${escapeHtml(_ciaImpact)}</span>
+                        ${_isPii ? `<span style="font-size:0.72rem; padding:3px 8px; border-radius:6px; background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.4); font-weight:800; margin-left:6px;">⚠ PII EXPOSURE DETECTED — Confidential</span>` : ""}
+                    </div>` : ""}
+
                     <div class="finding-detail-row" style="margin-bottom: 10px;">
                         <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">🔴 CVE References (click to view on NVD)</label>
                         <div style="margin-top: 4px;">${cveBadges}</div>
@@ -3750,6 +3902,15 @@ function renderFindingsList() {
                         </div>
                         <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${escapeHtml(_remed)}</p>
                     </div>
+
+                    ${(_remedActionable && _remedActionable !== _remed) ? `
+                    <div class="finding-detail-row" style="margin-bottom: 12px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <label style="font-weight:700; font-size:0.78rem; color:#10b981; text-transform:uppercase; letter-spacing:0.5px;">👨‍💻 Developer Actionable Mitigation Steps</label>
+                            <button type="button" onclick="navigator.clipboard.writeText('${escapeHtml(_remedActionable).replace(/'/g, "\\'")}'); showToastBanner('Mitigation steps copied to clipboard!');" style="padding:2px 8px; font-size:0.72rem; border-radius:4px; border:1px solid rgba(16,185,129,0.4); background:rgba(16,185,129,0.1); color:#10b981; font-weight:700; cursor:pointer;">📋 Copy Steps</button>
+                        </div>
+                        <p style="margin:0; font-size:0.86rem; color:#059669; line-height:1.5;">${escapeHtml(_remedActionable)}</p>
+                    </div>` : ""}
 
                     <div class="finding-actions" style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid rgba(148,163,184,0.15);">
                         <div style="font-size:0.78rem; color:#2563eb; font-weight:600; display:flex; align-items:center; gap:6px;">
@@ -6380,6 +6541,13 @@ async function assignTargetAuditorToActiveSession() {
     }
 }
 
+window._showAllDocHistory = false;
+
+function toggleShowAllDocHistory() {
+    window._showAllDocHistory = !window._showAllDocHistory;
+    renderAuditeeDocumentHistoryTable(window._docHistoryCache || []);
+}
+
 async function loadAuditeeDocumentHistory() {
     const container = document.getElementById("auditee-history-table-container");
     if (!container) return;
@@ -6393,13 +6561,27 @@ async function loadAuditeeDocumentHistory() {
             return;
         }
 
-        const history = data.history || [];
-        if (history.length === 0) {
-            container.innerHTML = `<div class="empty-state" style="padding: 30px; text-align: center; color: var(--text-muted);">No submitted document history found. Upload evidence files to see history log.</div>`;
-            return;
-        }
+        window._docHistoryCache = data.history || [];
+        window._showAllDocHistory = false;
+        renderAuditeeDocumentHistoryTable(window._docHistoryCache);
+    } catch (err) {
+        console.error("Error loading document history:", err);
+    }
+}
 
-        let html = `
+function renderAuditeeDocumentHistoryTable(history) {
+    const container = document.getElementById("auditee-history-table-container");
+    if (!container) return;
+
+    if (history.length === 0) {
+        container.innerHTML = `<div class="empty-state" style="padding: 30px; text-align: center; color: var(--text-muted);">No submitted document history found. Upload evidence files to see history log.</div>`;
+        return;
+    }
+
+    const limit = window._showAllDocHistory ? history.length : 10;
+    const toRender = history.slice(0, limit);
+
+    let html = `
             <div style="overflow-x: auto;">
                 <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem; text-align: left;">
                     <thead>
@@ -6415,7 +6597,7 @@ async function loadAuditeeDocumentHistory() {
                     <tbody>
         `;
 
-        history.forEach(item => {
+        toRender.forEach(item => {
             const isDel = item.is_deleted;
             const rowBg = isDel ? "rgba(239, 68, 68, 0.06)" : "transparent";
             const fileIcon = item.filename.endsWith(".pdf") ? "📄" : item.filename.endsWith(".zip") ? "📦" : "📝";
@@ -6448,10 +6630,17 @@ async function loadAuditeeDocumentHistory() {
                 </table>
             </div>
         `;
-        container.innerHTML = html;
-    } catch (err) {
-        console.error("Error loading document history:", err);
+
+    if (history.length > 10) {
+        const label = window._showAllDocHistory
+            ? "▲ Show Top 10 Documents Only"
+            : `📂 Show More Documents (Total ${history.length})`;
+        html += `<div style="text-align:center; padding-top:10px;">
+            <button type="button" class="btn-secondary" style="padding:6px 14px; font-size:0.76rem; font-weight:700;" onclick="toggleShowAllDocHistory()">${escapeHtml(label)}</button>
+        </div>`;
     }
+
+    container.innerHTML = html;
 }
 
 async function deleteServerEvidenceFile(sessionId, fileId, filename) {

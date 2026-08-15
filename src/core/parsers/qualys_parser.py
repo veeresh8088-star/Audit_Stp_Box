@@ -56,10 +56,16 @@ def _find_col(headers_norm: dict, key: str) -> Optional[str]:
 class QualysParser(BaseParser):
     """Parses Qualys / OpenVAS vulnerability scan exports.
     Primary support: Qualys CSV export (the most common real-world export format).
-    Secondary, best-effort support: Qualys/OpenVAS XML exports.
-    NOTE: not yet verified against a real Qualys/OpenVAS export file -- built against
-    the documented standard CSV column set and common XML report structures. If a
-    real export doesn't parse, this needs adjusting against an actual sample file.
+    XML support covers three real-world layouts, tried in order:
+      1. Qualys 'Host List Detection' XML (the actual format Qualys's API/UI export --
+         <HOST><DETECTION_LIST><DETECTION> with a separate <GLOSSARY> for titles).
+      2. Simpler/legacy Qualys <VULN> XML variant (title inline, no glossary).
+      3. OpenVAS/Greenbone GMP <result> XML.
+    NOTE: still not verified against a real customer export file -- built against
+    each tool's documented/published schema and synthetic samples matching it. If a
+    real export doesn't parse, compare its actual structure against the three
+    _parse_qualys_detection_xml / _parse_qualys_vuln_xml / _parse_openvas_gmp_xml
+    methods below and adjust the one that's closest.
     """
 
     def can_parse(self, filename: str, content: str) -> bool:
@@ -155,7 +161,6 @@ class QualysParser(BaseParser):
 
     # ── XML export (best-effort secondary path — Qualys XML / OpenVAS GMP XML) ──
     def _parse_xml(self, content: str) -> List[Finding]:
-        findings: List[Finding] = []
         try:
             soup = BeautifulSoup(content, _XML_PARSER)
         except Exception:
@@ -166,18 +171,82 @@ class QualysParser(BaseParser):
             except Exception:
                 return []
 
-        # Qualys XML: <VULN><QID>...</QID><TITLE>...</TITLE><SEVERITY>...</SEVERITY>...
+        findings = self._parse_qualys_detection_xml(soup)
+        if findings:
+            return findings
+
+        findings = self._parse_qualys_vuln_xml(soup)
+        if findings:
+            return findings
+
+        return self._parse_openvas_gmp_xml(soup)
+
+    def _parse_qualys_detection_xml(self, soup) -> List[Finding]:
+        """Qualys 'Host List Detection' XML (the real format Qualys's API/UI actually
+        exports): <HOST_LIST><HOST><IP>/<DNS>/<DETECTION_LIST><DETECTION><QID>/<SEVERITY>/
+        <RESULTS>...</DETECTION></DETECTION_LIST></HOST></HOST_LIST>, with vulnerability
+        titles kept separately in a <GLOSSARY><QID_LIST><QID><QID>id</QID><TITLE>...
+        </QID></QID_LIST></GLOSSARY> lookup table rather than inline per-detection."""
+        findings: List[Finding] = []
+
+        qid_titles = {}
+        for qid_node in soup.find_all(re.compile(r"^qid$", re.IGNORECASE)):
+            parent = qid_node.parent
+            if parent is not None and parent.name and parent.name.lower() == "qid":
+                inner_qid = qid_node.get_text(strip=True)
+                title_node = parent.find(re.compile(r"^title$", re.IGNORECASE))
+                if inner_qid and title_node:
+                    qid_titles[inner_qid] = title_node.get_text(strip=True)
+
+        for host in soup.find_all(re.compile(r"^host$", re.IGNORECASE)):
+            ip_node = host.find(re.compile(r"^ip$", re.IGNORECASE))
+            dns_node = host.find(re.compile(r"^dns$", re.IGNORECASE))
+            ip = ip_node.get_text(strip=True) if ip_node else ""
+            dns = dns_node.get_text(strip=True) if dns_node else ""
+            base_target = " / ".join(p for p in [ip, dns] if p) or "Unknown Host"
+
+            for det in host.find_all(re.compile(r"^detection$", re.IGNORECASE)):
+                def _text(tag_name):
+                    t = det.find(re.compile(f"^{tag_name}$", re.IGNORECASE))
+                    return t.get_text(strip=True) if t else ""
+
+                qid = _text("qid")
+                if not qid:
+                    continue
+                title = qid_titles.get(qid) or _text("title") or f"Qualys QID {qid}"
+
+                raw_sev = _text("severity")
+                sev_digits = re.sub(r"[^0-9]", "", raw_sev)
+                severity = QUALYS_SEVERITY_MAP.get(sev_digits, raw_sev or "INFO")
+
+                results_text = _text("results")
+                port = _text("port")
+                target = f"{base_target}:{port}" if port else base_target
+
+                findings.append(Finding(
+                    title=title,
+                    severity=severity,
+                    target=target,
+                    description=results_text or title,
+                    remediation="Apply vendor patch per Qualys solution guidance.",
+                    evidence=results_text[:500] if results_text else f"QID {qid}",
+                    plugin_id=qid,
+                    source_tool="Qualys",
+                ))
+        return findings
+
+    def _parse_qualys_vuln_xml(self, soup) -> List[Finding]:
+        """Simpler/legacy Qualys XML variant: <VULN><QID>/<TITLE>/<SEVERITY>... with a
+        preceding sibling <IP> giving the host, no separate glossary needed."""
+        findings: List[Finding] = []
         vuln_nodes = soup.find_all(re.compile(r"^vuln$", re.IGNORECASE))
-        # OpenVAS GMP XML: <result><name>...</name><severity>...</severity><nvt><cve>...</cve></nvt></result>
-        if not vuln_nodes:
-            vuln_nodes = soup.find_all(re.compile(r"^result$", re.IGNORECASE))
 
         for node in vuln_nodes:
             def _text(tag_name):
                 t = node.find(re.compile(f"^{tag_name}$", re.IGNORECASE))
                 return t.get_text(strip=True) if t else ""
 
-            title = _text("title") or _text("name") or "Qualys/OpenVAS Finding"
+            title = _text("title") or "Qualys Finding"
             qid = _text("qid")
             raw_sev = _text("severity")
             sev_digits = re.sub(r"[^0-9]", "", raw_sev)
@@ -204,6 +273,79 @@ class QualysParser(BaseParser):
                 remediation=solution,
                 evidence=f"QID {qid}" if qid else "",
                 plugin_id=qid,
+                source_tool="Qualys",
+            ))
+        return findings
+
+    def _parse_openvas_gmp_xml(self, soup) -> List[Finding]:
+        """OpenVAS/Greenbone GMP <get_reports> XML: <result><name>/<host>/<port>/
+        <severity> (a numeric CVSS-like score, NOT the 1-5 Qualys scale) /<threat>
+        (word form: High/Medium/Low/Log/None) /<nvt><cve>...</nvt></result>.
+
+        Bug fixed here: previously ran the numeric <severity> score straight through
+        QUALYS_SEVERITY_MAP (keys "1".."5"), so an OpenVAS score like "7.5" stripped
+        to digits ("75") never matched and silently fell back to raw text "7.5" as
+        the severity string -- which Finding.__post_init__ then normalizes to INFO,
+        since "7.5" contains no CRIT/HIGH/MED/LOW substring. A genuine HIGH-severity
+        finding was being mislabeled INFO. Now prefers the word-form <threat>, and
+        falls back to proper CVSS-score-band mapping (not digit-stripping) for the
+        numeric <severity> when <threat> is absent.
+        """
+        findings: List[Finding] = []
+        result_nodes = soup.find_all(re.compile(r"^result$", re.IGNORECASE))
+
+        for node in result_nodes:
+            def _text(tag_name):
+                t = node.find(re.compile(f"^{tag_name}$", re.IGNORECASE))
+                return t.get_text(strip=True) if t else ""
+
+            title = _text("name") or "OpenVAS Finding"
+            threat = _text("threat")
+            raw_score = _text("severity")
+
+            cvss_score = None
+            if raw_score:
+                try:
+                    cvss_score = float(raw_score)
+                except ValueError:
+                    cvss_score = None
+
+            if threat and threat.upper() not in ("LOG", "NONE", ""):
+                severity = threat.upper()
+            elif cvss_score is not None:
+                if cvss_score >= 9.0: severity = "CRITICAL"
+                elif cvss_score >= 7.0: severity = "HIGH"
+                elif cvss_score >= 4.0: severity = "MEDIUM"
+                elif cvss_score > 0.0: severity = "LOW"
+                else: severity = "INFO"
+            else:
+                severity = "INFO"
+
+            nvt_node = node.find(re.compile(r"^nvt$", re.IGNORECASE))
+            cve_text = (nvt_node.find(re.compile(r"^cve$", re.IGNORECASE)).get_text(strip=True)
+                        if nvt_node and nvt_node.find(re.compile(r"^cve$", re.IGNORECASE)) else "") or _text("cve")
+            cve_list = [c.strip() for c in re.split(r"[,;\s]+", cve_text) if c.strip().upper().startswith("CVE-")]
+
+            host = _text("host")
+            port = _text("port")
+            target = f"{host}:{port}" if host and port else (host or "Unknown Host")
+
+            description = _text("description") or title
+            solution_node = node.find(re.compile(r"^solution$", re.IGNORECASE))
+            solution = solution_node.get_text(strip=True) if solution_node else "Apply vendor patch per scanner solution guidance."
+
+            if not title:
+                continue
+
+            findings.append(Finding(
+                title=title,
+                severity=severity,
+                severity_score=cvss_score,
+                cve_list=cve_list,
+                target=target,
+                description=description,
+                remediation=solution,
+                evidence="",
                 source_tool="Qualys",
             ))
         return findings

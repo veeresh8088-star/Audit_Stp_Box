@@ -940,11 +940,16 @@ Return format: ["topic1", "topic2", ...]"""
                 )
             else:
                 # Mapped file not found among uploads — fall back to all files.
-                print(
-                    f"[SCOPING WARNING] Control {c['control']}: Target '{target_doc_name}' "
-                    f"not matched among uploads {file_names_list}. "
-                    f"Falling back to full evidence pool.",
-                    flush=True
+                _scoping_fallback_msg = (
+                    f"Control {c['control']}: Excel checklist targets '{target_doc_name}' "
+                    f"but that file is not among the uploaded evidence {file_names_list}. "
+                    f"Falling back to full evidence pool for this control (AI-style broad retrieval) "
+                    f"instead of the strict Excel-locked file."
+                )
+                print(f"[SCOPING WARNING] {_scoping_fallback_msg}", flush=True)
+                log_system_event(
+                    "SCOPING_FALLBACK", "WARNING", _scoping_fallback_msg,
+                    session_id=checkpoint_session_id or bg_key
                 )
                 control_file_names = file_names_list
                 control_context = context
@@ -1529,6 +1534,26 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
     try:
         from src.core.parsers import parse_tool_file, map_finding_to_control
 
+        # Pre-seed dedup keys from whatever this session already saved in a PREVIOUS
+        # run -- without this, re-running a scan on the same session (e.g. after
+        # uploading more evidence) re-inserted every finding from files that were
+        # already scanned before, since in-memory dedup alone only sees the current run.
+        try:
+            with force_master():
+                _db_seed = SessionLocal()
+                _existing_report = _db_seed.query(AuditReport).filter(AuditReport.session_id == bg_key).first()
+                if _existing_report:
+                    _existing_keys = _db_seed.query(Finding.dedup_key).filter(
+                        Finding.report_id == _existing_report.id,
+                        Finding.dedup_key.isnot(None)
+                    ).all()
+                    for (_ek,) in _existing_keys:
+                        if _ek:
+                            _seen_dedup_keys.add(_ek)
+                _db_seed.close()
+        except Exception as _seed_err:
+            print(f"[VAPT DEDUP] Failed to pre-seed existing dedup keys: {_seed_err}", flush=True)
+
         for fd in files_data:
             fname = fd.get("name", "")
             ftext = fd.get("text", "")
@@ -1554,17 +1579,20 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
             for f in combined_tool_findings:
                 # Skip exact-duplicate findings (same CVE, or same tool+plugin_id, or
                 # same tool+normalized title — see Finding.dedup_key()) before they're
-                # ever written to the report. dedup_key() already existed but was never
-                # wired into this aggregation loop, so re-scans and overlapping uploaded
-                # files produced literal duplicate rows.
+                # ever written to the report. Checks both this run's findings-so-far
+                # AND whatever a previous run on this session already saved (pre-seeded
+                # above), so re-scanning after uploading more evidence doesn't duplicate
+                # findings from files that were already scanned before.
+                _dedup_key_val = None
                 if hasattr(f, "dedup_key"):
-                    _key = f.dedup_key()
-                    if _key in _seen_dedup_keys:
+                    _dedup_key_val = f.dedup_key()
+                    if _dedup_key_val in _seen_dedup_keys:
                         continue
-                    _seen_dedup_keys.add(_key)
+                    _seen_dedup_keys.add(_dedup_key_val)
 
                 c_id = map_finding_to_control(f)
                 f_dict = f.to_dict() if hasattr(f, "to_dict") else dict(f)
+                f_dict["dedup_key"] = _dedup_key_val
                 f_dict["control_id"] = c_id
                 f_dict["control"] = f_dict.get("control") or c_id
                 f_dict["status"] = "Non-Compliant" if f_dict.get("severity") != "INFO" else "Informational"
@@ -1620,7 +1648,15 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
                             recommendation=f.get("remediation") or f.get("recommendation", ""),
                             reasoning=f.get("reasoning", ""),
                             status=f.get("status", "Non-Compliant"),
-                            source_files=f.get("source_files", "")  # Now = scan filename, NOT host IP
+                            source_files=f.get("source_files", ""),  # Now = scan filename, NOT host IP
+                            # VAPT enrichment fields -- previously computed by map_findings_list()
+                            # then silently dropped here (no columns existed to persist them into),
+                            # so every saved VAPT finding lost this data the moment the scan finished.
+                            category=f.get("category") or "",
+                            cia_impact=f.get("cia_impact") or "",
+                            is_pii_exposed=bool(f.get("is_pii_exposed") or False),
+                            remediation_actionable=f.get("remediation_actionable") or "",
+                            dedup_key=f.get("dedup_key"),
                         ))
                     
                     # Update Compliance Score

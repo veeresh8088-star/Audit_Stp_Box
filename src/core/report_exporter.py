@@ -841,7 +841,9 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
             pdf.ln(5)
             
         vuln_title = html.unescape(str(f.get("title") or f.get("finding") or f.get("control") or f"Finding 3.3.{idx}"))
-        desc = html.unescape(str(f.get("description") or f.get("gap_description") or f.get("finding") or "-"))
+        # VAPT reports: redact email/phone (incidental PII) but keep IPs -- the
+        # vulnerable host's IP address is the report's actual content, not PII.
+        desc = html.unescape(redact_pii(str(f.get("description") or f.get("gap_description") or f.get("finding") or "-"), redact_ip=False))
         target = html.unescape(str(f.get("target") or f.get("control_id") or "Scoped Network Endpoints / Systems"))
         conf_val = str(f.get("confidence") or "").strip()
         status_str = f"Detected ({conf_val.capitalize()})" if conf_val and conf_val.lower() in ("certain", "firm", "tentative") else "Detected"
@@ -859,16 +861,16 @@ def _export_vapt_pdf(session_title, findings, resolved_list, status, comments=""
         # ── Proof of Concept text: structured PoC block built in bg_worker takes priority ──
         # evidence_snippet = "Target Host: X.X.X.X\nPlugin ID: ...\nCVE(s): ...\nPlugin Output:\n..."
         # This is already the rich, structured block we want to show in the report.
-        poc_text = html.unescape(str(
+        poc_text = html.unescape(redact_pii(str(
             f.get("evidence_snippet") or   # Structured PoC block (built in bg_worker)
             f.get("evidence") or           # Raw plugin output
             f.get("evidence_quote") or     # LLM evidence quote
             f.get("poc") or
             "Console / Log Audit Verification"
-        ))
+        ), redact_ip=False))
 
         remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
-        remed = html.unescape(remed_raw) if remed_raw and ("no action" not in remed_raw.lower() and remed_raw != "NIL") else "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
+        remed = html.unescape(redact_pii(remed_raw, redact_ip=False)) if remed_raw and ("no action" not in remed_raw.lower() and remed_raw != "NIL") else "Immediately apply vendor security patches or software updates to mitigate identified vulnerability."
         ref = html.unescape(str(f.get("references") or f.get("reference") or "OWASP / OSSTMM / NIST Security Recommendations"))
         main_img = f.get("poc_image") or f.get("image_path")
         extra_img = f.get("extra_image")
@@ -1530,10 +1532,12 @@ def _export_vapt_docx(session_title, findings, resolved_list, status, comments="
         score = float(f.get("severity_score", 0.0) or 0.0)
         sev_label = str(f.get("severity", "Low")).split()[-1].upper()
         target_val = html.unescape(str(f.get("target") or f.get("control_id", "") or "Web / Network infrastructure"))
-        desc_val = html.unescape(str(f.get("description") or f.get("gap_description") or f.get("finding") or "-"))
-        poc_val = html.unescape(str(f.get("evidence") or f.get("evidence_snippet") or f.get("evidence_quote") or f.get("poc") or "Console / Log Audit Verification"))
+        # VAPT reports: redact email/phone (incidental PII) but keep IPs -- the
+        # vulnerable host's IP address is the report's actual content, not PII.
+        desc_val = html.unescape(redact_pii(str(f.get("description") or f.get("gap_description") or f.get("finding") or "-"), redact_ip=False))
+        poc_val = html.unescape(redact_pii(str(f.get("evidence") or f.get("evidence_snippet") or f.get("evidence_quote") or f.get("poc") or "Console / Log Audit Verification"), redact_ip=False))
         remed_raw = str(f.get("recommendation") or f.get("remediation") or "").strip()
-        remed_val = html.unescape(remed_raw) if remed_raw else "Immediately apply vendor security patches or software updates."
+        remed_val = html.unescape(redact_pii(remed_raw, redact_ip=False)) if remed_raw else "Immediately apply vendor security patches or software updates."
 
         # Heading
         fp = doc.add_paragraph()
@@ -1711,9 +1715,16 @@ def _policy_evidence_summary(f):
 
 
 def _policy_evidence_gap_text(f):
-    """Specific gap explanations, appended to the Observations cell."""
-    pol_gap = str(f.get("policy_gap") or "").strip()
-    ev_gap = str(f.get("evidence_gap") or "").strip()
+    """Specific gap explanations, appended to the Observations cell.
+
+    These are free-text, LLM-generated from evidence documents -- unlike the
+    enum-style status/assessment fields in _policy_evidence_summary, a gap
+    narrative can easily quote a phone number/email/IP straight out of the
+    source evidence, so it must go through the same redaction as
+    description/recommendation/evidence_snippet before export.
+    """
+    pol_gap = redact_pii(str(f.get("policy_gap") or "").strip())
+    ev_gap = redact_pii(str(f.get("evidence_gap") or "").strip())
     parts = []
     if pol_gap and pol_gap.lower() != "no policy gap identified.":
         parts.append(f"Policy Gap: {pol_gap}")
@@ -2010,7 +2021,9 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
                 ctrl_pt = f"{c_id} {u_c or c_n or c_name}".strip() if c_id and (c_id not in (u_c or c_n or c_name)) else (u_c or c_n or c_name or c_id)
 
             policy_ref = str(f.get("policy_reference") or f.get("reference") or f.get("control_id") or "")
-            obs        = str(f.get("gap_description") or f.get("reasoning") or f.get("observation") or f.get("finding") or "")[:800]
+            # PII redacted before writing to exported document (this table previously
+            # skipped redaction entirely, unlike the other export tables/functions)
+            obs        = redact_pii(str(f.get("gap_description") or f.get("reasoning") or f.get("observation") or f.get("finding") or "")[:800])
             pe_summary = _policy_evidence_summary(f)
             pe_gap     = _policy_evidence_gap_text(f)
             if pe_summary:
@@ -2019,9 +2032,9 @@ def _export_iso_template_docx(session_title, findings, resolved_list, status, co
                 obs = f"{obs}\n{pe_gap}"
             display_s  = str(f.get("display_status") or f.get("status") or "Open")
             risk_lbl   = _risk_level(f)
-            impact     = str(f.get("impact") or f.get("risk_impact") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Business Risk"))
-            suggestion = str(f.get("recommendation") or f.get("suggestion") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Remediate as per IS guidelines."))[:400]
-            evidence   = str(f.get("source_files") or f.get("evidence_quote") or f.get("evidence") or "Audit Evidence Files")
+            impact     = redact_pii(str(f.get("impact") or f.get("risk_impact") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Business Risk")))
+            suggestion = redact_pii(str(f.get("recommendation") or f.get("suggestion") or ("NIL" if display_s.lower() in ("accepted","compliant") else "Remediate as per IS guidelines."))[:400])
+            evidence   = redact_pii(str(f.get("source_files") or f.get("evidence_quote") or f.get("evidence") or "Audit Evidence Files"))
             ev_meta    = _evidence_meta_summary(f)
             if ev_meta:
                 evidence = f"{evidence}\n{ev_meta}"

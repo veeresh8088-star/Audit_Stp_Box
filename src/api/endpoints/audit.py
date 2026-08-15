@@ -1128,7 +1128,14 @@ def api_get_findings(request: Request, session_id: str, role: Optional[str] = No
                 "evidence_gap": f.evidence_gap,
                 "evidence_relevance": f.evidence_relevance,
                 "final_result": f.final_result,
-                "final_reason": f.final_reason
+                "final_reason": f.final_reason,
+                # VAPT enrichment fields (src/core/parsers/control_mapper.py) -- populated
+                # for findings saved from a scanner-parsed VAPT session; empty for ISO
+                # findings, which don't go through that enrichment pipeline.
+                "category": f.category or "",
+                "cia_impact": f.cia_impact or "",
+                "is_pii_exposed": bool(f.is_pii_exposed or False),
+                "remediation_actionable": f.remediation_actionable or "",
             })
         return {
             "success": True, 
@@ -1891,6 +1898,38 @@ def api_export_docx(
                 else:
                     sev_score = 2.5
                     
+                # CIA impact / risk category / developer-actionable remediation: read the
+                # real saved columns first (populated for anything scanned since the VAPT
+                # enrichment persistence fix); fall back to computing them for legacy rows
+                # saved before that fix. See api_export_pdf's identical block for why the
+                # fallback needs a real src.core.parsers.finding_schema.Finding adapter.
+                _desc_str = f.description or f.gap_detected or ""
+                _c_impact = f.cia_impact or None
+                _risk_cat = f.category or None
+                _is_pii = bool(f.is_pii_exposed or False)
+                _remed_actionable = f.remediation_actionable or None
+                if not _c_impact or not _risk_cat or not _remed_actionable:
+                    try:
+                        from src.core.parsers.finding_schema import Finding as _ParserFinding
+                        from src.core.parsers.control_mapper import (
+                            evaluate_cia_and_pii_impact, map_finding_to_risk_category, get_actionable_remediation,
+                        )
+                        _pf = _ParserFinding(
+                            title=f.control_name or f.control_id or "",
+                            severity=f.severity or "MEDIUM",
+                            description=_desc_str,
+                            remediation=f.recommendation or "",
+                            evidence=f.evidence_snippet or "",
+                        )
+                        if not _c_impact:
+                            _c_impact, _is_pii = evaluate_cia_and_pii_impact(_pf)
+                        if not _risk_cat:
+                            _risk_cat = map_finding_to_risk_category(_pf)
+                        if not _remed_actionable:
+                            _remed_actionable = get_actionable_remediation(_pf)
+                    except Exception as _enrich_err:
+                        print(f"[DOCX EXPORT] CIA/risk-category fallback computation failed: {_enrich_err}", flush=True)
+
                 findings_mapped.append({
                     "control_id": f.control_id,
                     "control_name": f.control_name or f.control_id,
@@ -1908,6 +1947,10 @@ def api_export_docx(
                     "source_files": f.source_files or "",
                     "reasoning": f.reasoning or "",
                     "gap_description": f.description or f.gap_detected or "",
+                    "category": _risk_cat or "",
+                    "cia_impact": _c_impact or "",
+                    "is_pii_exposed": _is_pii,
+                    "remediation_actionable": _remed_actionable or "",
                     # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7)
                     "policy_status": f.policy_status,
                     "policy_assessment": f.policy_assessment,
@@ -2159,21 +2202,43 @@ def api_export_pdf(
                 ev_pres = f.evidence_present or ("Compliant" if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") else "No")
                 is_comp = (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") or (pol_pres == "Compliant" and ev_pres == "Compliant")
 
-                # Compute CIA and PII impact if missing
+                # CIA impact / risk category / developer-actionable remediation: read the
+                # real saved columns first (populated for anything scanned since the VAPT
+                # enrichment persistence fix). Bug fixed here: the fallback used to call
+                # evaluate_cia_and_pii_impact(str, str, str) -- a 3-string-arg call against
+                # a function that takes one Finding object -- and imported a function,
+                # _determine_owasp_category, that doesn't exist in control_mapper.py at
+                # all. Both raised immediately and were swallowed by the bare except, so
+                # EVERY finding silently fell through to the hardcoded defaults below --
+                # every VAPT finding in every exported PDF showed risk category "Injection"
+                # and "Confidential (PII Data Present)" regardless of what it actually was.
                 _desc_str = f.description or f.gap_detected or ""
-                _c_impact = getattr(f, "cia_impact", None)
-                _risk_cat = getattr(f, "category", None)
-                _is_pii = getattr(f, "is_pii_exposed", False)
+                _c_impact = f.cia_impact or None
+                _risk_cat = f.category or None
+                _is_pii = bool(f.is_pii_exposed or False)
+                _remed_actionable = f.remediation_actionable or None
 
-                if not _c_impact or not _risk_cat:
+                if not _c_impact or not _risk_cat or not _remed_actionable:
                     try:
-                        from src.core.parsers.control_mapper import evaluate_cia_and_pii_impact, _determine_owasp_category
+                        from src.core.parsers.finding_schema import Finding as _ParserFinding
+                        from src.core.parsers.control_mapper import (
+                            evaluate_cia_and_pii_impact, map_finding_to_risk_category, get_actionable_remediation,
+                        )
+                        _pf = _ParserFinding(
+                            title=f.control_name or f.control_id or "",
+                            severity=f.severity or "MEDIUM",
+                            description=_desc_str,
+                            remediation=f.recommendation or "",
+                            evidence=f.evidence_snippet or "",
+                        )
                         if not _c_impact:
-                            _c_impact, _is_pii = evaluate_cia_and_pii_impact(f.control_name or "", _desc_str, f.severity or "")
+                            _c_impact, _is_pii = evaluate_cia_and_pii_impact(_pf)
                         if not _risk_cat:
-                            _risk_cat = _determine_owasp_category(f.control_name or "", _desc_str, getattr(f, "evidence_snippet", ""))
-                    except Exception:
-                        pass
+                            _risk_cat = map_finding_to_risk_category(_pf)
+                        if not _remed_actionable:
+                            _remed_actionable = get_actionable_remediation(_pf)
+                    except Exception as _enrich_err:
+                        print(f"[PDF EXPORT] CIA/risk-category fallback computation failed: {_enrich_err}", flush=True)
 
                 findings_mapped.append({
                     "control_id": f.control_id,
@@ -2196,9 +2261,10 @@ def api_export_pdf(
                     "source_files": f.source_files or "",
                     "reasoning": f.reasoning or "",
                     "gap_description": _desc_str,
-                    "category": _risk_cat or "Injection",
-                    "cia_impact": _c_impact or "C:Confidential (High - PII Data Present) | I:HIGH | A:NONE",
+                    "category": _risk_cat or "",
+                    "cia_impact": _c_impact or "",
                     "is_pii_exposed": _is_pii,
+                    "remediation_actionable": _remed_actionable or "",
                     # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7)
                     "policy_status": f.policy_status,
                     "policy_assessment": f.policy_assessment,
@@ -2503,7 +2569,7 @@ def api_get_interrupted_checkpoints(request: Request, username: Optional[str] = 
             for ck in checkpoints:
                 # Retrieve session title & owner from AuditReport
                 report = db.query(AuditReport).filter(AuditReport.session_id == ck.session_id).first()
-                if username and report and report.username and report.username.lower() != username.lower():
+                if username and report and report.created_by and report.created_by.lower() != username.lower():
                     continue  # Belongs to a different user — do not leak across users
 
                 title = report.session_title if report else f"Audit Session {ck.session_id[:12]}"

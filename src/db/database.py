@@ -126,6 +126,26 @@ class Finding(Base):
     final_result           = Column(String(50), nullable=True)
     final_reason           = Column(Text, nullable=True)
 
+    # VAPT enrichment fields (src/core/parsers/control_mapper.py::map_findings_list).
+    # These were computed at parse time but never had a column to persist into --
+    # bg_worker.py's VAPT save path silently dropped them, so every saved VAPT
+    # finding lost this data the moment the scan finished. Nullable/no server_default
+    # so the schema-reconciliation in init_db() can add these to existing tables
+    # without touching already-saved rows.
+    category               = Column(String(200), nullable=True)  # Risk category, e.g. "Injection"
+    cia_impact             = Column(String(300), nullable=True)  # e.g. "C:HIGH | I:HIGH | A:NONE"
+    is_pii_exposed         = Column(Boolean, nullable=True)
+    remediation_actionable = Column(Text, nullable=True)         # Developer-actionable fix guidance
+
+    # VAPT dedup identity (src/core/parsers/finding_schema.py::Finding.dedup_key()).
+    # In-memory dedup during a single scan run worked, but nothing checked a new
+    # finding against what a PREVIOUS run on this same session already saved -- since
+    # the DB never stored the CVE/plugin_id/tool identity needed to recompute the key,
+    # re-running a VAPT scan (e.g. after uploading more evidence) duplicated every
+    # finding from files that were already scanned before. Persisting the key makes
+    # cross-run comparison exact instead of guessing from title text.
+    dedup_key               = Column(String(500), nullable=True, index=True)
+
 class AdminAuditLog(Base):
     """
     Audit log tracking administrative actions, force acceptances, and override events.
@@ -630,14 +650,37 @@ def reconcile_schemas(engine):
                         print(f"[SCHEMA WIDEN WARNING] Failed to widen columns for '{table_name}': {widen_err}")
 
                 if not migration_success:
+                    # NEVER silently drop a table to "fix" a failed migration -- this used
+                    # to run DROP TABLE ... CASCADE here, which deletes every row with no
+                    # backup the instant an ALTER TABLE fails for ANY reason. Since
+                    # reconcile_schemas() runs on every single app startup for every table
+                    # (users, audit_reports, findings, evidence_files, ...), a single bad
+                    # migration attempt permanently wiped the entire database on a routine
+                    # restart -- confirmed in production: the users table was reduced to
+                    # just a freshly-reseeded "admin" row, and audit_reports/findings/
+                    # evidence_files were all emptied to 0 rows. Rename the table aside
+                    # instead so create_all() can still build a correctly-shaped fresh
+                    # table (self-healing preserved), but the old data is fully recoverable
+                    # under the backup name rather than gone.
+                    import time as _time
+                    backup_name = f"{table_name}_backup_{int(_time.time())}"
                     try:
                         with engine.begin() as conn:
-                            if engine.dialect.name == "postgresql":
-                                conn.execute(text(f"DROP TABLE IF EXISTS {table_name} CASCADE"))
-                            else:
-                                conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
-                    except Exception as drop_err:
-                        print(f"[SCHEMA RECONCILIATION WARNING] Failed to drop table {table_name}: {drop_err}")
+                            conn.execute(text(f'ALTER TABLE "{table_name}" RENAME TO "{backup_name}"'))
+                        print(
+                            f"[SCHEMA RECONCILIATION] Migration failed for '{table_name}' -- renamed the "
+                            f"existing table to '{backup_name}' instead of dropping it. Its data is intact "
+                            f"under that name; a fresh '{table_name}' will be created with the correct schema. "
+                            f"Manual review/data-copy from '{backup_name}' is recommended.",
+                            flush=True
+                        )
+                    except Exception as rename_err:
+                        print(
+                            f"[SCHEMA RECONCILIATION ERROR] Could not rename '{table_name}' aside either "
+                            f"({rename_err}). Leaving the table exactly as-is rather than risk data loss -- "
+                            f"the missing column(s) may need a manual migration.",
+                            flush=True
+                        )
 
 def _resolve_bootstrap_admin_credentials():
     """

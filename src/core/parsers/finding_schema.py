@@ -108,18 +108,26 @@ class Finding:
         1. Primary: CVE list if present (e.g. CVE:CVE-2025-6218)
         2. Secondary (Same Tool): source_tool + plugin_id (e.g. nessus:242073)
         3. Tertiary (Cross Tool / Non-CVE): source_tool + normalized title
+
+        Capped at 480 chars (the DB column is VARCHAR(500), src/db/database.py's
+        Finding.dedup_key) -- a finding tied to dozens of CVEs (common for EOL/
+        outdated-component findings) or a long scanner-generated title could
+        otherwise produce an unbounded string and crash the DB insert with
+        StringDataRightTruncation on a real scan. Truncation is applied
+        consistently on both write and the pre-seed read of existing keys, so
+        exact-match comparison still works correctly.
         """
         if self.cve_list:
             clean_cves = sorted(set(c.strip().upper() for c in self.cve_list if c and c.strip()))
             if clean_cves:
-                return f"CVE:{':'.join(clean_cves)}"
-        
+                return f"CVE:{':'.join(clean_cves)}"[:480]
+
         tool = (self.source_tool or "generic").lower().strip()
         if self.plugin_id and self.plugin_id.strip():
-            return f"{tool}:{self.plugin_id.strip()}"
-        
+            return f"{tool}:{self.plugin_id.strip()}"[:480]
+
         clean_title = (self.title or "unnamed").lower().strip()
-        return f"{tool}:{clean_title}"
+        return f"{tool}:{clean_title}"[:480]
 
     def to_dict(self) -> dict:
         from dataclasses import asdict

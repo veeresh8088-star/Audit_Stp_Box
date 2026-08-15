@@ -22,6 +22,28 @@ taskkill /F /IM uvicorn.exe /T >nul 2>&1
 taskkill /F /IM llama-server* /T >nul 2>&1
 taskkill /F /IM ollama* /T >nul 2>&1
 powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000,11434,11435,443 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue; if ($p -and $p.ProcessName -notlike '*docker*') { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }" >nul 2>&1
+
+:: Verify port 8000 is actually free before continuing. A crash on the PREVIOUS
+:: run can leave the OS socket held a moment longer than the kill above accounts
+:: for, so the next launch fails to bind: [Errno 10048] only one usage of each
+:: socket address is normally permitted. Retry with a short wait instead of
+:: assuming one taskkill pass was enough.
+set PORT8000_RETRY=0
+:CHECK_PORT_8000
+set PORT8000_STATE=FREE
+for /f %%s in ('powershell -NoProfile -Command "if (Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue) { 'BUSY' } else { 'FREE' }"') do set PORT8000_STATE=%%s
+if "%PORT8000_STATE%"=="BUSY" (
+    set /a PORT8000_RETRY+=1
+    if %PORT8000_RETRY% GEQ 5 (
+        echo [!] Port 8000 still in use after 5 cleanup attempts -- continuing anyway, launch may fail.
+        goto PORT8000_DONE
+    )
+    echo [i] Port 8000 still busy, retrying cleanup ^(attempt %PORT8000_RETRY%/5^)...
+    powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+    timeout /t 1 >nul
+    goto CHECK_PORT_8000
+)
+:PORT8000_DONE
 echo [v] Ports 8000, 11434 ^& 11435 cleared safely without stopping Docker.
 
 
@@ -79,6 +101,7 @@ docker ps > nul 2>&1
 if %errorlevel% equ 0 (
     echo [v] Docker detected. Starting ShaktiDB PostgreSQL container...
     docker-compose up -d shakthidb > nul 2>&1
+    call :DoBackup
 ) else (
     echo [i] Docker is offline/not running. Continuing with local SQLite fallback database.
 )
@@ -97,11 +120,19 @@ set OLLAMA_MAX_LOADED_MODELS=3
 :: rejected clearly past that instead of queuing indefinitely at the LLM server.
 set /a MAX_CONCURRENT_AUDITS=%LLM_SLOTS%*2
 set REDIS_URL=redis://127.0.0.1:6380/0
+:: Lowered from resource_guard.py's 8% default -- this machine typically runs
+:: close to that line already, so 8% was blocking new audits too eagerly.
+:: 5% still leaves a real buffer above the 0.5GB absolute floor.
+set RESOURCE_GUARD_CRITICAL_PERCENT=5
 :: JWT_SECRET intentionally not set here -- that hardcoded value was a real,
 :: exploitable credential (forge any session, including admin) once committed
 :: to source control. src/api/endpoints/auth.py generates and persists a
 :: random secret to data/.jwt_secret on first run if JWT_SECRET isn't set;
 :: set it explicitly here only for a production/multi-instance deployment.
+
+if not exist "%~dp0logs" mkdir "%~dp0logs"
+for /f "tokens=*" %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set RUN_TIMESTAMP=%%t
+set RUN_LOG=%~dp0logs\run_all_%RUN_TIMESTAMP%.log
 
 echo.
 echo [6/6] Launching AISecurityAudit Web Dashboard...
@@ -109,9 +140,57 @@ echo ==================================================
 echo   AICyberAuditBox Local Web Dashboard Active
 echo   Local URL: http://localhost:8000/
 echo   Press Ctrl+C in this terminal to stop server.
+echo   Full output also saved to: %RUN_LOG%
 echo ==================================================
 start http://localhost:8000/
-python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+:: PYTHONUNBUFFERED so output stays real-time in the console even though it's
+:: piped through Tee-Object below -- Python defaults to block-buffered stdout
+:: when it isn't a real terminal, which would otherwise delay/batch log lines.
+:: Tee-Object mirrors everything to the log file so a crash that closes this
+:: window (or a native crash with no Python traceback) still leaves a full
+:: record to read afterward, instead of vanishing with the window.
+set PYTHONUNBUFFERED=1
+python -u -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 2>&1 | powershell -NoProfile -Command "$input | Tee-Object -FilePath '%RUN_LOG%'"
 pause
+goto :EOF
 
+:: ── AUTO-BACKUP: snapshot shakthidb_master BEFORE anything else touches it ──
+:: This exists because the live database was found completely empty on 2026-08-15
+:: with no working backup to recover from -- every user account and every audit
+:: report/finding was unrecoverably gone. Runs once per launch, right after Docker
+:: starts and before the app (and its schema-reconciliation step) ever connects,
+:: so there's always a same-day recovery point regardless of what happens after.
+::
+:: Written as a `call`-able subroutine, not inlined at its call site, because
+:: goto/labels used directly inside a parenthesized if-block (...) reliably
+:: break cmd.exe's parser ("X was unexpected at this time") -- confirmed
+:: reproducible, and almost certainly what caused an earlier unrelated
+:: "'tive' is not recognized" launch failure. `call` is immune to that; it
+:: works correctly from anywhere, including inside a parenthesized block.
+:DoBackup
+if not exist "%~dp0backups" mkdir "%~dp0backups"
+set PG_READY_RETRY=0
+:WAIT_PG_READY
+docker exec shakthidb_service pg_isready -p 15234 -U postgres >nul 2>&1
+if errorlevel 1 (
+    set /a PG_READY_RETRY+=1
+    if %PG_READY_RETRY% GEQ 15 (
+        echo [!] PostgreSQL not ready after 15s -- skipping today's backup, continuing startup.
+        exit /b
+    )
+    timeout /t 1 >nul
+    goto WAIT_PG_READY
+)
+for /f "tokens=*" %%t in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set BACKUP_TIMESTAMP=%%t
+set BACKUP_FILE=%~dp0backups\shakthidb_master_%BACKUP_TIMESTAMP%.sql
+docker exec shakthidb_service pg_dump -p 15234 -U postgres shakthidb_master > "%BACKUP_FILE%" 2>nul
+if errorlevel 1 (
+    echo [!] Backup attempt failed -- continuing startup anyway ^(app availability isn't gated on this^).
+    del "%BACKUP_FILE%" >nul 2>&1
+) else (
+    echo [v] Database backed up to: %BACKUP_FILE%
+    :: Keep only the 20 most recent backups so this doesn't grow unbounded.
+    powershell -NoProfile -Command "Get-ChildItem '%~dp0backups\shakthidb_master_*.sql' | Sort-Object LastWriteTime -Descending | Select-Object -Skip 20 | Remove-Item -Force" >nul 2>&1
+)
+exit /b
 
