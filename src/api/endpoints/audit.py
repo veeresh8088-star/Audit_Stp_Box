@@ -411,7 +411,7 @@ async def api_upload_evidence(
         # own size is even checked, so without this, a large batch of individually
         # "legal" files is still a real memory-exhaustion / DoS vector. ──
         MAX_FILES_PER_REQUEST = 30
-        MAX_TOTAL_REQUEST_BYTES = 300 * 1024 * 1024  # 300 MB
+        MAX_TOTAL_REQUEST_BYTES = 100 * 1024 * 1024  # 100 MB total, matching the per-file cap
         if len(files) > MAX_FILES_PER_REQUEST:
             raise HTTPException(
                 status_code=413,
