@@ -1339,7 +1339,18 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         except Exception as e:
             print(f"[PIPELINE] Failed to update active files status to Reviewing: {e}", flush=True)
 
-        _total_ctrl_count = len(selected_sls_copy)
+        # Was len(selected_sls_copy) -- the count of unique selected control IDs.
+        # In Excel-scoping mode, one control ID can span multiple checklist rows
+        # (e.g. two separate questions both filed under "8.5"), and the audit
+        # loop (inside generate_ollama_findings) iterates per ROW via
+        # _build_controls_for_audit(), not per unique control ID. Using the
+        # unique-ID count here instead produced checkpoint displays like
+        # "(7/6 done)" once more rows than the stated total had completed.
+        # Purely a display value -- never used in any resume/completion
+        # decision -- but confusing and worth matching reality. Re-derives the
+        # same list generate_ollama_findings will build (cheap: no LLM calls,
+        # just dict construction) so the two totals agree.
+        _total_ctrl_count = len(_build_controls_for_audit(selected_sls_copy, custom_evidence))
         _batch_sz = 1 if ("7B" in ai_model or "8B" in ai_model or "9B" in ai_model or "Escalation" in ai_model) else 4
 
         # On fresh start: create a new checkpoint.
