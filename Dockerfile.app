@@ -79,6 +79,15 @@ USER appuser
 # so they are baked into the image cache for 100% offline air-gapped operation.
 RUN python -c "from doctr.models import ocr_predictor; ocr_predictor(pretrained=True); from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); CrossEncoder('BAAI/bge-reranker-base')"
 
+# Hard offline guarantee at container runtime: the models above are already
+# cached in this image layer, but without these flags transformers/
+# sentence-transformers/huggingface-hub can still attempt an outbound
+# metadata call on cold start before falling back to cache -- on a network
+# that hard-blocks DNS (the customer's actual air-gapped site) that's a
+# hang/delay, not a clean local-only load. Set only after the download step
+# above, which still needs real network access at build time.
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+
 EXPOSE 8000
 
 # 1. Generate/reuse a persisted JWT_SECRET (docker/generate_secrets.sh).

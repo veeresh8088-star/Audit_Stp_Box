@@ -987,7 +987,7 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         try {
             const sessionBody = new FormData();
             sessionBody.append("session_title", finalTitle);
-            sessionBody.append("framework", "ISO 27001");
+            sessionBody.append("framework", framework);
             sessionBody.append("username", currentUser ? currentUser.username : "admin");
             const saveResp = await authFetch(`${API_BASE}/audit/sessions`, {
                 method: "POST",
@@ -1837,6 +1837,17 @@ function handleEvidenceFolderUpload(e) {
 
 
 async function uploadFiles(files) {
+    // Auditees must route their evidence to a specific auditor before uploading --
+    // otherwise the files land in a session nobody is looking for. Only applies to
+    // the auditee flow; the auditor's own workspace upload has no such selector.
+    if (currentUser && currentUser.role === "auditee") {
+        const targetAuditorSelector = document.getElementById("target-auditor-selector");
+        if (!targetAuditorSelector || !targetAuditorSelector.value) {
+            alert("⚠️ Please select a Target Auditor before uploading evidence.");
+            return;
+        }
+    }
+
     const dropZone = document.getElementById("drop-zone");
     const countBadge = document.getElementById("evidence-count-badge");
     const registry = document.getElementById("uploaded-files-registry");

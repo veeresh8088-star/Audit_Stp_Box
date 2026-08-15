@@ -743,26 +743,47 @@ def init_db():
             pool_pre_ping=True
         )
 
-        # Quick check if database and tables already exist and are initialized
-        try:
-            with eng_m.connect() as conn:
-                conn.execute(text("SELECT 1 FROM users LIMIT 1"))
-            # Database and tables exist, skip bootstrap but ALWAYS run reconcile_schemas to ensure columns exist
-            engine_master = eng_m
-            engine_slave1 = eng_s1
-            engine_slave2 = eng_s2
-            db_label = "ShaktiDB"
-            
-            reconcile_schemas(eng_m)
-            reconcile_schemas(eng_s1)
-            reconcile_schemas(eng_s2)
-            
-            Base.metadata.create_all(bind=eng_m)
-            Base.metadata.create_all(bind=eng_s1)
-            Base.metadata.create_all(bind=eng_s2)
-            return eng_m, "ShaktiDB"
-        except Exception:
-            pass
+        # Quick check if database and tables already exist and are initialized.
+        # Retried with backoff instead of failing on the first attempt: after an
+        # unclean shutdown (e.g. the terminal window closed while a scan was
+        # running, or Docker itself restarting), Postgres can need real time on
+        # its next start to replay its WAL and finish crash recovery. A single
+        # failed connection attempt during that window looks identical to "this
+        # database doesn't exist" to the bare except below -- which used to fall
+        # straight through to the bootstrap path further down and recreate
+        # shakthidb_master from scratch, discarding every table's data, even
+        # though the real database was still there and just not ready yet. This
+        # is the most likely explanation for the DB being found completely
+        # empty on 2026-08-15 with no prior warning.
+        _last_connect_err = None
+        for _attempt in range(8):
+            try:
+                with eng_m.connect() as conn:
+                    conn.execute(text("SELECT 1 FROM users LIMIT 1"))
+                if _attempt > 0:
+                    print(f"[DATABASE] Connected to ShaktiDB after {_attempt} retr{'y' if _attempt == 1 else 'ies'} "
+                          f"(likely still finishing startup/recovery) -- proceeding normally, NOT bootstrapping.", flush=True)
+                # Database and tables exist, skip bootstrap but ALWAYS run reconcile_schemas to ensure columns exist
+                engine_master = eng_m
+                engine_slave1 = eng_s1
+                engine_slave2 = eng_s2
+                db_label = "ShaktiDB"
+
+                reconcile_schemas(eng_m)
+                reconcile_schemas(eng_s1)
+                reconcile_schemas(eng_s2)
+
+                Base.metadata.create_all(bind=eng_m)
+                Base.metadata.create_all(bind=eng_s1)
+                Base.metadata.create_all(bind=eng_s2)
+                return eng_m, "ShaktiDB"
+            except Exception as _connect_err:
+                _last_connect_err = _connect_err
+                if _attempt < 7:
+                    time.sleep(1.5)
+                continue
+        print(f"[DATABASE WARNING] Could not connect to ShaktiDB after 8 retries (~12s): {_last_connect_err}. "
+              f"Proceeding to check whether it needs bootstrapping.", flush=True)
 
         # Fallback: Bootstrapping and schema creation
         # Connect to the default 'shakthidb' database on port 15234 to bootstrap databases if they do not exist
@@ -842,6 +863,12 @@ def init_db():
         return eng_m, "ShaktiDB"
 
     except Exception as pg_err:
+        # REQUIRE_POSTGRES is set for every containerized deployment (see
+        # docker-compose.yml / docker-compose.customer.yml) -- the customer bundle
+        # must never silently land audit data in a throwaway container-local
+        # SQLite file. Unset (native/dev runs), behavior below is unchanged.
+        if os.environ.get("REQUIRE_POSTGRES"):
+            raise
         print(f"[DATABASE WARNING] PostgreSQL/ShaktiDB is offline or unreachable: {pg_err}. Auto-switching to local SQLite fallback database...", flush=True)
         os.makedirs("data/sqlite", exist_ok=True)
         sqlite_path = "data/sqlite/shakthidb_sqlite.db"

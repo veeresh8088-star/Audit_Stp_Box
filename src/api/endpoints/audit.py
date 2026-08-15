@@ -306,6 +306,12 @@ def api_get_auditee_sessions(request: Request, username: Optional[str] = None):
             else:
                 # Auditor/admin view: only sessions a real auditee actually submitted.
                 query = db.query(AuditReport).filter(AuditReport.auditee_id.isnot(None))
+                if auth_user.get("role") != "admin":
+                    # A non-admin auditor only sees sessions the auditee specifically
+                    # routed to them via "Target Auditor Assignment" -- previously this
+                    # showed every auditee's submission to every auditor account,
+                    # regardless of who it was actually sent to.
+                    query = query.filter(AuditReport.assigned_auditor_username == auth_user.get("username"))
 
             reports = query.order_by(AuditReport.created_at.desc()).all()
 
@@ -567,12 +573,17 @@ async def api_upload_evidence(
 
 @router.get("/users/auditors")
 def api_get_registered_auditors(request: Request):
-    """Returns list of real registered users with auditor or admin role."""
+    """Returns list of real registered auditor accounts only.
+
+    Deliberately excludes admin: this list feeds the auditee's "Target
+    Auditor Assignment" dropdown, which is meant to route evidence to a
+    working auditor, not to the platform admin account.
+    """
     _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
-            auditors = db.query(User).filter(User.role.in_(["auditor", "admin", "AUDITOR", "ADMIN"])).all()
+            auditors = db.query(User).filter(User.role.in_(["auditor", "AUDITOR"])).all()
             res = []
             for a in auditors:
                 res.append({
@@ -586,20 +597,34 @@ def api_get_registered_auditors(request: Request):
 
 @router.post("/assign-auditor")
 def api_assign_auditor(req: AssignAuditorRequest, request: Request):
-    """Assigns an audit session and its files to a specific real Auditor user."""
+    """Assigns an audit session and its files to a specific real Auditor user.
+
+    Called by the auditee who owns the session (the "Target Auditor
+    Assignment" dropdown on their Upload Evidence tab) -- the old
+    role-gate here (admin/auditor only) rejected every real auditee caller
+    with a 403, since "auditee" was never in the allowed list. Replaced with
+    an ownership check (_assert_session_access) so the actual owner of the
+    session -- whichever role they are -- can assign it, while still
+    blocking one auditee from hijacking another's session by session_id.
+    """
     auth_user = _require_auth(request)
-    if auth_user.get("role") not in ("admin", "auditor"):
-        raise HTTPException(status_code=403, detail="Access denied. Only auditors/admins can assign sessions.")
     db = SessionLocal()
     try:
         with force_master():
             report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
             if not report:
                 raise HTTPException(status_code=404, detail="Audit session not found")
-            auditor = db.query(User).filter(User.username == req.assigned_auditor_username).first()
+            _assert_session_access(db, report, auth_user)
+
+            auditor = db.query(User).filter(
+                User.username == req.assigned_auditor_username,
+                User.role.in_(["auditor", "AUDITOR"])
+            ).first()
+            if not auditor:
+                raise HTTPException(status_code=400, detail="Target must be a real registered auditor account.")
+
             report.assigned_auditor_username = req.assigned_auditor_username
-            if auditor:
-                report.assigned_auditor_id = auditor.id
+            report.assigned_auditor_id = auditor.id
             db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id).update(
                 {EvidenceFile.assigned_auditor_username: req.assigned_auditor_username},
                 synchronize_session=False
@@ -654,17 +679,43 @@ def api_get_auditee_document_history(request: Request, username: Optional[str] =
     finally:
         db.close()
 
+def _assert_session_access(db, report, auth_user):
+    """Raises 403 unless the caller owns this audit session: its creator, its
+    assigned auditee, its assigned auditor, or an admin. Session IDs are
+    unguessable uuid4 hex, but that's obscurity, not access control -- one
+    leaked/shared session_id (a pasted link, a log line, a shared screen)
+    would otherwise expose another auditor's live progress, evidence list,
+    and findings to any logged-in user, since _require_auth() only checks
+    "is this JWT valid", not "does this JWT's owner have any relationship to
+    this session". Mirrors the same "Strict Account Isolation" ownership rule
+    already enforced in api_get_sessions (created_by == caller, or caller is
+    the assigned auditee) -- this just closes the same gap on the
+    session_id-keyed endpoints, which had no equivalent check at all.
+    """
+    if auth_user.get("role") == "admin":
+        return
+    if report.created_by == auth_user.get("username"):
+        return
+    if report.assigned_auditor_username and report.assigned_auditor_username == auth_user.get("username"):
+        return
+    if report.auditee_id:
+        user = db.query(User).filter(User.username == auth_user.get("username")).first()
+        if user and report.auditee_id == user.id:
+            return
+    raise HTTPException(status_code=403, detail="Access denied. You do not have access to this session.")
+
 @router.get("/evidence")
 def api_get_session_evidence(session_id: str, request: Request):
     """Returns list of active (non-deleted) uploaded evidence files for the given session ID."""
-    _require_auth(request)
+    auth_user = _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
             report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
             if not report:
                 return {"success": True, "files": []}
-            
+            _assert_session_access(db, report, auth_user)
+
             files = db.query(EvidenceFile).filter(
                 EvidenceFile.report_id == report.id,
                 (EvidenceFile.is_deleted == False) | (EvidenceFile.is_deleted.is_(None))
@@ -876,7 +927,8 @@ def api_start_audit(req: StartAuditRequest, request: Request):
                     "audit_mode": req.audit_mode,
                     "file_registry": file_registry,
                     "custom_evidence": req.custom_evidence,
-                    "custom_docs": req.custom_documents
+                    "custom_docs": req.custom_documents,
+                    "username": auth_user.get("username") or req.username
                 },
                 daemon=True
             )
@@ -920,7 +972,15 @@ def api_get_my_active_audits(request: Request):
 
 @router.get("/status/{session_id}")
 def api_get_status(session_id: str, request: Request):
-    _require_auth(request)
+    auth_user = _require_auth(request)
+    db = SessionLocal()
+    try:
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if report:
+                _assert_session_access(db, report, auth_user)
+    finally:
+        db.close()
     with _bg_lock:
         is_running = session_id in _bg_running
         progress = _bg_store["progress"].get(session_id)
@@ -1000,7 +1060,7 @@ def api_get_progress(session_id: str, request: Request):
 
 @router.get("/findings")
 def api_get_findings(request: Request, session_id: str, role: Optional[str] = None, saved_only: bool = False, include_info: bool = False):
-    _require_auth(request)
+    auth_user = _require_auth(request)
     db = SessionLocal()
     try:
         from src.core.controls_data import USE_CASES
@@ -1017,7 +1077,8 @@ def api_get_findings(request: Request, session_id: str, role: Optional[str] = No
             report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
             if not report:
                 raise HTTPException(status_code=404, detail="Audit session not found.")
-                
+            _assert_session_access(db, report, auth_user)
+
             query = db.query(Finding).filter(Finding.report_id == report.id)
             if role == "auditee":
                 # Strict Auditee Isolation: Only return delivered findings saved to Shakthi DB (no raw auditor draft scans)
@@ -1149,14 +1210,22 @@ def api_get_findings(request: Request, session_id: str, role: Optional[str] = No
 
 @router.put("/findings/{finding_id}")
 def api_update_finding(finding_id: int, req: UpdateFindingRequest, request: Request):
-    _require_auth(request)
+    """Updates a finding's status/content. finding_id is a small sequential
+    integer, not a random UUID -- trivially enumerable -- so ownership must be
+    checked explicitly here, unlike session_id-keyed endpoints where the ID
+    itself is at least unguessable.
+    """
+    auth_user = _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
             finding = db.query(Finding).filter(Finding.id == finding_id).first()
             if not finding:
                 raise HTTPException(status_code=404, detail="Finding not found.")
-                
+            report = db.query(AuditReport).filter(AuditReport.id == finding.report_id).first()
+            if report:
+                _assert_session_access(db, report, auth_user)
+
             finding.status = req.status
             if req.severity: finding.severity = req.severity
             if req.description: finding.description = req.description
@@ -1217,6 +1286,8 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest, request: Requ
             db.commit()
             log_system_event("FINDING_UPDATED", "INFO", f"Finding #{finding_id} updated to '{req.status}' (control: {finding.control_id})", session_id=str(finding.report_id))
             return {"success": True, "message": "Finding successfully updated and saved to Shakthi DB."}
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"[UPDATE FINDING ERROR] finding_id={finding_id} | {e}", flush=True)
         raise HTTPException(status_code=500, detail="Database update failed. Please try again.")
@@ -1427,8 +1498,16 @@ def api_get_admin_logs(request: Request):
 
 @router.get("/benchmark/sessions")
 def api_get_benchmark_sessions(request: Request):
-    """Retrieves real auditor session telemetry logs recorded during audits."""
-    _require_auth(request)
+    """Retrieves real auditor session telemetry logs recorded during audits.
+
+    Admin-only: this is cross-session telemetry (token usage, file names,
+    compliance counts) spanning every auditor's work, not scoped to the
+    caller -- previously any authenticated user, including an auditee,
+    could read it with a bare _require_auth() check.
+    """
+    auth_user = _require_auth(request)
+    if auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     try:
         from src.core.token_tracker import get_all_benchmark_records
         records = get_all_benchmark_records()
@@ -1456,8 +1535,10 @@ class AggregateSessionsRequest(BaseModel):
 
 @router.post("/benchmark/aggregate")
 def api_aggregate_benchmark_sessions(request: Request, body: AggregateSessionsRequest = None):
-    """Combines and aggregates metrics across selected real auditor sessions."""
-    _require_auth(request)
+    """Combines and aggregates metrics across selected real auditor sessions. Admin-only -- see api_get_benchmark_sessions."""
+    auth_user = _require_auth(request)
+    if auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     try:
         from src.core.token_tracker import aggregate_audit_sessions
         sids = body.session_ids if body and body.session_ids else None
@@ -1469,8 +1550,10 @@ def api_aggregate_benchmark_sessions(request: Request, body: AggregateSessionsRe
 
 @router.get("/benchmark/export")
 def api_export_benchmark_excel(request: Request):
-    """Downloads styled executive Excel benchmark report."""
-    _require_auth(request)
+    """Downloads styled executive Excel benchmark report. Admin-only -- see api_get_benchmark_sessions."""
+    auth_user = _require_auth(request)
+    if auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     try:
         from fastapi.responses import FileResponse
         from src.core.token_tracker import BENCHMARK_EXCEL_PATH, get_all_benchmark_records, generate_excel_benchmark_report
@@ -2367,8 +2450,28 @@ def api_deliver_report_v2(req: DeliverReportRequest, request: Request):
 
 @router.get("/export-token-benchmark")
 def api_export_token_benchmark(request: Request, session_id: Optional[str] = None):
-    """Exports Excel spreadsheet containing token consumption, latency, text length, and file size benchmarks."""
-    _require_auth(request)
+    """Exports Excel spreadsheet containing token consumption, latency, text length, and file size benchmarks.
+
+    Without a session_id (or "all"), this exports every session's telemetry --
+    admin-only. With a specific session_id, the caller must own that session
+    (same rule as _assert_session_access elsewhere): its creator, its
+    assigned auditor/auditee, or admin.
+    """
+    auth_user = _require_auth(request)
+    if not session_id or session_id.lower() == "all":
+        if auth_user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Access denied. Admin only for the full export -- pass a session_id to export just your own session.")
+    else:
+        db_check = SessionLocal()
+        try:
+            with force_master():
+                report_check = db_check.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+                if report_check:
+                    _assert_session_access(db_check, report_check, auth_user)
+                elif auth_user.get("role") != "admin":
+                    raise HTTPException(status_code=403, detail="Access denied.")
+        finally:
+            db_check.close()
     import os
     import json
     from starlette.responses import FileResponse
@@ -2483,7 +2586,7 @@ def api_export_token_benchmark(request: Request, session_id: Optional[str] = Non
 
 @router.post('/findings/{finding_id}/reject-doc')
 def api_reject_doc_from_finding(finding_id: int, req: dict, request: Request):
-    _require_auth(request)
+    auth_user = _require_auth(request)
     db = SessionLocal()
     try:
         doc_name = req.get('doc_name', '').strip()
@@ -2495,6 +2598,9 @@ def api_reject_doc_from_finding(finding_id: int, req: dict, request: Request):
             finding = db.query(Finding).filter(Finding.id == finding_id).first()
             if not finding:
                 raise HTTPException(status_code=404, detail='Finding not found')
+            report = db.query(AuditReport).filter(AuditReport.id == finding.report_id).first()
+            if report:
+                _assert_session_access(db, report, auth_user)
             current_docs = [s.strip() for s in (finding.source_files or '').split(',') if s.strip()]
             updated_docs = [s for s in current_docs if s != doc_name]
             finding.source_files = ', '.join(updated_docs)
@@ -2522,7 +2628,7 @@ def api_reject_doc_from_finding(finding_id: int, req: dict, request: Request):
 
 @router.post('/findings/{finding_id}/restore-doc')
 def api_restore_doc_to_finding(finding_id: int, req: dict, request: Request):
-    _require_auth(request)
+    auth_user = _require_auth(request)
     db = SessionLocal()
     try:
         doc_name = req.get('doc_name', '').strip()
@@ -2532,6 +2638,9 @@ def api_restore_doc_to_finding(finding_id: int, req: dict, request: Request):
             finding = db.query(Finding).filter(Finding.id == finding_id).first()
             if not finding:
                 raise HTTPException(status_code=404, detail='Finding not found')
+            report = db.query(AuditReport).filter(AuditReport.id == finding.report_id).first()
+            if report:
+                _assert_session_access(db, report, auth_user)
             current_docs = [s.strip() for s in (finding.source_files or '').split(',') if s.strip()]
             if doc_name not in current_docs:
                 current_docs.append(doc_name)
@@ -2594,7 +2703,7 @@ def api_get_interrupted_checkpoints(request: Request, username: Optional[str] = 
 
 @router.post('/resume-checkpoint')
 def api_resume_checkpoint(req: dict, background_tasks: BackgroundTasks, request: Request):
-    _require_auth(request)
+    auth_user = _require_auth(request)
     session_id = req.get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="Missing session_id")
@@ -2674,7 +2783,8 @@ def api_resume_checkpoint(req: dict, background_tasks: BackgroundTasks, request:
                 None,
                 None,
                 None,
-                already_done_ids   # ← per-control skip list
+                already_done_ids,   # ← per-control skip list
+                auth_user.get("username")
             )
 
             return {

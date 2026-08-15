@@ -3,14 +3,10 @@ uvicorn[standard]
 python-multipart
 requests
 pdfplumber
-chromadb
 sentence-transformers
 pandas
-python-dotenv
 sqlalchemy
 psycopg2-binary
-pywhatkit
-anthropic
 openpyxl
 xlrd>=2.0.1
 olefile>=0.46
@@ -21,10 +17,8 @@ pyotp
 bcrypt
 qrcode
 pydantic>=2.0
-langchain>=0.1.0
 langgraph>=0.0.10
 langchain-ollama>=0.1.0
-easyocr
 python-doctr[torch]
 numpy
 PyJWT>=2.8.0
@@ -38,8 +32,4 @@ cvss>=3.1
 lxml>=5.0.0
 sentry-sdk[fastapi]>=2.0.0
 rank-bm25>=0.2.2
-
-
-
-
 

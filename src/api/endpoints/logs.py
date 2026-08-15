@@ -24,7 +24,9 @@ def api_get_system_events(
     page: int = Query(0, ge=0),
     page_size: int = Query(20, ge=1, le=100)
 ):
-    _require_auth(request)  # Admin/auditor auth required
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     db = SessionLocal()
     try:
         query = db.query(SystemEvent)
@@ -71,7 +73,9 @@ def api_get_audit_trail(
     page: int = Query(0, ge=0),
     page_size: int = Query(20, ge=1, le=100)
 ):
-    _require_auth(request)  # Auth required
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     db = SessionLocal()
     try:
         query = db.query(AuditTrail)
@@ -104,7 +108,9 @@ def api_get_audit_trail(
 
 @router.get("/developer")
 def api_get_developer_logs(request: Request):
-    _require_auth(request)  # Auth required — logs contain sensitive server info
+    user = _require_auth(request)  # logs contain sensitive server info
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     if not os.path.exists(LOG_PATH):
         return {"success": True, "logs": "", "message": "No logs recorded yet."}
     
@@ -147,12 +153,15 @@ def api_purge_logs(request: Request, days: int = Query(90, ge=1)):
 # table in the Admin Dashboard. Falls back to zeros if Redis is offline.
 # ─────────────────────────────────────────────────────────────────────────────
 @router.get("/live-metrics")
-def api_get_live_metrics(limit: int = 500):
+def api_get_live_metrics(request: Request, limit: int = 500):
     """
     Returns live token counts, latency, file sizes, error counts, and
     per-session active auditor metrics from Redis or ShaktiDB fallback.
     Accepts optional ?limit= query parameter (defaults to 500).
     """
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     try:
         from src.core.redis_metrics import get_live_metrics
         data = get_live_metrics(limit=limit)
@@ -239,11 +248,13 @@ def api_export_system_logs_excel(
     request: Request,
     auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
 ):
-    _require_auth(request)
     """
     Download System Audit Event Logs as a styled Excel (.xlsx) file.
     Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
     """
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     from src.core.token_tracker import generate_excel_system_logs_report
     logs = _fetch_system_events(auditor_user)
     ts   = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -267,11 +278,13 @@ def api_export_system_logs_pdf(
     request: Request,
     auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
 ):
-    _require_auth(request)
     """
     Download System Audit Event Logs as an executive PDF (.pdf) file.
     Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
     """
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     from src.core.token_tracker import generate_pdf_system_logs_report
     logs = _fetch_system_events(auditor_user)
     ts   = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -295,11 +308,13 @@ def api_export_benchmark_excel(
     request: Request,
     auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
 ):
-    _require_auth(request)
     """
     Download Telemetry Benchmark Report as a styled Excel (.xlsx) file.
     Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
     """
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     from src.core.token_tracker import generate_excel_benchmark_report
     records = _fetch_benchmark_records(auditor_user)
     ts      = _dt.utcnow().strftime("%Y%m%d_%H%M%S")
@@ -323,11 +338,13 @@ def api_export_benchmark_pdf(
     request: Request,
     auditor_user: Optional[str] = Query(None, description="Filter by auditor username")
 ):
-    _require_auth(request)
     """
     Download Telemetry Benchmark Report as an executive PDF (.pdf) file.
     Supports optional ?auditor_user= filter. Works with PostgreSQL & SQLite.
     """
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
     from src.core.token_tracker import generate_pdf_benchmark_report
     records = _fetch_benchmark_records(auditor_user)
     ts      = _dt.utcnow().strftime("%Y%m%d_%H%M%S")

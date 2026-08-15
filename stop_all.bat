@@ -19,8 +19,15 @@ powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 11434,11435 -Sta
 
 echo.
 echo [3/3] Stopping Docker Database Container (ShaktiDB)...
-docker-compose down >nul 2>&1
-docker stop shakthidb_service >nul 2>&1
+:: -t 30 gives Postgres a real 30s to shut down cleanly (checkpoint + flush)
+:: instead of Docker's default ~10s grace period before SIGKILL. Too short a
+:: window here -- especially if Postgres was mid-write when this ran, e.g. an
+:: audit actively saving findings -- forces WAL crash-recovery on the NEXT
+:: start, which is what actually triggered the empty-database incident this
+:: was fixed alongside (src/db/database.py's init_db() retry logic protects
+:: against that race if it still happens; this reduces how often it can).
+docker-compose down -t 30 >nul 2>&1
+docker stop -t 30 shakthidb_service >nul 2>&1
 
 echo.
 echo ==================================================

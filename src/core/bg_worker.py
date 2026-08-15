@@ -20,15 +20,22 @@ from src.db.database import (
     get_all_custom_controls
 )
 
-def log_system_event(event_type, severity, details, session_id=None, actor="rk1@gmail.com"):
-    """Logs an audit error/warning/event into SystemEvent for the Privacy-Safe System Log Trail."""
+def log_system_event(event_type, severity, details, session_id=None, actor="System"):
+    """Logs an audit error/warning/event into SystemEvent for the Privacy-Safe System Log Trail.
+
+    Default actor is "System", not a specific person -- most callers that omit
+    `actor` are logging system-initiated events (LLM timeouts, malware blocks,
+    port-lock failures, background thread exceptions), not a real user's
+    action, so attributing them to one specific hardcoded email was both
+    misleading and a minor accuracy/privacy issue in the admin log trail.
+    """
     try:
         with force_master():
             db = SessionLocal()
             db.add(SystemEvent(
                 event_type=event_type,
                 severity=severity,
-                actor=actor or "Auditor",
+                actor=actor or "System",
                 session_id=session_id or "System",
                 meta=details
             ))
@@ -494,7 +501,7 @@ def get_global_resumable_checkpoint():
         finally:
             db.close()
 
-def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None):
+def generate_ollama_findings(context, file_names_list, selected_sls, model_choice, bg_key=None, batch_size=None, checkpoint_session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None, username=None):
     os.environ["RAG_RERANK_MODE"] = "quick" if "quick" in str(audit_mode).lower() else "deep"
     llm_model = _resolve_llm_model(model_choice)
     controls = _build_controls_for_audit(selected_sls, custom_evidence)
@@ -1194,7 +1201,13 @@ Return format: ["topic1", "topic2", ...]"""
             total_text_chunks = max(1, int(text_chars / 500))
 
         file_types_str = ", ".join([f"{ext.upper()}: {cnt}" for ext, cnt in file_types_summary.items()]) if file_types_summary else "N/A"
-        auditor_user = getattr(locals().get("req", None), "auditor_username", None) or os.environ.get("CURRENT_AUDITOR", "rk1@gmail.com")
+        # Previously: getattr(locals().get("req", None), "auditor_username", None) or
+        # os.environ.get("CURRENT_AUDITOR", "rk1@gmail.com") -- this function has no
+        # local named "req" and CURRENT_AUDITOR is never set anywhere in the codebase,
+        # so that always evaluated to the literal hardcoded fallback regardless of who
+        # actually ran the audit. `username` is now a real parameter threaded down from
+        # the authenticated request (api_start_audit -> _run_ollama_bg -> here).
+        auditor_user = username or "Unknown Auditor"
 
         summary_box = f"""====================================================================================
  • Session ID                      : {checkpoint_session_id or bg_key or 'SESSION-LATEST'}
@@ -1249,7 +1262,7 @@ Return format: ["topic1", "topic2", ...]"""
 # Without --mlock, the OS manages memory like a normal app (swap to disk when
 # tight), so queuing is unnecessary — worst case is slower, never a crash.
 
-def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None):
+def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=None, audit_mode="Deep", custom_docs=None, custom_evidence=None, file_registry=None, already_done_ids=None, username=None):
     print(f"[_run_ollama_bg] Starting thread for key {bg_key} with model {ai_model}...", flush=True)
     _sid = session_id or bg_key
     try:
@@ -1322,7 +1335,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 for f_data in files_data
             )
             _file_mb_pre = round(_total_file_bytes_pre / (1024 * 1024), 3)
-            _auditor_pre = os.environ.get("CURRENT_AUDITOR", "Auditor")
+            _auditor_pre = username or "Unknown Auditor"
             _rm.session_start(
                 session_id=_sid,
                 auditor=_auditor_pre,
@@ -1384,7 +1397,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             context_str, file_names_list, selected_sls_copy, ai_model, bg_key=bg_key,
             checkpoint_session_id=_sid, audit_mode=audit_mode,
             custom_docs=custom_docs, custom_evidence=custom_evidence, file_registry=file_registry,
-            already_done_ids=already_done_ids or []
+            already_done_ids=already_done_ids or [], username=username
         )
         if len(res) == 4:
             resolved_combined, findings_combined, all_results_combined, is_resource_paused = res

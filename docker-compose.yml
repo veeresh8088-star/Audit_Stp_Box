@@ -62,7 +62,7 @@
     build:
       context: .
       dockerfile: Dockerfile.app
-    image: aicyberauditbox-app:2.1
+    image: aicyberauditbox-app:2.7
     container_name: aicyberauditbox_app
     # Shares shakthidb's network namespace so "localhost:15234" inside this
     # container genuinely reaches Postgres, matching database.py's hardcoded
@@ -85,6 +85,9 @@
       - LLM_HOSTS=llm:11434
       - EMBEDDING_HOST=http://llm-embed:11435
       - REDIS_URL=redis://redis:6379/0
+      # Every containerized deployment must use ShaktiDB -- never silently fall
+      # back to the container-local SQLite file (see database.py's except branch).
+      - REQUIRE_POSTGRES=1
       # JWT_SECRET intentionally NOT set here -- docker/generate_secrets.sh
       # auto-generates and persists a unique one to the app-data volume on
       # first boot if this isn't provided. Set it explicitly here (or via a
