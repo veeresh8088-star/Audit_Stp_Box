@@ -887,6 +887,18 @@ def api_stop_audit(session_id: str, request: Request):
     return {"success": True, "message": "Scan stopped successfully."}
 
 
+@router.get("/my-active-audits")
+def api_get_my_active_audits(request: Request):
+    """Returns the calling auditor's own currently-running audit session IDs.
+    Used by the frontend to warn before starting a new session if this
+    auditor already has one actively processing, and offer to stop it."""
+    auth_user = _require_auth(request)
+    auditor_id = auth_user.get("username")
+    with _bg_lock:
+        active = [s for s in _auditor_sessions.get(auditor_id, set()) if s in _bg_running]
+    return {"success": True, "active_sessions": active}
+
+
 @router.get("/status/{session_id}")
 def api_get_status(session_id: str, request: Request):
     _require_auth(request)

@@ -826,6 +826,27 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         let finalTitle = customTitle || defaultTitle;
 
         if (!skipPrompt && customTitle === null) {
+            // Only this auditor's own running audits are checked -- other
+            // auditors' active sessions never block or interrupt this flow.
+            try {
+                const activeResp = await authFetch(`${API_BASE}/audit/my-active-audits`);
+                const activeData = await activeResp.json();
+                const activeSessions = (activeData.success && activeData.active_sessions) ? activeData.active_sessions : [];
+                if (activeSessions.length > 0) {
+                    const proceed = confirm(
+                        `⚠️ You have ${activeSessions.length} audit(s) currently running:\n\n` +
+                        activeSessions.map(s => `• ${s}`).join('\n') +
+                        `\n\nStarting a new session will STOP the running audit(s) and their in-progress scan will be lost. Continue?`
+                    );
+                    if (!proceed) return;
+                    for (const sid of activeSessions) {
+                        await authFetch(`${API_BASE}/audit/stop/${sid}`, { method: "POST" }).catch(() => {});
+                    }
+                    showToast("⏹️ Stopped previous running audit(s).", "info");
+                }
+            } catch (err) {
+                console.error("Error checking active audits:", err);
+            }
             openNewSessionModal();
             return;
         }
