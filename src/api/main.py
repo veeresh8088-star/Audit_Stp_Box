@@ -3,6 +3,20 @@ import asyncio
 import os
 import warnings
 
+# Windows' default console codepage (cp1252) can't encode emoji used in several
+# log/print statements (e.g. audit.py's "started" message) -- that raised an
+# unhandled UnicodeEncodeError and crashed the request entirely (500 Internal
+# Server Error with no JSON body) any time a print() with an emoji ran inside
+# a request handler on a plain Windows terminal. Reconfiguring stdout/stderr
+# to UTF-8 here, before anything else prints, fixes it at the source instead
+# of chasing every individual print statement.
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # Silence third-party library deprecation/version noise (LangChain / Pydantic V1)
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message=".*Pydantic.*")

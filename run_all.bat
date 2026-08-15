@@ -95,7 +95,11 @@ set OLLAMA_NUM_PARALLEL=4
 set OLLAMA_MAX_LOADED_MODELS=3
 set MAX_CONCURRENT_AUDITS=%LLM_SLOTS%
 set REDIS_URL=redis://127.0.0.1:6380/0
-set JWT_SECRET=3f955ad04cac120284051dc8bdaed7320dfeaba546860e8a3507dc8583a06ec9
+:: JWT_SECRET intentionally not set here -- that hardcoded value was a real,
+:: exploitable credential (forge any session, including admin) once committed
+:: to source control. src/api/endpoints/auth.py generates and persists a
+:: random secret to data/.jwt_secret on first run if JWT_SECRET isn't set;
+:: set it explicitly here only for a production/multi-instance deployment.
 
 echo.
 echo [6/6] Launching AISecurityAudit Web Dashboard...
