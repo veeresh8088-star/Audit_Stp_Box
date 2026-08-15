@@ -405,9 +405,23 @@ async def api_upload_evidence(
             report = get_or_create_audit_report(db, session_id, username=username)
             report_id = report.id
 
+        # ── REQUEST-LEVEL LIMITS: cap file count and total bytes per upload request.
+        # The per-file 100MB check below doesn't stop e.g. 50 files at 99MB each
+        # (~5GB) in one request -- each file is read fully into memory before its
+        # own size is even checked, so without this, a large batch of individually
+        # "legal" files is still a real memory-exhaustion / DoS vector. ──
+        MAX_FILES_PER_REQUEST = 30
+        MAX_TOTAL_REQUEST_BYTES = 300 * 1024 * 1024  # 300 MB
+        if len(files) > MAX_FILES_PER_REQUEST:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Too many files in one upload ({len(files)}). Please upload at most {MAX_FILES_PER_REQUEST} files at a time."
+            )
+
         uploaded_details = []
         blocked_details = []
         new_evidence_records = []  # Collect all new DB records first
+        total_bytes_so_far = 0
 
         for f in files:
             # ── FIX 1: async await → non-blocking stream read from all 10 tabs at once ──
@@ -419,6 +433,13 @@ async def api_upload_evidence(
                 raise HTTPException(
                     status_code=413,
                     detail=f"File '{f.filename}' exceeds the maximum allowed size of 100MB. Please upload a smaller file."
+                )
+
+            total_bytes_so_far += len(file_bytes)
+            if total_bytes_so_far > MAX_TOTAL_REQUEST_BYTES:
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"This upload batch exceeds the {MAX_TOTAL_REQUEST_BYTES // (1024*1024)}MB total limit per request. Please upload fewer files at once."
                 )
 
             # ── ZIP Auto-Unpack: Extract all contained documents into individual evidence files ──
