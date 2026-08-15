@@ -28,3 +28,6 @@ data/
 .tmp-*
 backups/
 logs/
+node_modules/
+test-results/
+playwright-report/
