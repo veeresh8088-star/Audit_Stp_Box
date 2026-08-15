@@ -108,20 +108,30 @@ def _check_zip_bomb(filename: str, raw_bytes: bytes) -> tuple:
     if ext not in ("zip", "docx", "xlsx", "pptx"):
         return True, ""
 
+    # Admin-editable (src/core/settings.py) instead of fixed, with these
+    # module-level constants as the fallback default if settings can't be read.
+    try:
+        from src.core.settings import get_setting
+        max_uncompressed_bytes = get_setting("max_zip_uncompressed_mb") * 1_000_000
+        max_zip_ratio = get_setting("max_zip_ratio")
+    except Exception:
+        max_uncompressed_bytes = MAX_UNCOMPRESSED_BYTES
+        max_zip_ratio = MAX_ZIP_RATIO
+
     try:
         with zipfile.ZipFile(io.BytesIO(raw_bytes)) as z:
             total_compressed = sum(i.compress_size for i in z.infolist())
             total_uncompressed = sum(i.file_size for i in z.infolist())
 
-            if total_uncompressed > MAX_UNCOMPRESSED_BYTES:
+            if total_uncompressed > max_uncompressed_bytes:
                 return False, (
                     f"Layer 3: '{filename}' expands to {total_uncompressed // 1_000_000}MB "
-                    f"when decompressed. This exceeds the safe limit of 500MB."
+                    f"when decompressed. This exceeds the safe limit of {max_uncompressed_bytes // 1_000_000}MB."
                 )
 
             if total_compressed > 0:
                 ratio = total_uncompressed / total_compressed
-                if ratio > MAX_ZIP_RATIO:
+                if ratio > max_zip_ratio:
                     return False, (
                         f"Layer 3: Suspicious ZIP compression ratio ({ratio:.0f}:1) "
                         f"detected in '{filename}'. Possible ZIP bomb."

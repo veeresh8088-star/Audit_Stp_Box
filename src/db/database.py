@@ -140,6 +140,20 @@ class AdminAuditLog(Base):
     details             = Column(Text, nullable=True)
     ip_address          = Column(String(50), nullable=True)
 
+class SystemSetting(Base):
+    """
+    Admin-editable runtime settings (e.g. upload size limits) -- lets an admin
+    change these from the UI without a code edit + server restart. Falls back
+    to the existing hardcoded defaults (src/core/settings.py) for any key with
+    no row here yet, so this table can start empty.
+    """
+    __tablename__ = "system_settings"
+    id           = Column(Integer, primary_key=True, autoincrement=True)
+    key          = Column(String(100), unique=True, nullable=False, index=True)
+    value        = Column(String(200), nullable=False)
+    updated_at   = Column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
+    updated_by   = Column(String(100), nullable=True)
+
 class AuditorLearningRule(Base):
     """
     Stores auditor modifications, false-positive feedback, and remediation edits.

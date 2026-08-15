@@ -406,12 +406,16 @@ async def api_upload_evidence(
             report_id = report.id
 
         # ── REQUEST-LEVEL LIMITS: cap file count and total bytes per upload request.
-        # The per-file 100MB check below doesn't stop e.g. 50 files at 99MB each
-        # (~5GB) in one request -- each file is read fully into memory before its
-        # own size is even checked, so without this, a large batch of individually
-        # "legal" files is still a real memory-exhaustion / DoS vector. ──
-        MAX_FILES_PER_REQUEST = 30
-        MAX_TOTAL_REQUEST_BYTES = 100 * 1024 * 1024  # 100 MB total, matching the per-file cap
+        # The per-file check below doesn't stop e.g. 50 files at 99MB each (~5GB)
+        # in one request -- each file is read fully into memory before its own
+        # size is even checked, so without this, a large batch of individually
+        # "legal" files is still a real memory-exhaustion / DoS vector. Admin-
+        # editable (src/core/settings.py) instead of fixed, so these can be
+        # tuned without a code change + restart. ──
+        from src.core.settings import get_setting
+        MAX_FILES_PER_REQUEST = get_setting("max_files_per_upload")
+        MAX_FILE_SIZE_BYTES = get_setting("max_file_size_mb") * 1024 * 1024
+        MAX_TOTAL_REQUEST_BYTES = get_setting("max_upload_total_mb") * 1024 * 1024
         if len(files) > MAX_FILES_PER_REQUEST:
             raise HTTPException(
                 status_code=413,
@@ -427,12 +431,11 @@ async def api_upload_evidence(
             # ── FIX 1: async await → non-blocking stream read from all 10 tabs at once ──
             file_bytes = await f.read()
 
-            # ── FILE SIZE LIMIT: max 100MB per file (prevent DoS via large upload) ──
-            MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+            # ── FILE SIZE LIMIT (prevent DoS via large upload) ──
             if len(file_bytes) > MAX_FILE_SIZE_BYTES:
                 raise HTTPException(
                     status_code=413,
-                    detail=f"File '{f.filename}' exceeds the maximum allowed size of 100MB. Please upload a smaller file."
+                    detail=f"File '{f.filename}' exceeds the maximum allowed size of {MAX_FILE_SIZE_BYTES // (1024*1024)}MB. Please upload a smaller file."
                 )
 
             total_bytes_so_far += len(file_bytes)
@@ -1310,6 +1313,53 @@ def api_commit_session_findings(session_id: str, request: Request, force: bool =
         raise HTTPException(status_code=500, detail="Commit to Shakthi DB failed. Please try again.")
     finally:
         db.close()
+
+@router.get("/settings/upload-limits")
+def api_get_upload_limit_settings(request: Request):
+    """Returns the current admin-editable upload limits and their allowed
+    min/max bounds. Admin only -- these govern the whole system's upload
+    behavior, not just one auditor's."""
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+    from src.core.settings import get_all_upload_settings, UPLOAD_SETTINGS
+    values = get_all_upload_settings()
+    return {
+        "success": True,
+        "settings": {
+            key: {"value": values[key], "min": bounds[1], "max": bounds[2], "default": bounds[0]}
+            for key, bounds in UPLOAD_SETTINGS.items()
+        }
+    }
+
+
+@router.put("/settings/upload-limits")
+def api_update_upload_limit_settings(request: Request, updates: dict):
+    """Updates one or more upload-limit settings. Admin only. Body is a flat
+    {key: new_value} object; unknown keys or out-of-bounds values are rejected
+    with a clear error rather than silently clamped."""
+    user = _require_auth(request)
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+    from src.core.settings import set_setting, get_all_upload_settings, UPLOAD_SETTINGS
+
+    unknown = [k for k in updates if k not in UPLOAD_SETTINGS]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Unknown setting(s): {', '.join(unknown)}")
+
+    try:
+        for key, value in updates.items():
+            set_setting(key, value, updated_by=user.get("username"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    log_system_event(
+        "SETTINGS_UPDATED", "INFO",
+        f"Upload limit settings updated: {updates}",
+        actor=user.get("username")
+    )
+    return {"success": True, "settings": get_all_upload_settings()}
+
 
 @router.get("/admin-logs")
 def api_get_admin_logs(request: Request):

@@ -415,6 +415,7 @@ function switchTab(tabId, tabBtn) {
         populateBenchmarkSessionSelector();
     } else if (tabId === "tab-manage-controls") {
         loadCustomControlsTable();
+        if (currentUser && currentUser.role === "admin") loadUploadSettings();
     } else if (tabId === "tab-submitted-reports") {
         loadSubmittedReports();
     } else if (tabId === "tab-auditee-history") {
@@ -4174,6 +4175,59 @@ async function sendChatMessage() {
         errDiv.className = "chat-bubble assistant error-msg";
         errDiv.innerHTML = `<p>Error: ${err.message}. Ollama server might be offline.</p>`;
         feed.appendChild(errDiv);
+    }
+}
+
+// ── ADMIN-EDITABLE UPLOAD LIMIT SETTINGS ──
+
+const UPLOAD_SETTING_LABELS = {
+    max_file_size_mb: "Max size per file (MB)",
+    max_upload_total_mb: "Max total size per upload (MB)",
+    max_files_per_upload: "Max files per upload",
+    max_zip_uncompressed_mb: "Max ZIP decompressed size (MB)",
+    max_zip_ratio: "Max ZIP compression ratio (X:1)",
+};
+
+async function loadUploadSettings() {
+    const grid = document.getElementById("upload-settings-grid");
+    if (!grid) return;
+    try {
+        const res = await authFetch(`${API_BASE}/audit/settings/upload-limits`);
+        const data = await res.json();
+        if (!data.success) return;
+        grid.innerHTML = Object.entries(data.settings).map(([key, s]) => `
+            <div>
+                <label style="display:block; font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-bottom:4px;">${escapeHtml(UPLOAD_SETTING_LABELS[key] || key)}</label>
+                <input type="number" id="setting-${escapeHtml(key)}" value="${s.value}" min="${s.min}" max="${s.max}"
+                    style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(15,23,42,0.4); color:var(--text-main); font-size:0.84rem;">
+                <span style="font-size:0.68rem; color:var(--text-muted);">Range: ${s.min}-${s.max}</span>
+            </div>
+        `).join("");
+    } catch (err) {
+        console.error("Error loading upload settings:", err);
+    }
+}
+
+async function saveUploadSettings() {
+    const statusEl = document.getElementById("upload-settings-status");
+    const updates = {};
+    for (const key of Object.keys(UPLOAD_SETTING_LABELS)) {
+        const el = document.getElementById(`setting-${key}`);
+        if (el) updates[key] = parseInt(el.value, 10);
+    }
+    if (statusEl) { statusEl.textContent = "Saving..."; statusEl.style.color = "var(--text-muted)"; }
+    try {
+        const res = await authFetch(`${API_BASE}/audit/settings/upload-limits`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(updates)
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(formatApiError(data.detail, "Failed to save settings."));
+        if (statusEl) { statusEl.textContent = "✅ Saved — applies immediately, no restart needed."; statusEl.style.color = "#10b981"; }
+        showToast("Upload limit settings saved.", "info");
+    } catch (err) {
+        if (statusEl) { statusEl.textContent = `❌ ${err.message}`; statusEl.style.color = "var(--error)"; }
     }
 }
 
