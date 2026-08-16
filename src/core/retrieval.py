@@ -139,9 +139,17 @@ def _vec_store_embedding(chunk_db_id, vector, engine):
     except Exception:
         pass  # Never crash audit on vector storage failure — next run will retry
 
-def _vec_native_search(query_vector, filenames, top_k, engine):
+def _vec_native_search(query_vector, filenames, top_k, engine, report_id=None):
     """Perform KNN search using native engine. Returns {chunk_db_id: similarity}."""
     if engine is None or engine == "python" or query_vector is None:
+        return {}
+    # An empty filenames list means "no evidence files for this control/session" --
+    # both branches below used to treat that as "no filter" and search every chunk
+    # in the entire document_chunks/pg_vec_chunks table, across every session and
+    # every client sharing this deployment, silently handing the LLM someone else's
+    # document content as "evidence" instead of correctly reporting no evidence
+    # available. Must return no results here, before either SQL branch runs.
+    if not filenames:
         return {}
     # get_embedding() can return a vector wrapped in list-of-one-list, and how many
     # layers varies (observed differing by input length) -- without unwrapping fully,
@@ -157,31 +165,26 @@ def _vec_native_search(query_vector, filenames, top_k, engine):
             conn.enable_load_extension(True)
             sqlite_vec.load(conn)
             conn.enable_load_extension(False)
-            if filenames:
-                placeholders = ",".join(["?"]*len(filenames))
-                sql = (f"SELECT vc.chunk_id, vc.distance FROM vec_chunks vc "
-                       f"JOIN document_chunks dc ON dc.id=vc.chunk_id "
-                       f"WHERE dc.filename IN ({placeholders}) "
-                       f"AND vc.embedding MATCH ? AND K=? ORDER BY vc.distance")
-                rows = conn.execute(sql, [*filenames, packed_q, top_k*4]).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT chunk_id, distance FROM vec_chunks WHERE embedding MATCH ? AND K=? ORDER BY distance",
-                    [packed_q, top_k*4]).fetchall()
+            placeholders = ",".join(["?"]*len(filenames))
+            report_clause = " AND dc.report_id = ? " if report_id is not None else " "
+            sql = (f"SELECT vc.chunk_id, vc.distance FROM vec_chunks vc "
+                   f"JOIN document_chunks dc ON dc.id=vc.chunk_id "
+                   f"WHERE dc.filename IN ({placeholders}){report_clause}"
+                   f"AND vc.embedding MATCH ? AND K=? ORDER BY vc.distance")
+            sql_params = [*filenames] + ([report_id] if report_id is not None else []) + [packed_q, top_k*4]
+            rows = conn.execute(sql, sql_params).fetchall()
             conn.close()
             return {r[0]: max(0.0, 1.0-(r[1]/2.0)) for r in rows}
         elif engine.get("type") == "pgvector":
             from sqlalchemy import text
             vec_str = "[" + ",".join(str(v) for v in query_vector) + "]"
-            if filenames:
-                sql = text("SELECT pvc.chunk_id, 1-(pvc.embedding <=> CAST(:vec_str AS vector)) AS sim "
-                           "FROM pg_vec_chunks pvc JOIN document_chunks dc ON dc.id=pvc.chunk_id "
-                           "WHERE dc.filename = ANY(:fn_list) ORDER BY sim DESC LIMIT :top_k_val")
-                params = {"vec_str": vec_str, "fn_list": list(filenames), "top_k_val": top_k * 4}
-            else:
-                sql = text("SELECT chunk_id, 1-(embedding <=> CAST(:vec_str AS vector)) AS sim "
-                           "FROM pg_vec_chunks ORDER BY sim DESC LIMIT :top_k_val")
-                params = {"vec_str": vec_str, "top_k_val": top_k * 4}
+            report_clause = "AND dc.report_id = :report_id " if report_id is not None else ""
+            sql = text("SELECT pvc.chunk_id, 1-(pvc.embedding <=> CAST(:vec_str AS vector)) AS sim "
+                       "FROM pg_vec_chunks pvc JOIN document_chunks dc ON dc.id=pvc.chunk_id "
+                       f"WHERE dc.filename = ANY(:fn_list) {report_clause}ORDER BY sim DESC LIMIT :top_k_val")
+            params = {"vec_str": vec_str, "fn_list": list(filenames), "top_k_val": top_k * 4}
+            if report_id is not None:
+                params["report_id"] = report_id
             with engine["engine"].begin() as conn:
                 rows = conn.execute(sql, params).fetchall()
             return {r[0]: float(r[1]) for r in rows}
@@ -275,13 +278,25 @@ def load_top_k_config():
             
     return config
 
-def save_document_chunks(filename, text):
-    """Splits a document text into overlapping paragraph windows (> 40 chars), prepends parent section headers, and writes to ShaktiDB."""
+def save_document_chunks(filename, text, report_id=None):
+    """Splits a document text into overlapping paragraph windows (> 40 chars), prepends parent section headers, and writes to ShaktiDB.
+
+    report_id scopes the delete-before-insert to THIS session's own prior chunks
+    for `filename` -- without it, two different sessions uploading a
+    identically-named file (e.g. "ISO27001_Policy.pdf") would silently delete
+    and overwrite each other's chunks, since filename alone was the only key.
+    report_id=None falls back to the old filename-only scoping (only expected
+    for call sites that couldn't resolve a report_id).
+    """
     session = SessionLocal()
     try:
         with force_master():
-            # Delete existing chunks for this file to prevent duplicates
-            session.query(DocumentChunk).filter(DocumentChunk.filename == filename).delete()
+            # Delete existing chunks for this file (scoped to this session
+            # when report_id is known) to prevent duplicates on re-upload.
+            _del_q = session.query(DocumentChunk).filter(DocumentChunk.filename == filename)
+            if report_id is not None:
+                _del_q = _del_q.filter(DocumentChunk.report_id == report_id)
+            _del_q.delete()
 
             # Purge this filename's cached embeddings too. The cache is keyed by
             # (filename, chunk_index), not content -- if a file gets re-uploaded with
@@ -332,6 +347,7 @@ def save_document_chunks(filename, text):
                         
                         db_chunk = DocumentChunk(
                             filename=filename,
+                            report_id=report_id,
                             chunk_index=chunks_saved,
                             content=child_content,
                             metadata_json=json.dumps(child_metadata),
@@ -479,6 +495,7 @@ def save_document_chunks(filename, text):
                         
                     chunk = DocumentChunk(
                         filename=filename,
+                        report_id=report_id,
                         chunk_index=chunks_saved,
                         content=child_content,
                         metadata_json=json.dumps(child_metadata),
@@ -616,7 +633,7 @@ def _calculate_dynamic_context_budget(controls_batch, mode="standard"):
         return FALLBACK_TARGET, FALLBACK_HARD_MAX
 
 
-def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, KEYWORD_SYNONYMS, audit_mode=None):
+def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, KEYWORD_SYNONYMS, audit_mode=None, report_id=None):
     """Production RAG retrieval engine.
     Phase 3: Multi-document evidence aggregation — searches ALL uploaded files simultaneously.
     Phase 4: Pipeline: keyword scoring -> exact dedup -> Jaccard near-dedup -> diversity -> rank.
@@ -641,10 +658,17 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
     print(f"[RAG SMART CHUNK] Document text is {len(context)} chars. Routing through full Smart Vector Chunking pipeline.", flush=True)
 
     # 1. Ensure chunks exist for ALL uploaded files
+    # report_id scopes both the existence check and the load below to THIS
+    # session's own chunks -- filename alone isn't a safe key across sessions
+    # (see save_document_chunks: two sessions uploading identically-named
+    # files used to silently delete/overwrite each other's chunks).
     chunks_count = 0
     session = SessionLocal()
     try:
-        chunks_count = session.query(DocumentChunk).filter(DocumentChunk.filename.in_(file_names_list)).count()
+        _count_q = session.query(DocumentChunk).filter(DocumentChunk.filename.in_(file_names_list))
+        if report_id is not None:
+            _count_q = _count_q.filter(DocumentChunk.report_id == report_id)
+        chunks_count = _count_q.count()
     except Exception as db_verify_err:
         print(f"[RAG WARNING] Failed to verify chunks count: {db_verify_err}")
     finally:
@@ -654,15 +678,18 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
         print(f"[RAG] No chunks found for {file_names_list}. Ingesting on-the-fly...")
         primary_file = file_names_list[0] if file_names_list else "default_document.pdf"
         try:
-            save_document_chunks(primary_file, context)
+            save_document_chunks(primary_file, context, report_id=report_id)
         except Exception as ingest_err:
             print(f"[RAG WARNING] Failed to ingest chunks: {ingest_err}")
 
-    # 2. Load ALL chunks from ALL uploaded files
+    # 2. Load ALL chunks from ALL uploaded files (this session's own only)
     session = SessionLocal()
     db_chunks = []
     try:
-        db_chunks = session.query(DocumentChunk).filter(DocumentChunk.filename.in_(file_names_list)).all()
+        _load_q = session.query(DocumentChunk).filter(DocumentChunk.filename.in_(file_names_list))
+        if report_id is not None:
+            _load_q = _load_q.filter(DocumentChunk.report_id == report_id)
+        db_chunks = _load_q.all()
     except Exception as db_query_err:
         print(f"[RAG WARNING] Database query failed: {db_query_err}")
     finally:
@@ -835,10 +862,13 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
                     ):
                         if vector is None:
                             continue
-                        row = session_tmp.query(DocumentChunk).filter(
+                        _row_q = session_tmp.query(DocumentChunk).filter(
                             DocumentChunk.filename == fname,
                             DocumentChunk.chunk_index == cidx
-                        ).first()
+                        )
+                        if report_id is not None:
+                            _row_q = _row_q.filter(DocumentChunk.report_id == report_id)
+                        row = _row_q.first()
                         if row:
                             _vec_store_embedding(row.id, vector, _native_engine)
                     session_tmp.close()
@@ -853,7 +883,7 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
 
         # ── Vector similarity: native engine first, Python cosine fallback ────
         _native_engine = _get_native_vec_engine()
-        native_sims = _vec_native_search(query_vector, file_names_list, 40, _native_engine)
+        native_sims = _vec_native_search(query_vector, file_names_list, 40, _native_engine, report_id=report_id)
 
         if native_sims:
             # Map native chunk_db_id results back to (filename, chunk_index) keys

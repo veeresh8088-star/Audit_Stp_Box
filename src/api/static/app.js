@@ -1325,7 +1325,25 @@ async function deleteEvidenceFile(idx) {
     renderUploadedFilesList();
 }
 
-function clearAllUploadedFiles() {
+async function clearAllUploadedFiles() {
+    // Same server-sync gap as the single-file delete above (see the comment
+    // in deleteEvidenceFile): each file was already uploaded to the server
+    // in the background the moment it was dropped, so clearing only the
+    // local uploadedFilesList left every one of them still attached to the
+    // session server-side. The next upload then landed on top of that full
+    // set instead of replacing it, and the audit ran against old+new files
+    // combined. Soft-delete each one server-side first, same as removing
+    // files individually.
+    if (activeSessionId) {
+        await Promise.all(uploadedFilesList.filter(f => f && f.name).map(file =>
+            authFetch(`${API_BASE}/audit/evidence/delete`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: activeSessionId, filename: file.name })
+            }).catch(e => console.warn("Evidence delete (server) failed for", file.name, e))
+        ));
+    }
+
     uploadedFilesList = [];
     renderUploadedFilesList();
 }
@@ -2102,6 +2120,18 @@ async function triggerAuditAnalysis() {
 
     if (selectedSls.length === 0) {
         alert("⚠️ Please select at least one control to analyze.");
+        btn.disabled = false;
+        btn.innerText = "▶ Run RAG Scan";
+        if (stopBtn) stopBtn.style.display = "none";
+        return;
+    }
+
+    // Nothing previously stopped a scan from starting with zero evidence
+    // uploaded -- the button would just run every selected control against an
+    // empty file list, burning real LLM time to produce nothing but no-evidence
+    // findings. Same early-return pattern as the control-count check above.
+    if (uploadedFilesList.length === 0) {
+        alert("⚠️ Please upload at least one evidence file before starting the audit.");
         btn.disabled = false;
         btn.innerText = "▶ Run RAG Scan";
         if (stopBtn) stopBtn.style.display = "none";

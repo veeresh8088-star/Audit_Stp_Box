@@ -248,6 +248,14 @@ class DocumentChunk(Base):
     __tablename__ = "document_chunks"
     id            = Column(Integer, primary_key=True, autoincrement=True)
     filename      = Column(String(200), index=True)
+    # Scopes every read/write to the AuditReport that owns this chunk. Without
+    # this, filename was the ONLY key -- two different sessions uploading a
+    # file with the same name would silently delete and overwrite each
+    # other's chunks (save_document_chunks), and searches could cross-match
+    # the wrong session's content. NULL for rows written before this column
+    # existed; those become unreachable (never matched) rather than falsely
+    # matching a real session, which is the safe failure direction.
+    report_id     = Column(Integer, index=True, nullable=True)
     chunk_index   = Column(Integer)
     content       = Column(Text)
     metadata_json = Column(Text, nullable=True)

@@ -33,6 +33,7 @@ from src.core.parsers.doc_parsers import extract_text
 from src.core.retrieval import save_document_chunks
 from src.core.llm_client import query_llm
 from src.api.endpoints.auth import _require_auth
+from src.core.pii_redactor import redact_pii
 
 def retrieve_chat_context(db, session_id: str, query_text: str, top_k: int = 5) -> str:
     """Retrieves pointwise RAG context chunks from ShaktiDB document chunks."""
@@ -46,8 +47,12 @@ def retrieve_chat_context(db, session_id: str, query_text: str, top_k: int = 5) 
     if not file_names:
         return ""
         
-    # Get chunks
-    chunks = db.query(DocumentChunk).filter(DocumentChunk.filename.in_(file_names)).all()
+    # Get chunks (scoped to this session's report_id -- see report_id column note
+    # on DocumentChunk: filename alone isn't a safe key across sessions)
+    chunks = db.query(DocumentChunk).filter(
+        DocumentChunk.filename.in_(file_names),
+        DocumentChunk.report_id == report.id
+    ).all()
     if not chunks:
         return ""
         
@@ -209,6 +214,7 @@ def _enforce_max_sessions_limit(db, username: str, max_sessions: int = 50):
                 db.query(Finding).filter(Finding.report_id.in_(delete_ids)).delete(synchronize_session=False)
                 db.query(EvidenceFile).filter(EvidenceFile.report_id.in_(delete_ids)).delete(synchronize_session=False)
                 db.query(ComplianceScore).filter(ComplianceScore.report_id.in_(delete_ids)).delete(synchronize_session=False)
+                db.query(DocumentChunk).filter(DocumentChunk.report_id.in_(delete_ids)).delete(synchronize_session=False)
             if delete_sids:
                 db.query(AuditCheckpoint).filter(AuditCheckpoint.session_id.in_(delete_sids)).delete(synchronize_session=False)
 
@@ -372,13 +378,13 @@ def get_or_create_audit_report(db, session_id: str, default_title: str = None, d
         db.refresh(report)
     return report
 
-def _bg_extract_and_chunk(filename: str, file_bytes: bytes):
+def _bg_extract_and_chunk(filename: str, file_bytes: bytes, report_id: int = None):
     try:
         f_like = io.BytesIO(file_bytes)
         f_like.name = filename
         extracted = extract_text(f_like)
         if extracted:
-            save_document_chunks(filename, extracted)
+            save_document_chunks(filename, extracted, report_id=report_id)
     except Exception as err:
         print(f"[BG CHUNK ERROR] '{filename}': {err}", flush=True)
 
@@ -527,9 +533,9 @@ async def api_upload_evidence(
 
                 # Asynchronously extract text & save chunks in background thread
                 if bg_tasks:
-                    bg_tasks.add_task(_bg_extract_and_chunk, sub_name, sub_bytes)
+                    bg_tasks.add_task(_bg_extract_and_chunk, sub_name, sub_bytes, report_id)
                 else:
-                    _bg_extract_and_chunk(sub_name, sub_bytes)
+                    _bg_extract_and_chunk(sub_name, sub_bytes, report_id)
 
                 uploaded_details.append({
                     "filename": sub_name,
@@ -867,8 +873,16 @@ def api_start_audit(req: StartAuditRequest, request: Request):
             report_id = report.id
             report_framework = report.framework or ""
 
-            # Load evidence files text & bytes from disk
-            ev_files = db.query(EvidenceFile).filter(EvidenceFile.report_id == report_id).all()
+            # Load evidence files text & bytes from disk. Must exclude
+            # soft-deleted files here -- this endpoint is what actually feeds
+            # the audit run, so without this filter a file removed via
+            # Delete-All/single-delete still got re-loaded into every
+            # subsequent audit on this session, appearing "combined" with
+            # newly uploaded files even though the UI showed it gone.
+            ev_files = db.query(EvidenceFile).filter(
+                EvidenceFile.report_id == report_id,
+                (EvidenceFile.is_deleted == False) | (EvidenceFile.is_deleted.is_(None))
+            ).all()
             ev_file_list = [(ev.file_path, ev.filename) for ev in ev_files]
 
         files_data = []
@@ -890,6 +904,22 @@ def api_start_audit(req: StartAuditRequest, request: Request):
                     "bytes": file_bytes,
                     "text": text
                 })
+
+        # ── Refuse to start an audit with zero evidence files ──────────────────
+        # Nothing upstream of this ever blocked it: the UI's "Running Scan..."
+        # button has no client-side guard, and this endpoint would happily spawn
+        # the background worker to run every selected control against an empty
+        # file list -- burning real LLM time on every control while retrieval
+        # has nothing to search, producing a session's worth of guaranteed
+        # no-evidence findings instead of telling the auditor up front to
+        # upload something first.
+        if not files_data:
+            with _bg_lock:
+                _auditor_sessions[auditor_id].discard(bg_key)
+            raise HTTPException(
+                status_code=400,
+                detail="No evidence files are attached to this session. Please upload at least one evidence file before starting an audit."
+            )
 
         # Determine standard/scoping
         if req.audit_mode in ("VAPT validation", "Technical findings only") or "VAPT" in report_framework.upper():
@@ -936,6 +966,14 @@ def api_start_audit(req: StartAuditRequest, request: Request):
         _mode_label = "VAPT" if is_tech_only else req.audit_mode
         log_system_event("AUDIT_STARTED", "INFO", f"Audit started (mode: {_mode_label}, controls: {len(req.selected_sls)}, files: {len(files_data)})", session_id=req.session_id, actor=req.username or "Auditor")
         return {"success": True, "status": "started", "message": "Background RAG scan initialized."}
+    except HTTPException:
+        # Deliberate errors raised inside this try block (e.g. the zero-evidence
+        # guard above) were being caught by the broad except below and rewrapped
+        # into an opaque 500 -- losing both the real status code and the actual
+        # message the caller needs (e.g. "upload evidence first" became "please
+        # try again", which just tells the auditor to retry the exact same
+        # no-evidence request).
+        raise
     except Exception as e:
         print(f"[START AUDIT ERROR] session={req.session_id} | {e}", flush=True)
         raise HTTPException(status_code=500, detail="Failed to start audit scan. Please try again.")
@@ -1266,21 +1304,30 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest, request: Requ
             if req.comment:
                 finding.review_note = req.comment
                 
-            # Log to AuditorFeedback to prevent false positives from recurring
+            # Log to AuditorFeedback to prevent false positives from recurring.
+            # get_auditor_feedback_few_shot() later injects evidence_snippet/finding/
+            # auditor_comments verbatim into OTHER auditors' generation prompts (see
+            # src/ai/knowledge_loop.py) -- redact known PII patterns (email/IP/phone)
+            # before it's ever written, not just at report-export time. This is a
+            # partial mitigation: it won't catch names or account numbers (that needs
+            # real NER, not regex), but it closes the structured-PII leak now.
+            _redacted_evidence = redact_pii(finding.evidence_snippet)
+            _redacted_finding = redact_pii(finding.description)
+            _redacted_comment = redact_pii(req.comment or finding.review_note or "")
             dup = db.query(AuditorFeedback).filter(
                 AuditorFeedback.control_id == finding.control_id,
-                AuditorFeedback.evidence_snippet == finding.evidence_snippet,
+                AuditorFeedback.evidence_snippet == _redacted_evidence,
                 AuditorFeedback.corrected_status == req.status,
-                AuditorFeedback.finding == finding.description
+                AuditorFeedback.finding == _redacted_finding
             ).first()
             if not dup:
                 db.add(AuditorFeedback(
                     control_id=finding.control_id,
-                    evidence_snippet=finding.evidence_snippet,
+                    evidence_snippet=_redacted_evidence,
                     corrected_status=req.status,
-                    finding=finding.description,
+                    finding=_redacted_finding,
                     recommendation=finding.recommendation,
-                    auditor_comments=req.comment or finding.review_note or ""
+                    auditor_comments=_redacted_comment
                 ))
                 
             db.commit()
@@ -1671,8 +1718,8 @@ def api_clear_all_records(request: Request):
 def api_export_feedback(request: Request):
     """Exports all AuditorFeedback records to JSON safely."""
     user = _require_auth(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+    if user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied. Admin or auditor only.")
     with force_master():
         db = SessionLocal()
         try:
@@ -1690,16 +1737,38 @@ def api_export_feedback(request: Request):
                 })
             return {"success": True, "feedback": data}
         except Exception as e:
-            return {"success": True, "feedback": [], "error": str(e)}
+            print(f"[FEEDBACK EXPORT ERROR] {e}", flush=True)
+            return {"success": False, "feedback": [], "error": "Failed to export feedback records."}
         finally:
             db.close()
 
 @router.post("/feedback/import")
 def api_import_feedback(request: Request, file: UploadFile = File(...)):
-    """Imports AuditorFeedback records from uploaded JSON file."""
+    """Imports AuditorFeedback records from an uploaded JSON file.
+
+    These records get quoted verbatim into the generation prompt for every
+    future audit of a matching control (see get_auditor_feedback_few_shot in
+    src/ai/knowledge_loop.py) -- an import file is untrusted input from
+    outside this deployment, so without validation a crafted "finding" value
+    is a stored prompt-injection vector that persists in the DB and re-injects
+    into every real audit from then on. Type/length-checked and PII-redacted
+    the same way a live auditor correction is, before it's ever written.
+    """
     user = _require_auth(request)
-    if user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+    if user.get("role") not in ("admin", "auditor"):
+        raise HTTPException(status_code=403, detail="Access denied. Admin or auditor only.")
+
+    MAX_ITEMS = 500
+    MAX_FIELD_LEN = 4000
+
+    def _clean_str(v, max_len):
+        if not isinstance(v, str):
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        return v[:max_len]
+
     with force_master():
         db = SessionLocal()
         try:
@@ -1708,15 +1777,34 @@ def api_import_feedback(request: Request, file: UploadFile = File(...)):
             feedbacks_data = json.loads(file_bytes)
             if not isinstance(feedbacks_data, list):
                 feedbacks_data = feedbacks_data.get("feedback", [])
-            
+            if not isinstance(feedbacks_data, list):
+                raise HTTPException(status_code=400, detail="Expected a JSON array of feedback records (or an object with a 'feedback' array).")
+            if len(feedbacks_data) > MAX_ITEMS:
+                raise HTTPException(status_code=400, detail=f"Too many records in one import ({len(feedbacks_data)}). Please import at most {MAX_ITEMS} at a time.")
+
             from src.db.database import AuditorFeedback
             imported_count = 0
+            skipped_count = 0
             for item in feedbacks_data:
-                control_id = item.get("control_id")
-                evidence_snippet = item.get("evidence_snippet")
-                corrected_status = item.get("corrected_status")
-                finding = item.get("finding")
-                
+                if not isinstance(item, dict):
+                    skipped_count += 1
+                    continue
+
+                control_id = _clean_str(item.get("control_id"), 100)
+                finding = _clean_str(item.get("finding"), MAX_FIELD_LEN)
+                # control_id and finding are the two fields actually injected into
+                # future prompts (see knowledge_loop.py) -- required, everything else
+                # is supplementary.
+                if not control_id or not finding:
+                    skipped_count += 1
+                    continue
+
+                corrected_status = _clean_str(item.get("corrected_status"), 50) or ""
+                evidence_snippet = redact_pii(_clean_str(item.get("evidence_snippet"), MAX_FIELD_LEN) or "")
+                finding = redact_pii(finding)
+                recommendation = _clean_str(item.get("recommendation"), MAX_FIELD_LEN) or ""
+                auditor_comments = redact_pii(_clean_str(item.get("auditor_comments"), MAX_FIELD_LEN) or "")
+
                 # Prevent duplication
                 dup = db.query(AuditorFeedback).filter(
                     AuditorFeedback.control_id == control_id,
@@ -1730,15 +1818,23 @@ def api_import_feedback(request: Request, file: UploadFile = File(...)):
                         evidence_snippet=evidence_snippet,
                         corrected_status=corrected_status,
                         finding=finding,
-                        recommendation=item.get("recommendation"),
-                        auditor_comments=item.get("auditor_comments")
+                        recommendation=recommendation,
+                        auditor_comments=auditor_comments
                     ))
                     imported_count += 1
+                else:
+                    skipped_count += 1
             db.commit()
-            return {"success": True, "message": f"Successfully imported {imported_count} auditor feedback records into knowledge memory!"}
+            return {
+                "success": True,
+                "message": f"Successfully imported {imported_count} auditor feedback record(s) into knowledge memory ({skipped_count} skipped as invalid or duplicate)."
+            }
 
+        except HTTPException:
+            raise
         except Exception as e:
-            return {"success": False, "detail": f"Import failed: {str(e)}"}
+            print(f"[FEEDBACK IMPORT ERROR] {e}", flush=True)
+            return {"success": False, "detail": "Import failed. Please check the file is valid JSON in the expected format."}
         finally:
             db.close()
 
@@ -2609,12 +2705,14 @@ def api_reject_doc_from_finding(finding_id: int, req: dict, request: Request):
             ctrl_id = control_id or finding.control_id
             
             fb_comments = f"Auditor rejected document '{doc_name}'. Reason: {reason}" if reason else f"Auditor manually rejected document '{doc_name}' from evidence list."
+            # reason is free-text the auditor typed -- redact the same as every
+            # other AuditorFeedback write before it's stored (see knowledge_loop.py).
             db.add(AuditorFeedback(
                 control_id=ctrl_id,
-                evidence_snippet=f'Rejected evidence document: {doc_name} for control {ctrl_id}',
+                evidence_snippet=redact_pii(f'Rejected evidence document: {doc_name} for control {ctrl_id}'),
                 corrected_status='REJECTED',
-                finding=f'Document {doc_name} was rejected by auditor for control {ctrl_id}',
-                auditor_comments=fb_comments
+                finding=redact_pii(f'Document {doc_name} was rejected by auditor for control {ctrl_id}'),
+                auditor_comments=redact_pii(fb_comments)
             ))
             db.commit()
             return {'success': True, 'message': f'Document {doc_name} rejected and removed.', 'remaining_source_files': finding.source_files}

@@ -34,6 +34,11 @@ class AuditState(TypedDict):
     file_names_list: List[str]
     llm_model: str
     summary_text: str
+    # This session's AuditReport.id -- scopes every document_chunks read/write
+    # to only this session's own evidence, so two sessions that happen to
+    # upload identically-named files never collide (see save_document_chunks /
+    # _vec_native_search in retrieval.py). None only if resolution failed.
+    report_id: Optional[int]
     
     # State tracking
     retrieved_context: str
@@ -143,7 +148,8 @@ def retrieve_node(state: AuditState) -> Dict[str, Any]:
             file_names_list=locked_filenames,   # ← LOCKED: only these files
             llm_model=state["llm_model"],
             KEYWORD_SYNONYMS=KEYWORD_SYNONYMS,
-            audit_mode=state.get("audit_mode")
+            audit_mode=state.get("audit_mode"),
+            report_id=state.get("report_id")
         )
         # Safety guarantee: if locked files returned no context, fall back
         # to raw document_text (never send empty context to LLM)
@@ -162,7 +168,8 @@ def retrieve_node(state: AuditState) -> Dict[str, Any]:
             file_names_list=state["file_names_list"],
             llm_model=state["llm_model"],
             KEYWORD_SYNONYMS=KEYWORD_SYNONYMS,
-            audit_mode=state.get("audit_mode")
+            audit_mode=state.get("audit_mode"),
+            report_id=state.get("report_id")
         )
 
     return {"retrieved_context": condensed}
@@ -401,7 +408,10 @@ def validate_node(state: AuditState) -> Dict[str, Any]:
     session = SessionLocal()
     db_chunks = []
     try:
-        db_chunks = session.query(DocumentChunk).filter(DocumentChunk.filename.in_(state["file_names_list"])).all()
+        _chunk_query = session.query(DocumentChunk).filter(DocumentChunk.filename.in_(state["file_names_list"]))
+        if state.get("report_id") is not None:
+            _chunk_query = _chunk_query.filter(DocumentChunk.report_id == state["report_id"])
+        db_chunks = _chunk_query.all()
     except Exception as e:
         print(f"[LANGGRAPH VALIDATOR WARNING] Failed to query database chunks: {e}", flush=True)
     finally:

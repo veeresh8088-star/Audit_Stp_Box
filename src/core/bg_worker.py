@@ -507,6 +507,24 @@ def generate_ollama_findings(context, file_names_list, selected_sls, model_choic
     controls = _build_controls_for_audit(selected_sls, custom_evidence)
     scanned_files_str = ", ".join(file_names_list) if file_names_list else "None"
 
+    # Resolved once and threaded into every control's graph state below, so
+    # retrieval can scope document_chunks reads/writes to THIS session's own
+    # report_id -- without it, two sessions uploading identically-named files
+    # collide in the shared, session-agnostic document_chunks table (see
+    # save_document_chunks / _vec_native_search).
+    report_id_for_retrieval = None
+    if checkpoint_session_id:
+        try:
+            with force_master():
+                _rid_session = SessionLocal()
+                _rid_report = _rid_session.query(AuditReport).filter(
+                    AuditReport.session_id == checkpoint_session_id
+                ).first()
+                report_id_for_retrieval = _rid_report.id if _rid_report else None
+                _rid_session.close()
+        except Exception as _rid_err:
+            print(f"[REPORT ID RESOLVE] Failed to resolve report_id for {checkpoint_session_id}: {_rid_err}", flush=True)
+
     # ── On RESUME: restore already-completed results from checkpoint and skip those controls ──
     _already_done_set = set(already_done_ids or [])
     if _already_done_set:
@@ -756,7 +774,7 @@ Return format: ["topic1", "topic2", ...]"""
         for fname, ftext in file_registry.items():
             if fname and ftext:
                 try:
-                    save_document_chunks(fname, ftext)
+                    save_document_chunks(fname, ftext, report_id=report_id_for_retrieval)
                 except Exception as _e_ingest:
                     print(f"[RAG INGEST WARNING] Pre-ingest for '{fname}' failed: {_e_ingest}", flush=True)
 
@@ -825,7 +843,15 @@ Return format: ["topic1", "topic2", ...]"""
         control_file_names = file_names_list
         target_evidence_files = []   # Track which specific evidence files this control maps to
         matched_policy_files = []    # Locked files that came from a Policy-named column
-        matched_evidence_only_files = []  # Locked files that came from an Evidence-named column
+        matched_evidence_only_files = []  # Locked files that came from an Evidence-only column
+        # Set when this is an Excel-checklist row with NO evidence file mapped to it
+        # (either no file referenced at all, or the referenced file wasn't found among
+        # uploads). Previously this silently widened control_file_names to the WHOLE
+        # session's files instead of correctly reporting "no evidence" -- meaning an
+        # unmapped row could cite a file that was never authorized for that control,
+        # and did so with source_files left blank (no way to trace which file it used).
+        # Handled below: skips retrieval and the LLM call entirely for this control.
+        excel_no_evidence_mapped = False
 
         def _match_control_key(c_id, docs_source):
             if not c_id or not docs_source: return None
@@ -861,6 +887,15 @@ Return format: ["topic1", "topic2", ...]"""
             target_doc_name = row_specific_file
         elif docs_source:
             target_doc_name = _match_control_key(c["control"], docs_source)
+
+        # This checklist row has no evidence file referenced at all. Previously fell
+        # through to the "no Excel scoping for this control" comment below, which left
+        # control_file_names at its default of the FULL session file list -- searching
+        # every other uploaded file instead of correctly reporting no evidence.
+        if not target_doc_name and is_excel_scope:
+            excel_no_evidence_mapped = True
+            control_file_names = []
+            control_context = ""
 
         if target_doc_name:
             # Normalise filenames for fuzzy matching (strip extension + punctuation)
@@ -946,22 +981,29 @@ Return format: ["topic1", "topic2", ...]"""
                     flush=True
                 )
             else:
-                # Mapped file not found among uploads — fall back to all files.
+                # Mapped file not found among uploads. Previously fell back to
+                # searching every other uploaded file (see removed comment below) --
+                # that meant a checklist typo/missing-upload silently pulled in
+                # content never authorized for this control instead of surfacing the
+                # mismatch. Now treated the same as "no evidence mapped": no
+                # retrieval, no LLM call, flagged for human review.
                 _scoping_fallback_msg = (
                     f"Control {c['control']}: Excel checklist targets '{target_doc_name}' "
                     f"but that file is not among the uploaded evidence {file_names_list}. "
-                    f"Falling back to full evidence pool for this control (AI-style broad retrieval) "
-                    f"instead of the strict Excel-locked file."
+                    f"Marking as no evidence mapped instead of searching unrelated files."
                 )
                 print(f"[SCOPING WARNING] {_scoping_fallback_msg}", flush=True)
                 log_system_event(
                     "SCOPING_FALLBACK", "WARNING", _scoping_fallback_msg,
                     session_id=checkpoint_session_id or bg_key
                 )
-                control_file_names = file_names_list
-                control_context = context
+                excel_no_evidence_mapped = True
+                control_file_names = []
+                control_context = ""
 
-        # If no Excel scoping for this control, use all uploaded files (unchanged).
+        # If no Excel scoping for this control (Manual Scope / AI Auto-Scoping),
+        # control_file_names/control_context keep their defaults from above and
+        # correctly search all uploaded files -- unchanged, by design.
 
         # Assemble graph inputs mapping exactly to LangGraph AuditState schema
         state_input = {
@@ -979,6 +1021,7 @@ Return format: ["topic1", "topic2", ...]"""
             "file_names_list": control_file_names,
             "llm_model": llm_model,
             "summary_text": summary_text,
+            "report_id": report_id_for_retrieval,
 
             # State tracking
             "retrieved_context": "",
@@ -1007,77 +1050,116 @@ Return format: ["topic1", "topic2", ...]"""
             "evidence_locked_filenames": matched_evidence_only_files,
         }
         
-        try:
-            # Invoke LangGraph
-            state_output = audit_graph.invoke(state_input)
-            result = state_output.get("final_finding")
-            if result:
-                # ── Excel Scoping Safety Gate (Phase 2 final correction) ─────────────
-                # Overrides N/A evidence and wrong-file citations structurally.
-                if target_evidence_files:
-                    try:
-                        from src.core.validator import apply_excel_scoping_safety_gate
-                        retrieved_ctx = state_output.get("retrieved_context", "")
-                        result = apply_excel_scoping_safety_gate(
-                            finding=result,
-                            locked_filenames=target_evidence_files,
-                            retrieved_context=retrieved_ctx,
-                            checklist_question=c.get("checklist_question") or c["label"]
-                        )
-                    except Exception as _sg_err:
-                        print(f"[SAFETY GATE ERROR] {_sg_err}", flush=True)
-
-                # ── Evidence provenance fix ───────────────────────────────────────
-                # BUG FIX: source_files must ALWAYS reflect the Excel-mapped file.
-                # Previously: only overrode source_files when it was empty, allowing
-                # the validator to write the WRONG file (e.g. MFA doc for Capacity
-                # Management) when a fallback-pool search happened.
-                # Fix: if Excel strictly mapped this control to specific files, ALWAYS
-                # set source_files to those mapped files — ignore whatever the validator
-                # may have written from searching the wrong-pool fallback.
-                if target_evidence_files:
-                    # Excel scoping is active → enforce the mapped file unconditionally.
-                    result["source_files"] = ", ".join(target_evidence_files)
-                else:
-                    # No Excel scoping → use whatever the validator set (or leave empty).
-                    existing_src = result.get("source_files") or ""
-                    if not existing_src.strip():
-                        result["source_files"] = ""
-                all_results.append(result)
+        if excel_no_evidence_mapped:
+            # No retrieval, no LLM call -- there's nothing to search or evaluate.
+            # Deterministic NON_COMPLIANT-for-human-review, matching the same
+            # convention already used elsewhere for a genuine "evidence not found"
+            # LLM result, but without spending 10-45 minutes of LLM time (and
+            # without the risk of the LLM being handed unrelated session files)
+            # to arrive at the same place.
             ctrl_duration = time.time() - control_start_time
-            res_status = result.get("status", "Unknown") if result else "None"
-            
-            c_mins = int(ctrl_duration // 60)
-            c_secs = round(ctrl_duration % 60, 1)
-            c_lat_str = f"{c_mins}m {c_secs}s" if c_mins > 0 else f"0m {c_secs}s"
-
-            _real_token_stats = state_output.get("token_stats") or {}
-            ctrl_p_toks = _real_token_stats.get("prompt_tokens", 0)
-            ctrl_c_toks = _real_token_stats.get("completion_tokens", 0)
-            ctrl_t_toks = ctrl_p_toks + ctrl_c_toks
-            _audit_real_prompt_toks += ctrl_p_toks
-            _audit_real_comp_toks += ctrl_c_toks
-
-            print(f"[{time.strftime('%H:%M:%S')}] [CONTROL EVALUATED] {c['control']} ({c['label']}) | Status: {res_status} | Latency: {c_lat_str} ({ctrl_duration:.1f}s) | Tokens Used: {ctrl_t_toks:,} (Prompt: {ctrl_p_toks:,}, Completion: {ctrl_c_toks:,})", flush=True)
-            log_dev_latency(f"[{idx + 1}/{total}] [SUCCESS] Control {c['control']} {c['label']} completed in {ctrl_duration:.2f}s ({c_lat_str}) | Tokens: {ctrl_t_toks:,}")
-            # ── Redis: push per-control metrics live ─────────────────────────
+            _no_evidence_msg = "No evidence file was mapped to this control in the uploaded Excel checklist."
+            result = {
+                "control_id": c["control"],
+                "control_label": c["label"],
+                "control": c["control"],
+                "status": "NON_COMPLIANT",
+                "severity": c.get("severity", "MEDIUM"),
+                "finding": _no_evidence_msg,
+                "description": _no_evidence_msg,
+                "gap_detected": _no_evidence_msg,
+                "evidence_found": "NOT_FOUND",
+                "evidence_snippet": "",
+                "source_files": "",
+                "evidence_location": "",
+                "recommendation": f"Map and upload evidence for {c['label']} in the audit checklist, then re-run this control.",
+                "reasoning": (
+                    "This checklist row had no evidence file mapped to it, so no retrieval or "
+                    "LLM evaluation was performed -- flagged for human review instead of "
+                    "searching other, unrelated files in this session."
+                ),
+                "policy_status": "NOT_FOUND",
+                "policy_assessment": "NON_COMPLIANT",
+                "evidence_status": "NOT_FOUND",
+                "evidence_assessment": "NON_COMPLIANT",
+                "final_result": "NON_COMPLIANT",
+                "final_reason": _no_evidence_msg,
+            }
+            all_results.append(result)
+            print(f"[{time.strftime('%H:%M:%S')}] [CONTROL EVALUATED] {c['control']} ({c['label']}) | Status: NON_COMPLIANT (no evidence mapped -- retrieval/LLM skipped) | Latency: {ctrl_duration:.1f}s | Tokens Used: 0", flush=True)
+            log_dev_latency(f"[{idx + 1}/{total}] [NO EVIDENCE MAPPED] Control {c['control']} {c['label']} -- retrieval/LLM skipped ({ctrl_duration:.2f}s)")
+        else:
             try:
-                _rm.push_control_metrics(
-                    session_id=checkpoint_session_id or bg_key or _sid,
-                    prompt_tokens=ctrl_p_toks,
-                    comp_tokens=ctrl_c_toks,
-                    latency_sec=ctrl_duration
-                )
-            except Exception as _rpm_err:
-                pass  # Redis write failures never break an audit
-        except Exception as e:
-            print(f"[AUDIT ERROR] Error evaluating control {c['control']}: {e}", flush=True)
-            log_dev_latency(f"ERROR: Control {c['control']} failed: {e}")
-            # ── Redis: push error signal ─────────────────────────────────────
-            try:
-                _rm.push_error(session_id=checkpoint_session_id or bg_key or _sid)
-            except Exception:
-                pass
+                # Invoke LangGraph
+                state_output = audit_graph.invoke(state_input)
+                result = state_output.get("final_finding")
+                if result:
+                    # ── Excel Scoping Safety Gate (Phase 2 final correction) ─────────────
+                    # Overrides N/A evidence and wrong-file citations structurally.
+                    if target_evidence_files:
+                        try:
+                            from src.core.validator import apply_excel_scoping_safety_gate
+                            retrieved_ctx = state_output.get("retrieved_context", "")
+                            result = apply_excel_scoping_safety_gate(
+                                finding=result,
+                                locked_filenames=target_evidence_files,
+                                retrieved_context=retrieved_ctx,
+                                checklist_question=c.get("checklist_question") or c["label"]
+                            )
+                        except Exception as _sg_err:
+                            print(f"[SAFETY GATE ERROR] {_sg_err}", flush=True)
+
+                    # ── Evidence provenance fix ───────────────────────────────────────
+                    # BUG FIX: source_files must ALWAYS reflect the Excel-mapped file.
+                    # Previously: only overrode source_files when it was empty, allowing
+                    # the validator to write the WRONG file (e.g. MFA doc for Capacity
+                    # Management) when a fallback-pool search happened.
+                    # Fix: if Excel strictly mapped this control to specific files, ALWAYS
+                    # set source_files to those mapped files — ignore whatever the validator
+                    # may have written from searching the wrong-pool fallback.
+                    if target_evidence_files:
+                        # Excel scoping is active → enforce the mapped file unconditionally.
+                        result["source_files"] = ", ".join(target_evidence_files)
+                    else:
+                        # No Excel scoping → use whatever the validator set (or leave empty).
+                        existing_src = result.get("source_files") or ""
+                        if not existing_src.strip():
+                            result["source_files"] = ""
+                    all_results.append(result)
+                ctrl_duration = time.time() - control_start_time
+                res_status = result.get("status", "Unknown") if result else "None"
+
+                c_mins = int(ctrl_duration // 60)
+                c_secs = round(ctrl_duration % 60, 1)
+                c_lat_str = f"{c_mins}m {c_secs}s" if c_mins > 0 else f"0m {c_secs}s"
+
+                _real_token_stats = state_output.get("token_stats") or {}
+                ctrl_p_toks = _real_token_stats.get("prompt_tokens", 0)
+                ctrl_c_toks = _real_token_stats.get("completion_tokens", 0)
+                ctrl_t_toks = ctrl_p_toks + ctrl_c_toks
+                _audit_real_prompt_toks += ctrl_p_toks
+                _audit_real_comp_toks += ctrl_c_toks
+
+                print(f"[{time.strftime('%H:%M:%S')}] [CONTROL EVALUATED] {c['control']} ({c['label']}) | Status: {res_status} | Latency: {c_lat_str} ({ctrl_duration:.1f}s) | Tokens Used: {ctrl_t_toks:,} (Prompt: {ctrl_p_toks:,}, Completion: {ctrl_c_toks:,})", flush=True)
+                log_dev_latency(f"[{idx + 1}/{total}] [SUCCESS] Control {c['control']} {c['label']} completed in {ctrl_duration:.2f}s ({c_lat_str}) | Tokens: {ctrl_t_toks:,}")
+                # ── Redis: push per-control metrics live ─────────────────────────
+                try:
+                    _rm.push_control_metrics(
+                        session_id=checkpoint_session_id or bg_key or _sid,
+                        prompt_tokens=ctrl_p_toks,
+                        comp_tokens=ctrl_c_toks,
+                        latency_sec=ctrl_duration
+                    )
+                except Exception as _rpm_err:
+                    pass  # Redis write failures never break an audit
+            except Exception as e:
+                print(f"[AUDIT ERROR] Error evaluating control {c['control']}: {e}", flush=True)
+                log_dev_latency(f"ERROR: Control {c['control']} failed: {e}")
+                # ── Redis: push error signal ─────────────────────────────────────
+                try:
+                    _rm.push_error(session_id=checkpoint_session_id or bg_key or _sid)
+                except Exception:
+                    pass
 
         # ── PER-CONTROL CHECKPOINT ─────────────────────────────────────────────
         # Save after EVERY control (~3ms). On crash, at most 1 control is re-run.
@@ -1300,6 +1382,22 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 "text": "🔍 Scanning file security...",
                 "percent": 0
             }
+
+        # Resolved once here and reused below -- scopes this session's chunk
+        # ingestion so a same-named file uploaded under a different session
+        # never collides with (deletes/overwrites) this session's own chunks.
+        _report_id_for_ingest = None
+        try:
+            with force_master():
+                _rid_session2 = SessionLocal()
+                _rid_report2 = _rid_session2.query(AuditReport).filter(
+                    AuditReport.session_id == _sid
+                ).first()
+                _report_id_for_ingest = _rid_report2.id if _rid_report2 else None
+                _rid_session2.close()
+        except Exception as _rid_err2:
+            print(f"[REPORT ID RESOLVE] Failed to resolve report_id for {_sid}: {_rid_err2}", flush=True)
+
         ctx = ""
         file_names_list = []
         for f_data in files_data:
@@ -1324,7 +1422,7 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 text = extract_text(f_like)
 
             ctx += f"--- FILE: {name} ---\n{text}\n\n"
-            save_document_chunks(name, text)
+            save_document_chunks(name, text, report_id=_report_id_for_ingest)
             file_names_list.append(name)
         context_str = ctx.strip()
 

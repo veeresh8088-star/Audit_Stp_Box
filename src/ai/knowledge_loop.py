@@ -3,6 +3,7 @@
 Knowledge Loop Module
 Filters historical auditor feedback and formats it as hints for in-context learning.
 """
+from src.core.pii_redactor import redact_pii
 
 def filter_feedback_record(feedback):
     """
@@ -47,15 +48,18 @@ def format_loop_hints(feedbacks):
             continue
             
         control_id = getattr(fb, "control_id", "")
-        comments = getattr(fb, "auditor_comments", "") or ""
+        # Redacted again here (not just at write time in audit.py) so records
+        # written before that redaction existed are still protected before
+        # this text gets injected verbatim into another auditor's prompt.
+        comments = redact_pii(getattr(fb, "auditor_comments", "") or "")
         status = getattr(fb, "corrected_status", "") or getattr(fb, "status", "") or ""
-        
+
         # Standardize status to check compliance
         status_upper = str(status).upper()
-        
+
         # If rejected or dismissed, add to negative constraint guidelines so LLM doesn't repeat the mistake
         if "REJECTED" in status_upper or "DISMISSED" in status_upper:
-            finding = getattr(fb, "finding", "") or getattr(fb, "description", "") or ""
+            finding = redact_pii(getattr(fb, "finding", "") or getattr(fb, "description", "") or "")
             if finding:
                 known_non_compliant.append(f"- For Control {control_id}: Note that a previous finding was REJECTED by the auditor: \"{finding}\". Do NOT repeat or generate this false finding.")
             continue
