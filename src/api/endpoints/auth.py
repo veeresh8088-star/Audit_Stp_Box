@@ -129,6 +129,17 @@ def _check_rate_limit(ip: str):
 
 @router.post("/register")
 def api_register(req: RegisterRequest):
+    # Self-service registration is for auditor/auditee accounts only. The
+    # "admin" role was previously accepted here with zero gatekeeping --
+    # anyone who could reach this public, unauthenticated endpoint could
+    # create their own admin account, which made every admin-only
+    # restriction elsewhere in the app (system logs, benchmark telemetry,
+    # finding-tampering protection, etc.) trivially bypassable. The one
+    # legitimate admin account is meant to come from the deployment's own
+    # bootstrap (ADMIN_DEFAULT_PASSWORD / seed_default_admin on first boot),
+    # not public self-signup.
+    if req.role == "admin":
+        raise HTTPException(status_code=403, detail="Admin accounts cannot be self-registered. Contact your system administrator.")
     # Call register_user logic from auth.py
     ok, msg, secret = register_user(req.username, req.password, req.role)
     if not ok:

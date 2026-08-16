@@ -810,7 +810,14 @@ function openNewSessionModal() {
     if (frameworkEl) frameworkEl.value = "ISO 27001";
     if (companyEl) companyEl.value = "";
     _autoFillSessionTitle();
-    if (modal) modal.style.display = "flex";
+    if (modal) {
+        modal.style.display = "flex";
+    } else {
+        // Previously a silent no-op if this element was ever missing --
+        // looked identical to the button doing nothing at all, with no way
+        // to tell from the outside. Now at least visible in the console.
+        console.error("[openNewSessionModal] #new-session-modal not found in DOM.");
+    }
     if (companyEl) setTimeout(() => { companyEl.focus(); }, 50);
 }
 
@@ -850,6 +857,13 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         if (!skipPrompt && customTitle === null) {
             // Only this auditor's own running audits are checked -- other
             // auditors' active sessions never block or interrupt this flow.
+            //
+            // Previously, declining the confirm() below returned out of this
+            // whole function with zero visible feedback -- indistinguishable
+            // from the button silently doing nothing at all, including from a
+            // stray misclick on the dialog. Now every path either opens the
+            // new-session modal or explicitly says why it didn't.
+            let userDeclined = false;
             try {
                 const activeResp = await authFetch(`${API_BASE}/audit/my-active-audits`);
                 const activeData = await activeResp.json();
@@ -860,16 +874,23 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
                         activeSessions.map(s => `• ${s}`).join('\n') +
                         `\n\nStarting a new session will STOP the running audit(s) and their in-progress scan will be lost. Continue?`
                     );
-                    if (!proceed) return;
-                    for (const sid of activeSessions) {
-                        await authFetch(`${API_BASE}/audit/stop/${sid}`, { method: "POST" }).catch(() => {});
+                    if (!proceed) {
+                        userDeclined = true;
+                        showToast("Cancelled — your running audit was left untouched.", "info");
+                    } else {
+                        for (const sid of activeSessions) {
+                            await authFetch(`${API_BASE}/audit/stop/${sid}`, { method: "POST" }).catch(() => {});
+                        }
+                        showToast("⏹️ Stopped previous running audit(s).", "info");
                     }
-                    showToast("⏹️ Stopped previous running audit(s).", "info");
                 }
             } catch (err) {
+                // Fails open: if the active-audits check itself errors (network
+                // blip, etc.), still let the user create a new session rather
+                // than silently blocking them.
                 console.error("Error checking active audits:", err);
             }
-            openNewSessionModal();
+            if (!userDeclined) openNewSessionModal();
             return;
         }
 
@@ -1030,16 +1051,30 @@ async function loadOrCreateSession(user) {
         if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
         if (titleEl) titleEl.innerText = activeSessionTitle;
     }
-    await checkInterruptedAuditSessions();
+    const showedInterruptedModal = await checkInterruptedAuditSessions();
+
+    // A fresh auditor account (or a browser with no saved session) previously
+    // landed on a blank workspace with no active session and no indication of
+    // what to do next -- despite this function's name, it never actually
+    // "created" one. Only auditors run audits from this workspace (admin
+    // doesn't, auditee has its own separate upload-driven flow), and only
+    // when there's neither a session to resume nor an interrupted one to
+    // recover, so this never stacks on top of the interrupted-session modal.
+    if (!lastSid && !showedInterruptedModal && user && user.role === "auditor") {
+        openNewSessionModal();
+    }
 }
 
 
 let currentInterruptedSession = null;
 
 async function checkInterruptedAuditSessions() {
-    if (!currentUser) return;
+    // Returns true iff an interrupted-session recovery modal was actually shown,
+    // so callers (loadOrCreateSession) know whether it's safe to instead prompt
+    // for a brand new session without stacking two modals on top of each other.
+    if (!currentUser) return false;
     // Admin user does not run audit scans — do NOT show audit scan recovery modal for admin!
-    if (currentUser.role === "admin" || currentUser.username === "admin") return;
+    if (currentUser.role === "admin" || currentUser.username === "admin") return false;
 
     try {
         const username = currentUser.username || "auditor";
@@ -1049,10 +1084,12 @@ async function checkInterruptedAuditSessions() {
         if (data.success && data.interrupted_sessions && data.interrupted_sessions.length > 0) {
             currentInterruptedSession = data.interrupted_sessions[0];
             showInterruptedSessionModal(currentInterruptedSession);
+            return true;
         }
-
+        return false;
     } catch (e) {
         console.warn("[Interrupted Checkpoint] Check error:", e);
+        return false;
     }
 }
 

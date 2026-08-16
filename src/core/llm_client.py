@@ -51,9 +51,23 @@ def _resolve_host(url=None, default_port=11434):
 
 def _ensure_llama_server_running(port=11434):
     """Auto-detects if llama-server.exe on port 11434 (LLM) or 11435 (Embedding) is offline,
-    and automatically spawns it in the background so the platform self-heals."""
+    and automatically spawns it in the background so the platform self-heals.
+
+    Native/single-machine deployments only -- in Docker, the LLM lives in its
+    own separate container (reached over the network as e.g. "llm:11434",
+    never localhost) with its own lifecycle managed by that container's own
+    entrypoint, not something this process could ever launch itself even in
+    principle. Attempting it anyway used to always fail here (checking
+    127.0.0.1, which nothing in the app container ever listens on) and log a
+    scary-looking "could not locate llama-server.exe" line for what was
+    usually just the LLM server being genuinely busy under concurrent load,
+    not actually down.
+    """
     import socket, subprocess, sys, time
-    
+
+    if in_docker():
+        return False
+
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.settimeout(1.5)
     try:
@@ -212,6 +226,20 @@ def query_llm(prompt, model, format=None, num_ctx=16384, temperature=0.0, num_th
                     except Exception: pass
                     raise Exception(f"llama-server.exe error: HTTP {r.status_code} - {r.text}")
                 return r.json()
+            except requests.exceptions.Timeout as _to_err:
+                # Must be caught BEFORE the broader ConnectionError/RequestException
+                # clause below -- requests.exceptions.Timeout (which ReadTimeout
+                # subclasses) is itself a RequestException, so with that clause
+                # first, a plain "the LLM server is just busy under concurrent
+                # load and hasn't answered yet" timeout was always being
+                # misdiagnosed as a dead connection, triggering a pointless
+                # local-process auto-start attempt instead of just logging the
+                # (accurate, and often totally expected under load) timeout.
+                try:
+                    from src.core.bg_worker import log_system_event
+                    log_system_event("LLM_REQUEST_TIMEOUT", "ERROR", f"LLM HTTP request timed out after {timeout}s", session_id=session_id)
+                except Exception: pass
+                raise
             except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as _conn_err:
                 print(f"[LLM CLIENT] Connection error to {url}: {_conn_err}. Attempting auto-start...", flush=True)
                 if _ensure_llama_server_running(11434):
@@ -219,12 +247,6 @@ def query_llm(prompt, model, format=None, num_ctx=16384, temperature=0.0, num_th
                     if r.status_code == 200:
                         return r.json()
                 raise Exception(f"llama-server.exe connection error on {url}: {_conn_err}")
-            except requests.exceptions.Timeout as _to_err:
-                try:
-                    from src.core.bg_worker import log_system_event
-                    log_system_event("LLM_REQUEST_TIMEOUT", "ERROR", f"LLM HTTP request timed out after {timeout}s", session_id=session_id)
-                except Exception: pass
-                raise
 
         result = _complete(1536)
         if result.get("stop_type") == "limit":

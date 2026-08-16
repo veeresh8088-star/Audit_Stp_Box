@@ -109,7 +109,7 @@ async function _fetchAndRenderLiveMetrics() {
     if (!container) return;
     try {
         const limit = window._adminLogLimit || 500;
-        const res = await fetch(`${API_BASE}/logs/live-metrics?limit=${limit}`);
+        const res = await authFetch(`${API_BASE}/logs/live-metrics?limit=${limit}`);
         if (!res.ok) return;
         const d = await res.json();
 
@@ -226,11 +226,21 @@ function _kpiCard(label, value, color, icon) {
 // Auto-hook: start polling when admin-logs tab is switched to
 // and stop polling when navigating away.
 // Integrates with the existing switchTab() in app.js.
+//
+// /logs/live-metrics is admin-only on the backend, so polling must be
+// gated by role here too. The old DOMContentLoaded check tested
+// adminTab.style.display !== "none" -- an *inline* style that's never set
+// (visibility is controlled by CSS classes), so that condition was true
+// for essentially every role on every page load, and the "container
+// exists" fallback below it made it unconditional even then. The net
+// effect: every auditor/auditee session silently polled an endpoint it
+// could never legitimately use, once every 3 seconds, forever.
 if (typeof window !== 'undefined') {
     const _origSwitchTab = window.switchTab;
     window.switchTab = function(tabId) {
         if (typeof _origSwitchTab === 'function') _origSwitchTab(tabId);
-        if (tabId === 'tab-admin-logs' || tabId === 'admin-logs') {
+        const isAdmin = typeof currentUser !== "undefined" && currentUser && currentUser.role === "admin";
+        if (isAdmin && (tabId === 'tab-admin-logs' || tabId === 'admin-logs')) {
             startLiveMetricsPolling();
         } else {
             stopLiveMetricsPolling();
@@ -238,11 +248,9 @@ if (typeof window !== 'undefined') {
     };
 
     document.addEventListener("DOMContentLoaded", () => {
+        const isAdmin = typeof currentUser !== "undefined" && currentUser && currentUser.role === "admin";
         const adminTab = document.getElementById("tab-admin-logs");
-        if (adminTab && (adminTab.classList.contains("active") || adminTab.style.display !== "none")) {
-            startLiveMetricsPolling();
-        } else if (document.getElementById("live-metrics-container")) {
-            // Also start polling if container exists
+        if (isAdmin && adminTab && adminTab.classList.contains("active")) {
             startLiveMetricsPolling();
         }
     });
