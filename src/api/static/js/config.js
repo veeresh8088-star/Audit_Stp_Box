@@ -1,9 +1,9 @@
 // ── GLOBAL STATE & UTILITY HELPERS ──
 var API_BASE = window.location.origin + "/api";
 
-var activeSessionId = localStorage.getItem("shakti_active_session") || null;
-var currentUser = JSON.parse(localStorage.getItem("shakti_user") || "null");
-var selectedRole = localStorage.getItem("shakti_role") || "auditor";
+var activeSessionId = null;
+var currentUser = null;
+var selectedRole = "auditor";
 var selectedAnalysisMode = "Deep";
 var selectedScopeControlIds = [];
 var findingsList = [];

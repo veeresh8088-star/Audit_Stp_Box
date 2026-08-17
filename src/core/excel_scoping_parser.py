@@ -40,51 +40,131 @@ _DIRECT_KEYWORD_CONTROL_MAP = [
     (["multifactor", "mfa", "multi-factor", "2fa", "two-factor"], "8.5 Secure Authentication"),
     (["pam", "privileged access", "pim", "idam"], "8.2 Privileged Access Rights"),
     (["access control policy", "access control"], "5.15 Access Control"),
-    # NOTE: control 8.5 is literally named "Secure Authentication" -- MFA and general
-    # "how is authentication done" questions are about the authentication *mechanism*,
-    # which is 8.5's scope, not 5.17 (which covers password/credential *lifecycle*
-    # management -- issuance, storage, revocation -- see the password/credential/secret
-    # entry further down, which correctly stays on 5.17). Bare "auth" was removed: as a
-    # substring match it also fired on "authorization"/"author" and could out-rank the
-    # more specific "access control" entry above depending on list order, misrouting an
-    # Access Control row's evidence file into 8.5's (or vice versa) whenever both
-    # keywords co-occurred in a question.
     (["authentication", "how is the auth"], "8.5 Secure Authentication"),
-    # Bare "register" removed: as a substring it also matched "risk register",
-    # misrouting risk-assessment questions into Asset Inventory.
     (["asset management policy", "asset management", "asset inventory"], "5.9 Inventory of Information and Other Associated Assets"),
     (["incident management policy", "incident response", "incident plan", "irp"], "5.24 Information Security Incident Management Planning and Preparation"),
     (["business continuity plan", "bcp", "disaster recovery", "dr plan"], "5.29 Information Security During Disruption"),
-    # Checked BEFORE the HR "screening" entry below so "vulnerability screening"
-    # resolves to 8.8 instead of being caught by the HR background-check keyword.
     (["vulnerability", "patch", "scan"], "8.8 Management of Technical Vulnerabilities"),
     (["hr security policy", "people security policy", "screening"], "6.1 Screening"),
-    (["physical security policy", "physical entry", "physical perimeter"], "7.1 Physical Security Perimeters"),
-    # Checked BEFORE Capacity Management below: a bare "monitoring" mention should
-    # default to Monitoring Activities (8.16), not be swallowed by Capacity
-    # Management, which previously had no dedicated competing entry at all.
+    (["physical security policy", "physical security perimeter", "physical perimeter", "perimeter security"], "7.1 Physical Security Perimeters"),
     (["security monitoring", "log monitoring", "siem", "monitoring activities", "monitoring"], "8.16 Monitoring Activities"),
     (["cpu", "memory", "disk", "utilization", "capacity", "cloudwatch"], "8.6 Capacity Management"),
-    (["log archival", "log archived", "archiv", "retention", "records"], "5.33 Protection of Records"),
+    (["log archival", "log archived", "archiv", "records retention", "records management"], "5.33 Protection of Records"),
     (["backup", "recovery", "restore"], "8.13 Information Backup"),
     (["incident", "response", "breach"], "5.24 Information Security Incident Management Planning and Preparation"),
     (["encryption", "tls", "ssl", "cipher"], "8.24 Use of Cryptography"),
     (["password", "credential", "secret"], "5.17 Authentication Information"),
-    (["firewall", "network", "traffic"], "8.20 Networks Security"),
+    (["firewall", "network security", "network traffic", "firewall policy"], "8.20 Network Security"),
     (["gdpr", "pii", "personal data", "privacy"], "5.34 Privacy and Protection of Personally Identifiable Information (Pii)"),
+
+    # ── Clause 5: Organizational Controls (all previously missing) ────────────
+    (["information security policy", "isms policy", "security policy document", "iprotect"], "5.1 Policies for Information Security"),
+    (["roles and responsibilities", "isms roles", "security roles", "responsibility assignment"], "5.2 Information Security Roles and Responsibilities"),
+    (["segregation of duties", "separation of duties", "dual control", "four eyes principle"], "5.3 Segregation of Duties"),
+    (["management commitment", "management responsibilities", "senior management", "executive sponsor"], "5.4 Management Responsibilities"),
+    (["contact with authorities", "law enforcement", "regulatory body", "government contact", "police contact"], "5.5 Contact with Authorities"),
+    (["special interest group", "isac", "industry group", "security forum", "peer group"], "5.6 Contact with Special Interest Groups"),
+    (["threat intelligence", "threat feed", "cti", "threat data", "ioc", "indicators of compromise"], "5.7 Threat Intelligence"),
+    (["project management", "project security", "sdlc governance", "project risk", "security in projects"], "5.8 Information Security in Project Management"),
+    (["acceptable use", "aup", "usage policy", "acceptable use policy", "permitted use"], "5.10 Acceptable Use of Information and Other Associated Assets"),
+    (["return of assets", "asset return", "exit assets", "equipment return", "device return on exit"], "5.11 Return of Assets"),
+    (["data classification", "information classification", "classification scheme", "sensitivity label", "classification policy"], "5.12 Classification of Information"),
+    (["data labelling", "information labelling", "label policy", "classification marking", "document marking"], "5.13 Labelling of Information"),
+    (["information transfer", "data transfer", "file transfer", "email security", "secure transfer", "sftp protocol", "secure ftp"], "5.14 Information Transfer"),
+    (["identity management", "user provisioning", "joiner leaver", "account lifecycle", "iam policy", "user lifecycle"], "5.16 Identity Management"),
+    (["access rights", "user permissions", "permission management", "access provisioning", "least privilege access"], "5.18 Access Rights"),
+    (["supplier relationship", "vendor relationship", "third party security", "supplier policy", "vendor agreement"], "5.19 Information Security in Supplier Relationships"),
+    (["supplier agreement", "vendor contract", "third party contract", "outsourcing agreement", "service contract"], "5.20 Addressing Information Security Within Supplier Agreements"),
+    (["ict supply chain", "supply chain security", "hardware supply", "software supply", "supply chain risk"], "5.21 Managing Information Security in The Ict Supply Chain"),
+    (["supplier monitoring", "vendor monitoring", "third party review", "supplier audit", "vendor performance"], "5.22 Monitoring, Review and Change Management of Supplier Services"),
+    (["cloud service", "cloud security", "saas", "iaas", "paas", "cloud provider", "aws", "azure", "gcp"], "5.23 Information Security for Use of Cloud Services"),
+    (["incident assessment", "security event assessment", "incident triage", "event decision", "incident classification"], "5.25 Assessment and Decision on Information Security Events"),
+    (["incident response plan", "incident handling", "containment", "eradication", "recovery response"], "5.26 Response to Information Security Incidents"),
+    (["lessons learned", "post incident review", "incident review", "learning from incidents", "incident debrief"], "5.27 Learning from Information Security Incidents"),
+    (["evidence collection", "forensic", "digital forensic", "chain of custody", "forensic evidence"], "5.28 Collection of Evidence"),
+    (["ict continuity", "ict readiness", "it continuity", "system continuity", "technology continuity"], "5.30 Ict Readiness for Business Continuity"),
+    (["legal requirement", "statutory requirement", "regulatory requirement", "contractual requirement", "compliance obligation"], "5.31 Legal, Statutory, Regulatory and Contractual Requirements"),
+    (["intellectual property", "copyright", "ip rights", "software license", "license management"], "5.32 Intellectual Property Rights"),
+    (["independent review", "internal audit", "isms review", "third party audit", "external audit"], "5.35 Independent Review of Information Security"),
+    (["compliance check", "policy compliance", "compliance with policy", "compliance review", "standards compliance"], "5.36 Compliance with Policies and Standards for Information Security"),
+    (["operating procedures", "sop", "documented procedures", "standard operating procedure", "work instructions"], "5.37 Documented Operating Procedures"),
+
+    # ── Clause 6: People Controls (all previously missing) ────────────────────
+    (["employment terms", "terms and conditions", "employment contract", "job agreement", "offer letter"], "6.2 Terms and Conditions of Employment"),
+    (["security awareness", "awareness training", "security training", "e-learning", "phishing awareness", "staff training"], "6.3 Information Security Awareness, Education and Training"),
+    (["disciplinary", "disciplinary process", "misconduct", "policy violation", "disciplinary action"], "6.4 Disciplinary Process"),
+    (["termination", "offboarding", "exit process", "leaver", "resignation", "dismissal", "account deactivation on exit"], "6.5 Responsibilities after Termination or Change of Employment"),
+    (["nda", "non-disclosure", "confidentiality agreement", "non disclosure agreement", "confidentiality clause"], "6.6 Confidentiality or Non-disclosure Agreements"),
+    (["remote work", "remote working", "work from home", "wfh", "telework", "home working", "vpn policy"], "6.7 Remote Working"),
+    (["security event reporting", "report incident", "event reporting", "staff reporting", "how to report"], "6.8 Information Security Event Reporting"),
+
+    # ── Clause 7: Physical Controls (all previously missing) ──────────────────
+    (["physical entry", "entry control", "door access", "turnstile", "access control door", "entry point"], "7.2 Physical Entry"),
+    (["secure office", "secure room", "secure facility", "server room", "data center access", "office security"], "7.3 Securing Offices, Rooms and Facilities"),
+    (["physical monitoring", "cctv", "camera surveillance", "security camera", "video surveillance"], "7.4 Physical Security Monitoring"),
+    (["environmental threat", "flood protection", "fire protection", "power protection", "environmental control", "uninterruptible power"], "7.5 Protecting against Physical and Environmental Threats"),
+    (["secure area", "working in secure area", "restricted area policy", "secure zone", "clean area"], "7.6 Working in Secure Areas"),
+    (["clean desk policy", "clear screen policy", "unattended workstation", "clear desk"], "7.7 Clear Desk and Clear Screen"),
+    (["equipment siting", "equipment placement", "server placement", "equipment protection", "rack security"], "7.8 Equipment Siting and Protection"),
+    (["off-premises", "assets off-premises", "remote equipment", "equipment offsite", "off site device"], "7.9 Security of Assets Off-premises"),
+    (["storage media", "removable media", "usb", "hard drive disposal", "media handling", "removable storage"], "7.10 Storage Media"),
+    (["supporting utilities", "power supply failure", "backup generator", "utility failure", "electricity supply", "uninterruptible power supply"], "7.11 Supporting Utilities"),
+    (["cabling", "cable security", "network cabling", "structured cabling", "cable management"], "7.12 Cabling Security"),
+    (["equipment maintenance", "maintenance schedule", "server maintenance", "hardware maintenance", "preventive maintenance"], "7.13 Equipment Maintenance"),
+    (["secure disposal", "equipment disposal", "data destruction", "disk wipe", "degauss", "decommission"], "7.14 Secure Disposal or Re-use of Equipment"),
+
+    # ── Clause 8: Technological Controls (all previously missing) ─────────────
+    (["endpoint", "user endpoint", "laptop policy", "mobile device", "mdm", "byod", "endpoint security"], "8.1 User Endpoint Devices"),
+    (["information access restriction", "need to know", "access restriction", "data access control"], "8.3 Information Access Restriction"),
+    (["source code", "code repository", "git access", "repository access", "source code access", "github", "gitlab"], "8.4 Access to Source Code"),
+    (["anti-malware", "edr", "malware protection", "endpoint protection", "av policy"], "8.7 Protection against Malware"),
+    (["configuration management", "baseline configuration", "hardening", "cmdb", "config baseline", "secure configuration"], "8.9 Configuration Management"),
+    (["data deletion", "information deletion", "secure erase", "data wiping", "data removal", "right to erasure"], "8.10 Information Deletion"),
+    (["data masking", "anonymization", "pseudonymization", "masking policy", "data anonymisation"], "8.11 Data Masking"),
+    (["dlp", "data leakage prevention", "data loss prevention", "data exfiltration", "information leakage"], "8.12 Data Leakage Prevention"),
+    (["system redundancy", "failover mechanism", "high availability setup", "active active", "active passive", "redundant system"], "8.14 Redundancy of Information Processing Facilities"),
+    (["log management", "syslog", "audit logs", "event logs", "logging policy", "log collection", "log retention"], "8.15 Logging"),
+    (["privileged utility", "admin tools", "utility programs", "system utilities", "privileged software"], "8.18 Use of Privileged Utility Programs"),
+    (["software installation", "approved software", "application whitelist", "install policy", "software approval"], "8.19 Installation of Software on Operational Systems"),
+    (["network services", "service security", "api gateway", "network service policy", "managed network service"], "8.21 Security of Network Services"),
+    (["network segregation", "vlan", "network segmentation", "dmz", "network zone", "micro segmentation"], "8.22 Segregation of Networks"),
+    (["web filtering", "url filtering", "proxy", "content filter", "internet filtering", "web proxy"], "8.23 Web Filtering"),
+    (["secure development", "sdlc", "secure development lifecycle", "secure development policy"], "8.25 Secure Development Life Cycle"),
+    (["application security", "app security requirements", "security requirements", "security in design"], "8.26 Application Security Requirements"),
+    (["secure architecture", "security architecture", "engineering principles", "security by design", "architecture review"], "8.27 Secure System Architecture and Engineering Principles"),
+    (["secure coding", "code review", "coding standard", "owasp", "sast", "dast", "static analysis"], "8.28 Secure Coding"),
+    (["security testing", "acceptance testing", "uat security", "pre-production testing", "security test"], "8.29 Security Testing in Development and Acceptance"),
+    (["outsourced development", "third party development", "vendor development", "offshore development"], "8.30 Outsourced Development"),
+    (["separation of environments", "dev test prod", "environment separation", "non-production", "staging environment"], "8.31 Separation of Development, Testing and Production Environments"),
+    (["change management", "change control", "change request", "change advisory board", "change approval process"], "8.32 Change Management"),
+    (["test information", "test data", "test data management", "production data in test", "sanitised test data"], "8.33 Test Information"),
+    (["audit testing", "audit protection", "system during audit", "audit tools", "audit environment"], "8.34 Protection of Information Systems During Audit Testing"),
 ]
 
 
 def _resolve_control_by_direct_map(text: str, use_cases: List[Dict]) -> Optional[Dict]:
-    """Fast O(n) keyword-map lookup before falling back to USE_CASES search."""
+    """Fast O(n) keyword-map lookup before falling back to USE_CASES search.
+    Ranks matches by keyword length so specific multi-word phrases (e.g. 'supplier monitoring')
+    take precedence over shorter substring matches (e.g. 'monitoring')."""
     text_norm = _normalize(text)
+    text_lower = str(text or "").lower()
+    matches = []
+
     for keywords, target_use_case in _DIRECT_KEYWORD_CONTROL_MAP:
-        if any(kw in text_norm for kw in keywords):
-            # Find the matching USE_CASE entry
-            target_norm = _normalize(target_use_case)
-            for uc in use_cases:
-                if _normalize(uc.get("use_case", "")) == target_norm:
-                    return uc
+        for kw in keywords:
+            kw_norm = _normalize(kw)
+            if kw_norm and (kw_norm in text_norm or kw.lower() in text_lower):
+                matches.append((len(kw_norm), target_use_case))
+
+    if matches:
+        # Longest match wins (e.g. 'supplier monitoring' len 19 > 'monitoring' len 10)
+        matches.sort(key=lambda x: x[0], reverse=True)
+        best_target = matches[0][1]
+        target_norm = _normalize(best_target)
+        for uc in use_cases:
+            if _normalize(uc.get("use_case", "")) == target_norm:
+                return uc
+
     return None
 
 

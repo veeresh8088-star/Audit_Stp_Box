@@ -295,6 +295,33 @@ function showError(msg) {
 
 function logout() {
     currentUser = null;
+    activeSessionId = "";
+    activeSessionTitle = "";
+    window._currentPollSessionId = null;
+    window._recentSessionsCache = [];
+    findingsList = [];
+    uploadedFilesList = [];
+    if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+    if (window._resultsInterval) { clearInterval(window._resultsInterval); window._resultsInterval = null; }
+
+    try {
+        localStorage.removeItem("last_active_session_id");
+        localStorage.removeItem("last_active_session_title");
+        localStorage.removeItem("shakti_active_session");
+        localStorage.removeItem("shakti_user");
+    } catch (e) {}
+
+    const badge = document.getElementById("active-session-badge");
+    const wsTitle = document.getElementById("workspace-title");
+    if (badge) badge.innerText = "";
+    if (wsTitle) wsTitle.innerText = "ISO 27001 Workspace";
+
+    const countBadge = document.getElementById("evidence-count-badge");
+    if (countBadge) countBadge.innerText = "0 files";
+    document.querySelectorAll("#uploaded-files-registry, #auditee-files-registry").forEach(reg => {
+        reg.innerHTML = `<div class="empty-state">No files uploaded yet. Drag files to begin audit.</div>`;
+    });
+
     document.getElementById("app-shell").style.display = "none";
     document.getElementById("auth-overlay").classList.add("active");
     document.getElementById("login-form").style.display = "block";
@@ -491,11 +518,18 @@ async function loadRecentSessions() {
             });
 
             // Restore Last Visited Session if not active or on initial startup
-            if ((!activeSessionId || activeSessionId === "") && window._recentSessionsCache.length > 0) {
-                const lastSid = localStorage.getItem("last_active_session_id");
+            if (window._recentSessionsCache.length > 0) {
+                const userKey = currentUser && currentUser.username ? `_${currentUser.username}` : "";
+                const lastSid = localStorage.getItem(`last_active_session_id${userKey}`);
                 const foundLast = lastSid ? window._recentSessionsCache.find(s => s.session_id === lastSid) : null;
-                const targetSession = foundLast || window._recentSessionsCache[0];
-                switchRecentSession(targetSession.session_id, targetSession.session_title);
+                const activeBelongsToUser = activeSessionId ? window._recentSessionsCache.some(s => s.session_id === activeSessionId) : false;
+
+                if (!activeSessionId || !activeBelongsToUser) {
+                    const targetSession = foundLast || window._recentSessionsCache[0];
+                    switchRecentSession(targetSession.session_id, targetSession.session_title);
+                } else {
+                    renderFilteredRecentSessionsList();
+                }
             } else {
                 renderFilteredRecentSessionsList();
             }
@@ -615,8 +649,11 @@ async function switchRecentSession(sessionId, sessionTitle) {
     if (sessionTitle) activeSessionTitle = sessionTitle;
 
     try {
-        localStorage.setItem("last_active_session_id", activeSessionId);
-        if (activeSessionTitle) localStorage.setItem("last_active_session_title", activeSessionTitle);
+        const userKey = currentUser && currentUser.username ? `_${currentUser.username}` : "";
+        localStorage.setItem(`last_active_session_id${userKey}`, activeSessionId);
+        if (activeSessionTitle) localStorage.setItem(`last_active_session_title${userKey}`, activeSessionTitle);
+        localStorage.removeItem("last_active_session_id");
+        localStorage.removeItem("last_active_session_title");
     } catch (e) {}
 
 
@@ -1018,6 +1055,11 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
             if (saveData.success && saveData.session_id) {
                 activeSessionId = saveData.session_id;
                 if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
+                try {
+                    const userKey = currentUser && currentUser.username ? `_${currentUser.username}` : "";
+                    localStorage.setItem(`last_active_session_id${userKey}`, activeSessionId);
+                    if (activeSessionTitle) localStorage.setItem(`last_active_session_title${userKey}`, activeSessionTitle);
+                } catch (e) {}
             }
         } catch (saveErr) {
             console.warn("[Session] Could not persist session to DB:", saveErr.message);
@@ -1041,8 +1083,9 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
 }
 
 async function loadOrCreateSession(user) {
-    const lastSid = localStorage.getItem("last_active_session_id");
-    const lastTitle = localStorage.getItem("last_active_session_title");
+    const userKey = user && user.username ? `_${user.username}` : "";
+    const lastSid = localStorage.getItem(`last_active_session_id${userKey}`);
+    const lastTitle = localStorage.getItem(`last_active_session_title${userKey}`);
     if (lastSid) {
         activeSessionId = lastSid;
         if (lastTitle) activeSessionTitle = lastTitle;
@@ -1050,6 +1093,13 @@ async function loadOrCreateSession(user) {
         const titleEl = document.getElementById("workspace-title");
         if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
         if (titleEl) titleEl.innerText = activeSessionTitle;
+    } else {
+        activeSessionId = "";
+        activeSessionTitle = "";
+        const badgeEl = document.getElementById("active-session-badge");
+        const titleEl = document.getElementById("workspace-title");
+        if (badgeEl) badgeEl.innerText = "";
+        if (titleEl) titleEl.innerText = "ISO 27001 Workspace";
     }
     const showedInterruptedModal = await checkInterruptedAuditSessions();
 
@@ -1326,26 +1376,32 @@ async function deleteEvidenceFile(idx) {
 }
 
 async function clearAllUploadedFiles() {
-    // Same server-sync gap as the single-file delete above (see the comment
-    // in deleteEvidenceFile): each file was already uploaded to the server
-    // in the background the moment it was dropped, so clearing only the
-    // local uploadedFilesList left every one of them still attached to the
-    // session server-side. The next upload then landed on top of that full
-    // set instead of replacing it, and the audit ran against old+new files
-    // combined. Soft-delete each one server-side first, same as removing
-    // files individually.
     if (activeSessionId) {
-        await Promise.all(uploadedFilesList.filter(f => f && f.name).map(file =>
-            authFetch(`${API_BASE}/audit/evidence/delete`, {
+        try {
+            await authFetch(`${API_BASE}/audit/evidence/delete-all`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ session_id: activeSessionId, filename: file.name })
-            }).catch(e => console.warn("Evidence delete (server) failed for", file.name, e))
-        ));
+                body: JSON.stringify({ session_id: activeSessionId })
+            });
+        } catch (e) {
+            console.warn("Evidence delete-all (server) failed, attempting individual deletes:", e);
+            if (uploadedFilesList && uploadedFilesList.length > 0) {
+                await Promise.all(uploadedFilesList.filter(f => f && f.name).map(file =>
+                    authFetch(`${API_BASE}/audit/evidence/delete`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ session_id: activeSessionId, filename: file.name })
+                    }).catch(err => console.warn("Evidence delete failed for", file.name, err))
+                ));
+            }
+        }
     }
 
     uploadedFilesList = [];
     renderUploadedFilesList();
+    if (typeof loadEvidenceFileList === "function") {
+        await loadEvidenceFileList();
+    }
 }
 
 function setAnalysisMode(mode) {
@@ -2040,6 +2096,25 @@ async function loadEvidenceFileList() {
 
     try {
         const response = await authFetch(`${API_BASE}/audit/evidence?session_id=${encodeURIComponent(requestSessionId)}`);
+        if (response.status === 403) {
+            console.warn(`[Evidence] User ${currentUser ? currentUser.username : ''} does not have access to session ${requestSessionId}. Resetting active session.`);
+            const userKey = currentUser && currentUser.username ? `_${currentUser.username}` : "";
+            try {
+                localStorage.removeItem(`last_active_session_id${userKey}`);
+                localStorage.removeItem(`last_active_session_title${userKey}`);
+            } catch (e) {}
+            if (activeSessionId === requestSessionId) {
+                activeSessionId = "";
+                activeSessionTitle = "";
+                if (window._recentSessionsCache && window._recentSessionsCache.length > 0) {
+                    const validSess = window._recentSessionsCache[0];
+                    switchRecentSession(validSess.session_id, validSess.session_title);
+                } else if (currentUser && currentUser.role === "auditor") {
+                    startNewAuditSession(true);
+                }
+            }
+            return;
+        }
         const data = await response.json();
 
         // Session guard: if active session changed while request was in-flight, ignore response
@@ -2072,14 +2147,22 @@ async function loadEvidenceFileList() {
                     else if (["ppt", "pptx"].includes(ext)) { fileClass = "file-type-doc"; fileIconText = "PPT"; }
                     else if (ext === "zip") { fileClass = "file-type-doc"; fileIconText = "ZIP"; }
 
+                    const safeFnEsc = fn.replace(/'/g, "\\'").replace(/"/g, "&quot;");
                     const card = document.createElement("div");
                     card.className = "modern-file-card";
+                    card.style.cssText = "display: flex; align-items: center; justify-content: space-between; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 10px; padding: 10px 12px; gap: 12px;";
                     card.innerHTML = `
-                        <div class="file-icon-badge ${fileClass}">${fileIconText}</div>
-                        <div class="file-details">
-                            <span class="file-title" title="${escapeHtml(fn)}">${escapeHtml(fn)}</span>
-                            <span class="file-meta">${escapeHtml(f.size_str || 'Ready')}</span>
+                        <div style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1;">
+                            <div class="file-icon-badge ${fileClass}" style="width: 32px; height: 32px; font-size: 0.65rem; border-radius: 8px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;">${fileIconText}</div>
+                            <div style="overflow: hidden;">
+                                <div style="font-size: 0.82rem; font-weight: 600; color: #f1f5f9; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${escapeHtml(fn)}">${escapeHtml(fn)}</div>
+                                <div style="font-size: 0.7rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+                                    <span>${escapeHtml(f.size_str || 'Ready')}</span>
+                                    <span style="color: #34d399; font-weight: 600;">✓ Attached</span>
+                                </div>
+                            </div>
                         </div>
+                        <button type="button" onclick="deleteServerEvidenceFile('${requestSessionId}', ${f.id}, '${safeFnEsc}')" style="background: transparent; border: none; color: #ef4444; font-size: 0.95rem; cursor: pointer; padding: 4px;" title="Remove ${escapeHtml(fn)}">🗑️</button>
                     `;
                     registry.appendChild(card);
                 });
@@ -2126,17 +2209,37 @@ async function triggerAuditAnalysis() {
         return;
     }
 
-    // Nothing previously stopped a scan from starting with zero evidence
-    // uploaded -- the button would just run every selected control against an
-    // empty file list, burning real LLM time to produce nothing but no-evidence
-    // findings. Same early-return pattern as the control-count check above.
-    if (uploadedFilesList.length === 0) {
+    // Count evidence: both files uploaded in THIS browser session (uploadedFilesList)
+    // AND files already attached server-side from a previous session/page load
+    // (rendered in the #uploaded-files-registry by loadEvidenceFileList).
+    // Previously only uploadedFilesList was checked, so a page reload with
+    // pre-existing server files would always fail this guard.
+    const serverAttachedCount = (() => {
+        // Primary source: the badge that loadEvidenceFileList sets
+        const badge = document.getElementById("evidence-count-badge");
+        if (badge) {
+            const n = parseInt(badge.innerText);
+            if (!isNaN(n)) return n;
+        }
+        // Fallback: count rendered file cards in the registry
+        const registry = document.getElementById("uploaded-files-registry");
+        if (registry) {
+            const cards = registry.querySelectorAll(".modern-file-card");
+            if (cards.length > 0) return cards.length;
+        }
+        return 0;
+    })();
+
+    const totalEvidenceCount = uploadedFilesList.length + serverAttachedCount;
+
+    if (totalEvidenceCount === 0) {
         alert("⚠️ Please upload at least one evidence file before starting the audit.");
         btn.disabled = false;
         btn.innerText = "▶ Run RAG Scan";
         if (stopBtn) stopBtn.style.display = "none";
         return;
     }
+
 
 
     const frameworkSelect = document.getElementById("framework-select");
@@ -2603,6 +2706,7 @@ function ensureAdminModalDOM() {
                                         <input type="checkbox" id="select-all-benchmark-chk" onchange="toggleSelectAllBenchmarkSessions(this.checked)" style="cursor: pointer;">
                                     </th>
                                     <th style="padding: 11px 10px;">Session ID / Timestamp</th>
+                                    <th style="padding: 11px 10px;">Auditor</th>
                                     <th style="padding: 11px 10px;">CPU Hardware</th>
                                     <th style="padding: 11px 10px;">Files & Types</th>
                                     <th style="padding: 11px 10px;">File Size</th>
@@ -2614,7 +2718,7 @@ function ensureAdminModalDOM() {
                                 </tr>
                             </thead>
                             <tbody id="benchmark-table-body">
-                                <tr><td colspan="10" style="text-align:center; padding:16px; color:#cbd5e1;">Loading audit session telemetry...</td></tr>
+                                <tr><td colspan="11" style="text-align:center; padding:16px; color:#cbd5e1;">Loading audit session telemetry...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -3004,6 +3108,68 @@ window.aggregateSelectedAuditSessions = async function () {
 window.exportAdminBenchmarkExcel = function () {
     window.location.href = `${API_BASE}/audit/benchmark/export`;
 };
+
+// ── Telemetry bulk download (Excel or PDF) ─────────────────────────────────
+window.downloadBenchmarkExport = async function (format) {
+    const btn = document.getElementById(
+        format === "pdf" ? "btn-download-telemetry-pdf" : "btn-download-telemetry-excel"
+    );
+    const origText = btn ? btn.innerHTML : "";
+    if (btn) { btn.disabled = true; btn.innerHTML = "⏳ Generating..."; }
+    try {
+        const endpoint = format === "pdf"
+            ? `${API_BASE}/audit/benchmark/export-pdf`
+            : `${API_BASE}/audit/benchmark/export`;
+        const resp = await authFetch(endpoint);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.detail || `Failed to download ${format.toUpperCase()} report.`, "error");
+            return;
+        }
+        const blob = await resp.blob();
+        const ext = format === "pdf" ? "pdf" : "xlsx";
+        const mime = format === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        const url = URL.createObjectURL(new Blob([blob], { type: mime }));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Executive_Audit_Telemetry_Report.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast(`✅ Telemetry report (.${ext}) downloaded!`, "success");
+    } catch (e) {
+        showToast(`Download failed: ${e.message}`, "error");
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = origText; }
+    }
+};
+
+// ── Per-session Excel download ─────────────────────────────────────────────
+window.downloadBenchmarkReportForSession = async function (sessionId) {
+    if (!sessionId) return;
+    try {
+        const resp = await authFetch(`${API_BASE}/audit/export-token-benchmark?session_id=${encodeURIComponent(sessionId)}`);
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            showToast(err.detail || "Failed to download session report.", "error");
+            return;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(new Blob([blob], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `Audit_Session_${sessionId.slice(0, 8)}_Benchmark.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showToast("✅ Session report downloaded!", "success");
+    } catch (e) {
+        showToast(`Download failed: ${e.message}`, "error");
+    }
+};
+
 
 function floatVal(val) {
     const num = parseFloat(val);

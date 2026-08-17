@@ -54,12 +54,12 @@ POLICY_GAP: never just "Yes"/"No" -- explain the actual deficiency, or write exa
 ════════════════════════════════════════
 EVIDENCE_STATUS / EVIDENCE_ASSESSMENT / EVIDENCE_RELEVANCE
 ════════════════════════════════════════
-EVIDENCE_STATUS: FOUND or NOT_FOUND only. A policy or procedure document alone is NOT implementation
-evidence -- e.g. "Administrators must perform periodic backups" is policy; "Backup job completed
-successfully on 10-Aug-2026" is evidence.
+EVIDENCE_STATUS: FOUND or NOT_FOUND only.
+- For operational technical controls (e.g. backups, clock sync, monitoring), a policy alone is not implementation evidence (e.g. "Administrators must perform periodic backups" is policy; "Backup job completed successfully on 10-Aug-2026" is evidence for 8.13).
+- For governance, policy, and documentation controls (such as 5.1 Policies for Information Security, 5.37 Documented Operating Procedures, 6.6 Confidentiality Agreements, or when an audit checklist question asks for an approved policy document/version/date), the approved, versioned policy document itself serves as the documentary evidence.
 
 EVIDENCE_ASSESSMENT: COMPLIANT or NON_COMPLIANT only. COMPLIANT only when the evidence (1) directly
-relates to this specific control, (2) demonstrates actual implementation/operation (not just intent),
+relates to this specific control, (2) demonstrates actual implementation/operation (or approved policy document for governance controls),
 (3) covers the control objective, (4) contains enough information to verify the claim, (5) is
 reasonably current, and (6) requires no unsupported assumptions to accept.
 
@@ -343,7 +343,7 @@ POLICY_STATUS/POLICY_ASSESSMENT: FOUND/NOT_FOUND, then COMPLIANT/NON_COMPLIANT o
 policy text actually addresses this specific control's requirement (not just a related topic).
 
 EVIDENCE_STATUS/EVIDENCE_ASSESSMENT/EVIDENCE_RELEVANCE: FOUND/NOT_FOUND, then COMPLIANT/NON_COMPLIANT
-only if the located text demonstrates actual implementation, not just a stated intent. EVIDENCE_RELEVANCE
+only if the located text demonstrates actual implementation (or approved versioned policy document for governance controls like 5.1/5.37 or checklist policy inquiries), not just a stated future intent. EVIDENCE_RELEVANCE
 is DIRECT/PARTIAL/RELATED/IRRELEVANT -- DIRECT includes equivalent/alternative implementations in
 different terminology that still satisfy the objective, not literal keyword matching. Only DIRECT
 evidence should support EVIDENCE_ASSESSMENT=COMPLIANT.

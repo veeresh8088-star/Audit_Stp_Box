@@ -87,15 +87,20 @@ def check_prompt_leakage(evidence, hints, threshold=0.75):
     if re.search(r'\blaw\s+([1-9]|10)\b', evidence_clean):
         return "PROMPT_LEAK"
             
+    if isinstance(hints, str):
+        hints = [hints]
+    elif not isinstance(hints, (list, tuple, set)):
+        hints = []
+
     import difflib
     for hint in hints:
-        if not hint:
+        if not hint or not isinstance(hint, str):
             continue
         hint_clean = hint.strip().strip('"').strip("'").strip('“').strip('”').strip().lower()
-        if not hint_clean:
+        if not hint_clean or len(hint_clean) < 15:
             continue
-        # Direct substring check
-        if hint_clean in evidence_clean or evidence_clean in hint_clean:
+        # Direct substring check for meaningful hint phrases
+        if hint_clean in evidence_clean:
             return "PROMPT_LEAK"
         # Fuzzy similarity check
         similarity = difflib.SequenceMatcher(None, hint_clean, evidence_clean).ratio()
@@ -574,7 +579,6 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             "ignore system instructions",
             "ignore the system prompt",
             "attention: ignore",
-            "mark the control as",
             "override all instructions"
         ]
         for kw in injection_keywords:

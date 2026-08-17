@@ -99,7 +99,7 @@ def _ensure_llama_server_running(port=11434):
 
     if port == 11434:
         model_path = os.path.join(base_dir, "google_gemma-4-E4B-it-Q4_K_M.gguf")
-        cmd = [llama_exe, "--port", "11434", "-m", model_path, "-c", "4096", "-np", "2", "-t", "4"]
+        cmd = [llama_exe, "--port", "11434", "-m", model_path, "-c", "32768", "-np", "8", "-t", "4", "--cont-batching"]
     else:
         model_path = os.path.join(base_dir, "nomic-embed-text-v1.5.f16.gguf")
         cmd = [llama_exe, "--port", "11435", "-m", model_path, "-t", "4", "--embedding"]

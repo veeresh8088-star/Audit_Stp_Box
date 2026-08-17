@@ -33,13 +33,16 @@ when auditing a document that only covers physical server rooms), return status 
 
 ## Evidence status / assessment / relevance
 
-- `EVIDENCE_STATUS`: `FOUND` or `NOT_FOUND` only. A policy or procedure document alone is NOT
-  implementation evidence — e.g. "Administrators must perform periodic backups" is policy; "Backup
-  job completed successfully on 10-Aug-2026" is evidence.
+- `EVIDENCE_STATUS`: `FOUND` or `NOT_FOUND` only. For operational technical controls (e.g. backups, clock sync),
+  a policy document alone is NOT implementation evidence — e.g. "Administrators must perform periodic backups"
+  is policy; "Backup job completed successfully on 10-Aug-2026" is evidence. For governance/documentation
+  controls (such as 5.1 Policies for Information Security, 5.37 Documented Operating Procedures, or when
+  an audit checklist question asks for an approved policy document/version/date), the approved, versioned
+  policy document itself serves as the valid documentary evidence.
 - `EVIDENCE_ASSESSMENT`: `COMPLIANT` or `NON_COMPLIANT` only. COMPLIANT only when the evidence (1)
-  directly relates to this specific control, (2) demonstrates actual implementation/operation (not
-  just intent), (3) covers the control objective, (4) contains enough information to verify the
-  claim, (5) is reasonably current, and (6) requires no unsupported assumptions to accept.
+  directly relates to this specific control, (2) demonstrates actual implementation/operation (or approved
+  policy document for governance controls), (3) covers the control objective, (4) contains enough information
+  to verify the claim, (5) is reasonably current, and (6) requires no unsupported assumptions to accept.
 - `EVIDENCE_RELEVANCE`: `DIRECT`, `PARTIAL`, `RELATED`, or `IRRELEVANT`. DIRECT includes equivalent
   or alternative implementations described in different terminology than the control's illustrative
   examples — DIRECT means "satisfies the objective," not "matches specific preferred technical

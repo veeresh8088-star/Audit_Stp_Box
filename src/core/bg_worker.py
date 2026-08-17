@@ -60,7 +60,7 @@ BACKEND_NAME = "Ollama"
 
 # ── GLOBAL TOPIC → ISO CONTROL MAPPING TABLE ─────────────────────────────
 TOPIC_CONTROL_MAP = {
-    # Authentication & Identity
+    # ── Authentication & Identity ─────────────────────────────────────────────
     "multi-factor authentication": ["8.5", "5.17", "5.16"],
     "mfa": ["8.5", "5.17"], "otp": ["8.5", "5.17"], "2fa": ["8.5", "5.17"],
     "two-factor": ["8.5", "5.17"], "password": ["8.5", "5.17"],
@@ -68,13 +68,19 @@ TOPIC_CONTROL_MAP = {
     "authentication information": ["5.17"], "identity management": ["5.16", "5.15"],
     "iam": ["5.16", "5.15", "8.2", "5.18"], "idam": ["5.16", "5.15", "8.2", "5.18"],
     "single sign-on": ["8.5", "5.16"], "sso": ["8.5", "5.16"],
-    # Privileged Access / PAM
+    "user provisioning": ["5.16", "5.18"], "account lifecycle": ["5.16", "5.18"],
+    "joiner leaver": ["5.16", "5.18", "6.5"],
+
+    # ── Privileged Access / PAM ───────────────────────────────────────────────
     "privileged access": ["8.2", "5.15", "5.18"], "pam": ["8.2", "5.15", "5.18"],
     "pim": ["8.2", "5.15"], "admin access": ["8.2", "5.18"],
     "root access": ["8.2", "5.18"], "role based access": ["5.15", "5.18", "8.2"],
     "rbac": ["5.15", "5.18"], "access rights": ["5.18", "5.15"],
     "access control": ["5.15", "5.18", "8.3"], "access management": ["5.15", "5.18"],
-    # Monitoring & Logging
+    "least privilege": ["5.18", "8.3"], "need to know": ["5.18", "8.3"],
+    "access restriction": ["8.3", "5.18"],
+
+    # ── Monitoring & Logging ──────────────────────────────────────────────────
     # NOTE: 7.4 (Physical Security Monitoring / CCTV) and 5.22 (Monitoring of SUPPLIER
     # Services specifically) were previously attached to every "monitoring" keyword here
     # just because their control names contain the word "monitoring" -- neither has
@@ -87,53 +93,217 @@ TOPIC_CONTROL_MAP = {
     "log archival": ["8.15", "5.28"], "log archive": ["8.15", "5.28"],
     "archived log": ["8.15", "5.28"], "audit log": ["8.15", "5.28"],
     "prod log": ["8.15", "5.28"], "syslog": ["8.15"], "event logs": ["8.15"],
+    "log retention": ["8.15", "5.33"],
     "collection of evidence": ["5.28"], "evidence collection": ["5.28"],
-    # NTP / Clock
+
+    # ── NTP / Clock ───────────────────────────────────────────────────────────
     "ntp": ["8.17"], "ntp server": ["8.17"], "clock synchronization": ["8.17"],
     "clock sync": ["8.17"], "ntp clock sync": ["8.17"],
     "time sync": ["8.17"], "time server": ["8.17"], "timestamp": ["8.17"],
-    # Cloud Services
+
+    # ── Cloud Services ────────────────────────────────────────────────────────
     "cloud": ["5.23", "8.16"], "aws": ["5.23", "8.16"], "azure": ["5.23"], "gcp": ["5.23"],
     "cloud services": ["5.23"], "cloud security": ["5.23"],
-    # Network Security
+    "saas": ["5.23"], "iaas": ["5.23"], "paas": ["5.23"],
+
+    # ── Network Security ──────────────────────────────────────────────────────
     "network security": ["8.20", "8.21", "8.22"], "firewall": ["8.20", "VAPT-13"],
-    "network segmentation": ["8.22", "VAPT-13"], "vpn": ["6.7", "8.20"],
-    "remote working": ["6.7"], "remote access": ["6.7", "8.20"],
-    # Vulnerability & Patch
+    "network segmentation": ["8.22", "VAPT-13"], "vlan": ["8.22"],
+    "dmz": ["8.22"], "micro segmentation": ["8.22"],
+    "vpn": ["6.7", "8.20"], "remote working": ["6.7"], "remote access": ["6.7", "8.20"],
+    "network services": ["8.21"], "api gateway": ["8.21"],
+    "web filtering": ["8.23"], "url filtering": ["8.23"], "proxy": ["8.23"],
+    "content filter": ["8.23"], "internet filtering": ["8.23"],
+
+    # ── Vulnerability & Patch ─────────────────────────────────────────────────
     "vulnerability": ["8.8", "VAPT-11"], "patch": ["VAPT-12", "8.8"],
     "patch management": ["VAPT-12", "8.8"], "vulnerability scan": ["8.8", "VAPT-3"],
     "penetration test": ["VAPT-5", "VAPT-6", "8.29"],
     "pentest": ["VAPT-5", "VAPT-6"], "vapt": ["VAPT-5", "VAPT-6", "8.29"],
-    # Operations & Procedures
+
+    # ── Operations & Procedures ───────────────────────────────────────────────
     "operating procedures": ["5.37"], "documented procedures": ["5.37"],
     "sop": ["5.37"], "operational procedure": ["5.37"],
     "standard operating procedure": ["5.37"],
-    # Business Continuity
+
+    # ── Policy & Governance ───────────────────────────────────────────────────
+    "information security policy": ["5.1"], "isms policy": ["5.1"],
+    "security policy": ["5.1"], "iprotect": ["5.1"], "isms": ["5.1"],
+    "roles and responsibilities": ["5.2"], "isms roles": ["5.2"],
+    "security roles": ["5.2"], "responsibility assignment": ["5.2"],
+    "segregation of duties": ["5.3"], "separation of duties": ["5.3"],
+    "dual control": ["5.3"], "four eyes principle": ["5.3"],
+    "management commitment": ["5.4"], "management responsibilities": ["5.4"],
+    "senior management": ["5.4"], "executive sponsor": ["5.4"],
+    "contact with authorities": ["5.5"], "law enforcement": ["5.5"],
+    "regulatory body": ["5.5"], "government contact": ["5.5"],
+    "special interest group": ["5.6"], "isac": ["5.6"], "industry group": ["5.6"],
+    "security forum": ["5.6"],
+
+    # ── Threat Intelligence ───────────────────────────────────────────────────
+    "threat intelligence": ["5.7"], "threat feed": ["5.7"], "cti": ["5.7"],
+    "threat data": ["5.7"], "ioc": ["5.7"], "indicators of compromise": ["5.7"],
+
+    # ── Project & SDLC Governance ─────────────────────────────────────────────
+    "project security": ["5.8"], "sdlc governance": ["5.8"], "project risk": ["5.8"],
+    "security in projects": ["5.8"], "project management": ["5.8"],
+
+    # ── Asset Management ──────────────────────────────────────────────────────
+    "asset inventory": ["5.9"], "asset register": ["5.9"], "asset management": ["5.9"],
+    "acceptable use": ["5.10"], "aup": ["5.10"], "usage policy": ["5.10"],
+    "return of assets": ["5.11"], "asset return": ["5.11"], "equipment return": ["5.11"],
+    "data classification": ["5.12"], "information classification": ["5.12"],
+    "classification scheme": ["5.12"], "sensitivity label": ["5.12"],
+    "data labelling": ["5.13"], "information labelling": ["5.13"], "document marking": ["5.13"],
+    "information transfer": ["5.14"], "data transfer": ["5.14"],
+    "file transfer": ["5.14"], "email security": ["5.14"], "secure ftp": ["5.14"], "sftp protocol": ["5.14"],
+
+    # ── Supplier / Third Party ────────────────────────────────────────────────
+    "supplier": ["5.19", "5.21", "5.22"], "vendor": ["5.19", "5.21", "5.22"],
+    "third party": ["5.19", "5.22"], "supplier security": ["5.19", "5.21", "5.22"],
+    "supplier relationship": ["5.19"], "vendor relationship": ["5.19"],
+    "supplier agreement": ["5.20"], "vendor contract": ["5.20"],
+    "third party contract": ["5.20"], "outsourcing agreement": ["5.20"],
+    "ict supply chain": ["5.21"], "supply chain security": ["5.21"],
+    "supply chain risk": ["5.21"], "hardware supply": ["5.21"],
+    "supplier monitoring": ["5.22"], "vendor monitoring": ["5.22"],
+    "third party review": ["5.22"], "supplier audit": ["5.22"],
+
+    # ── Incident Management ───────────────────────────────────────────────────
+    "incident": ["5.24", "5.25", "5.26"], "incident response": ["5.24", "5.25"],
+    "security incident": ["5.24"], "incident management": ["5.24", "5.25"],
+    "incident assessment": ["5.25"], "incident triage": ["5.25"],
+    "event decision": ["5.25"], "incident classification": ["5.25"],
+    "incident handling": ["5.26"], "containment": ["5.26"], "eradication": ["5.26"],
+    "recovery response": ["5.26"],
+    "lessons learned": ["5.27"], "post incident review": ["5.27"],
+    "learning from incidents": ["5.27"], "incident debrief": ["5.27"],
+    "forensic": ["5.28"], "digital forensic": ["5.28"],
+    "chain of custody": ["5.28"], "evidence forensic": ["5.28"],
+
+    # ── Business Continuity ───────────────────────────────────────────────────
     "business continuity": ["5.29", "5.30"], "bcp": ["5.29", "5.30"],
     "disaster recovery": ["5.29", "5.30"], "dr": ["5.29", "5.30"],
+    "ict continuity": ["5.30"], "ict readiness": ["5.30"], "it continuity": ["5.30"],
     "backup": ["8.13"], "data backup": ["8.13"], "backup policy": ["8.13"],
-    # HR & Personnel
-    "hr security": ["5.1", "5.37"], "background check": ["5.1"],
-    "screening": ["5.1"], "onboarding": ["5.1"], "offboarding": ["5.1"],
-    "terms of employment": ["5.1"],
-    # Physical Security
+    "system redundancy": ["8.14"], "failover mechanism": ["8.14"], "high availability setup": ["8.14"],
+
+    # ── Compliance & Legal ────────────────────────────────────────────────────
+    "legal requirement": ["5.31"], "statutory requirement": ["5.31"],
+    "regulatory requirement": ["5.31"], "contractual requirement": ["5.31"],
+    "compliance obligation": ["5.31"], "regulatory": ["5.31"],
+    "intellectual property": ["5.32"], "copyright": ["5.32"],
+    "software license": ["5.32"], "license management": ["5.32"], "ip rights": ["5.32"],
+    "log retention policy": ["5.33"], "records retention": ["5.33"], "record management": ["5.33"],
+    "gdpr": ["5.34"], "pii": ["5.34"], "personal data": ["5.34"],
+    "privacy": ["5.34"], "data privacy": ["5.34"],
+    "independent review": ["5.35"], "internal audit": ["5.35"], "isms review": ["5.35"],
+    "external audit": ["5.35"],
+    "compliance check": ["5.36"], "policy compliance": ["5.36"],
+    "compliance review": ["5.36"], "standards compliance": ["5.36"],
+    # ── HR & Personnel ────────────────────────────────────────────────────────
+    # FIXED: was mapped to 5.1 (wrong); screening/onboarding are 6.1 people controls
+    "background check": ["6.1"], "screening": ["6.1"], "pre-employment": ["6.1"],
+    "onboarding": ["6.1"], "hr security": ["6.1"],
+    "employment terms": ["6.2"], "terms of employment": ["6.2"],
+    "employment contract": ["6.2"], "offer letter": ["6.2"],
+    "security awareness": ["6.3"], "awareness training": ["6.3"],
+    "staff training": ["6.3"], "phishing awareness": ["6.3"], "e-learning": ["6.3"],
+    "disciplinary": ["6.4"], "misconduct": ["6.4"], "policy violation": ["6.4"],
+    "termination": ["6.5"], "offboarding": ["6.5"], "exit process": ["6.5"],
+    "leaver": ["6.5"], "resignation": ["6.5"], "dismissal": ["6.5"],
+    "nda": ["6.6"], "non-disclosure": ["6.6"], "confidentiality agreement": ["6.6"],
+    "remote work": ["6.7"], "work from home": ["6.7"], "wfh": ["6.7"],
+    "telework": ["6.7"], "home working": ["6.7"], "vpn policy": ["6.7"],
+    "security event reporting": ["6.8"], "event reporting": ["6.8"],
+    "how to report": ["6.8"], "staff reporting": ["6.8"],
+
+    # ── Physical Security ─────────────────────────────────────────────────────
     "physical security": ["7.1", "7.2", "7.4"], "visitor": ["7.2"],
     "visitor log": ["7.2"], "cctv": ["7.4"], "badge": ["7.2"],
     "physical access": ["7.1", "7.2"],
-    # Supplier / Vendor
-    "supplier": ["5.19", "5.21", "5.22"], "vendor": ["5.19", "5.21", "5.22"],
-    "third party": ["5.19", "5.22"], "supplier security": ["5.19", "5.21", "5.22"],
-    # Application & Software
+    "physical entry": ["7.2"], "entry control": ["7.2"],
+    "door access": ["7.2"], "turnstile": ["7.2"],
+    "secure office": ["7.3"], "secure room": ["7.3"], "server room": ["7.3"],
+    "data center access": ["7.3"],
+    "physical monitoring": ["7.4"], "camera surveillance": ["7.4"],
+    "security camera": ["7.4"], "video surveillance": ["7.4"],
+    "environmental threat": ["7.5"], "flood protection": ["7.5"], "fire protection": ["7.5"],
+    "power protection": ["7.5"], "uninterruptible power": ["7.5", "7.11"],
+    "secure area": ["7.6"], "restricted area": ["7.6"],
+    "clean desk policy": ["7.7"], "clear screen policy": ["7.7"], "unattended workstation": ["7.7"],
+    "equipment siting": ["7.8"], "rack security": ["7.8"],
+    "assets off-premises": ["7.9"], "remote equipment": ["7.9"], "equipment offsite": ["7.9"],
+    "storage media": ["7.10"], "removable media": ["7.10"], "usb": ["7.10"],
+    "media handling": ["7.10"], "removable storage": ["7.10"],
+    "supporting utilities": ["7.11"], "power supply failure": ["7.11"], "backup generator": ["7.11"],
+    "utility failure": ["7.11"],
+    "cabling": ["7.12"], "cable security": ["7.12"], "network cabling": ["7.12"],
+    "structured cabling": ["7.12"],
+    "equipment maintenance": ["7.13"], "maintenance schedule": ["7.13"],
+    "hardware maintenance": ["7.13"], "preventive maintenance": ["7.13"],
+    "secure disposal": ["7.14"], "equipment disposal": ["7.14"],
+    "data destruction": ["7.14"], "disk wipe": ["7.14"],
+    "degauss": ["7.14"], "decommission": ["7.14"],
+
+    # ── Endpoint & Device ─────────────────────────────────────────────────────
+    "endpoint": ["8.1"], "user endpoint": ["8.1"], "laptop policy": ["8.1"],
+    "mobile device": ["8.1"], "mdm": ["8.1"], "byod": ["8.1"],
+    "endpoint security": ["8.1"],
+
+    # ── Source Code ───────────────────────────────────────────────────────────
     "software development": ["8.25", "8.28"], "sdlc": ["8.25", "8.28"],
     "secure coding": ["8.28"], "code review": ["8.28"],
+    "source code": ["8.4", "8.28"], "code repository": ["8.4"],
+    "git access": ["8.4"], "github": ["8.4"], "gitlab": ["8.4"],
+
+    # ── Malware & Configuration ───────────────────────────────────────────────
+    "antivirus": ["8.7"], "anti-malware": ["8.7"], "edr": ["8.7"],
+    "malware": ["8.7"], "av policy": ["8.7"],
+    "configuration management": ["8.9"], "hardening": ["8.9"],
+    "cmdb": ["8.9"], "baseline configuration": ["8.9"],
+
+    # ── Data Management ───────────────────────────────────────────────────────
+    "data deletion": ["8.10"], "information deletion": ["8.10"],
+    "secure erase": ["8.10"], "data wiping": ["8.10"],
+    "data masking": ["8.11"], "anonymization": ["8.11"], "pseudonymization": ["8.11"],
+    "dlp": ["8.12"], "data leakage prevention": ["8.12"],
+    "data loss prevention": ["8.12"], "data exfiltration": ["8.12"],
+
+    # ── Capacity & Utilities ──────────────────────────────────────────────────
     "api security": ["8.26"], "fraud analytics": ["8.26"],
-    # Cryptography & Key Management
+    "capacity": ["8.6"], "cpu": ["8.6"], "memory": ["8.6"],
+    "disk utilization": ["8.6"],
+    "privileged utility": ["8.18"], "admin tools": ["8.18"],
+    "utility programs": ["8.18"], "system utilities": ["8.18"],
+    "software installation": ["8.19"], "approved software": ["8.19"],
+    "application whitelist": ["8.19"], "install policy": ["8.19"],
+
+    # ── Cryptography & Key Management ─────────────────────────────────────────
     "encryption": ["8.24"], "cryptography": ["8.24"],
     "kms": ["8.24"], "ssl": ["8.24"], "tls": ["8.24"], "key management": ["8.24"],
-    # Incident & Risk
-    "incident": ["5.24", "5.25", "5.26"], "incident response": ["5.24", "5.25"],
-    "security incident": ["5.24"], "incident management": ["5.24", "5.25"],
-    "risk assessment": ["5.12"], "risk management": ["5.12"], "risk": ["5.12"]
+
+    # ── Risk Assessment ───────────────────────────────────────────────────────
+    # FIXED: was mapped to 5.12 (Classification) which is wrong; risk assessment = 5.1, 5.7
+    "risk assessment": ["5.1", "5.7", "5.8"],
+    "risk management": ["5.1", "5.7"], "risk": ["5.1", "5.7"],
+    "risk register": ["5.1", "5.7"], "risk treatment": ["5.1", "5.7"],
+    "residual risk": ["5.1", "5.7"], "risk appetite": ["5.1", "5.7"],
+
+    # ── Secure Development ────────────────────────────────────────────────────
+    "secure development": ["8.25"], "secure development lifecycle": ["8.25"],
+    "application security": ["8.26"], "security requirements": ["8.26"],
+    "secure architecture": ["8.27"], "security architecture": ["8.27"],
+    "engineering principles": ["8.27"], "security by design": ["8.27"],
+    "security testing": ["8.29"], "acceptance testing": ["8.29"],
+    "outsourced development": ["8.30"], "third party development": ["8.30"],
+    "separation of environments": ["8.31"], "dev test prod": ["8.31"],
+    "staging environment": ["8.31"], "non-production": ["8.31"],
+    "change management": ["8.32"], "change control": ["8.32"],
+    "change request": ["8.32"], "change advisory board": ["8.32"], "change approval process": ["8.32"],
+    "test data": ["8.33"], "test information": ["8.33"],
+    "production data in test": ["8.33"], "sanitised test data": ["8.33"],
+    "audit testing": ["8.34"], "audit tools": ["8.34"], "audit environment": ["8.34"],
 }
 
 def log_dev_latency(message: str):
@@ -300,11 +470,13 @@ def _build_controls_for_audit(selected_sls=None, custom_evidence=None):
 def get_num_ctx(model_name: str) -> int:
     name = model_name.lower()
     if "12b" in name:
-        return 6144
+        return 8192
     if any(x in name for x in ["7b", "8b", "9b", "27b"]):
         return 8192
-    if "3b" in name or "e4b" in name:
+    if "3b" in name:
         return 4096
+    if "e4b" in name:
+        return 8192  # Gemma 4 e4b: server runs -c 32768 / -np 8 → 8192 per slot
     return 4096
 
 def _generate_context_summary(context, llm_model):

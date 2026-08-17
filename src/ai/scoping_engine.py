@@ -162,56 +162,151 @@ CONTENT_SIGNALS = {
     "HR / People Security Policy": [
         "screening", "pre-employment", "onboarding", "termination of employment",
         "awareness training", "disciplinary", "confidentiality agreement", "remote working",
-        "nda", "non-disclosure", "background check", "joiner", "leaver"
+        "nda", "non-disclosure", "background check", "joiner", "leaver",
+        # New: 6.2–6.8 sub-control keywords
+        "employment terms", "terms and conditions", "employment contract", "offer letter",
+        "security awareness", "phishing awareness", "staff training", "e-learning",
+        "misconduct", "policy violation", "disciplinary action",
+        "offboarding", "exit process", "resignation", "dismissal", "account deactivation",
+        "non disclosure", "confidentiality clause", "work from home", "wfh", "telework",
+        "home working", "vpn policy", "event reporting", "how to report security"
     ],
     "Physical Security Policy": [
         "badge", "physical access", "secure area", "clean desk", "visitor",
         "cctv", "tailgating", "piggyback", "reception", "keycard", "facility access",
-        "physical security", "equipment disposal", "secure room"
+        "physical security", "equipment disposal", "secure room",
+        # New: 7.2–7.14 sub-control keywords
+        "physical entry", "entry control", "door access", "turnstile", "entry point",
+        "secure office", "secure facility", "server room", "data center access",
+        "camera surveillance", "security camera", "video surveillance",
+        "environmental threat", "flood", "fire protection", "power protection", "ups",
+        "working in secure area", "restricted area policy", "secure zone",
+        "clear screen", "unattended workstation", "equipment siting", "rack security",
+        "assets off-premises", "remote equipment", "equipment offsite",
+        "storage media", "removable media", "usb", "media handling", "removable storage",
+        "supporting utilities", "power supply", "generator", "utility failure",
+        "cabling", "cable security", "network cabling", "structured cabling",
+        "equipment maintenance", "maintenance schedule", "hardware maintenance",
+        "secure disposal", "data destruction", "disk wipe", "degauss", "decommission"
     ],
     "Incident Management Policy": [
         "incident response", "security incident", "breach notification", "containment",
         "eradication", "forensic", "evidence collection", "incident severity",
-        "soc ", "security operations"
+        "soc ", "security operations",
+        # New: 5.25–5.28 sub-control keywords
+        "incident assessment", "incident triage", "event decision", "incident classification",
+        "incident handling", "recovery response",
+        "lessons learned", "post incident review", "incident review", "learning from incidents",
+        "incident debrief", "digital forensic", "chain of custody"
     ],
     "Access Control Policy": [
         "logical access", "user account", "privilege", "authentication", "password",
         "identity management", "access rights", "role-based", "rbac", "mfa",
         "multi-factor", "single sign", "sso", "least privilege", "user credential",
-        "system account", "login credential"
+        "system account", "login credential",
+        # New: 5.16–5.18, 8.2–8.3 sub-control keywords
+        "user provisioning", "joiner leaver", "account lifecycle", "iam policy", "user lifecycle",
+        "permission management", "access provisioning", "least privilege access",
+        "privileged access", "pam", "pim", "admin access", "root access",
+        "information access restriction", "need to know", "access restriction"
     ],
     "Technology / IT Security Policy": [
         "endpoint", "antivirus", "malware", "firewall", "encryption", "patch",
         "vulnerability", "network security", "logging", "monitoring", "backup",
-        "cryptography", "configuration management", "data loss prevention"
+        "cryptography", "configuration management", "data loss prevention",
+        # New: 8.1, 8.4, 8.7, 8.9–8.23 sub-control keywords
+        "user endpoint", "laptop policy", "mobile device", "mdm", "byod", "endpoint security",
+        "source code", "code repository", "git access", "github", "gitlab",
+        "anti-malware", "edr", "malware protection", "av policy",
+        "baseline configuration", "hardening", "cmdb", "config baseline", "secure configuration",
+        "data deletion", "information deletion", "secure erase", "data wiping", "right to erasure",
+        "data masking", "anonymization", "pseudonymization", "masking policy",
+        "dlp", "data leakage prevention", "data exfiltration", "information leakage",
+        "redundancy", "failover", "high availability", "active active", "active passive",
+        "log management", "syslog", "audit logs", "event logs", "logging policy", "log retention",
+        "clock synchronization", "ntp", "time server", "time sync",
+        "privileged utility", "admin tools", "utility programs", "system utilities",
+        "software installation", "approved software", "application whitelist", "install policy",
+        "network services", "api gateway", "managed network service",
+        "vlan", "network segmentation", "dmz", "network zone", "micro segmentation",
+        "web filtering", "url filtering", "proxy", "content filter", "internet filtering"
     ],
     "Supplier / Third Party Policy": [
         "supplier", "vendor", "third party", "outsourc", "service provider",
-        "cloud service", "supply chain", "contractor agreement", "sla"
+        "cloud service", "supply chain", "contractor agreement", "sla",
+        # New: 5.19–5.23 sub-control keywords
+        "supplier relationship", "vendor relationship", "supplier policy",
+        "supplier agreement", "vendor contract", "third party contract", "service contract",
+        "ict supply chain", "supply chain security", "hardware supply", "software supply",
+        "supply chain risk", "supplier monitoring", "vendor monitoring", "third party review",
+        "supplier audit", "vendor performance",
+        "saas", "iaas", "paas", "cloud provider", "aws", "azure", "gcp", "cloud security"
     ],
     "Risk Assessment": [
         "risk register", "risk assessment", "threat", "vulnerability assessment",
-        "risk treatment", "residual risk", "risk owner", "risk appetite"
+        "risk treatment", "residual risk", "risk owner", "risk appetite",
+        # New: 5.7, 5.8 sub-control keywords
+        "threat intelligence", "threat feed", "cti", "threat data", "ioc",
+        "indicators of compromise", "project security", "sdlc governance", "project risk"
     ],
     "Business Continuity Plan": [
         "business continuity", "disaster recovery", "bcp", "drp", "rto", "rpo",
-        "recovery time", "recovery point", "resilience", "failover"
+        "recovery time", "recovery point", "resilience", "failover",
+        # New: 5.30, 8.13, 8.14 sub-control keywords
+        "ict continuity", "ict readiness", "it continuity", "system continuity",
+        "technology continuity", "redundancy", "high availability", "restore"
     ],
     "Compliance / Legal Policy": [
         "gdpr", "pii", "personal data", "data privacy", "legal requirement",
-        "regulatory", "intellectual property", "data protection", "privacy"
+        "regulatory", "intellectual property", "data protection", "privacy",
+        # New: 5.31–5.36 sub-control keywords
+        "statutory requirement", "contractual requirement", "compliance obligation",
+        "copyright", "ip rights", "software license", "license management", "ipr",
+        "records retention", "record management", "log retention policy",
+        "independent review", "internal audit", "isms review", "external audit",
+        "compliance check", "policy compliance", "compliance review", "standards compliance"
     ],
     "General Security Policy": [
         "information security policy", "iprotect", "information protection policy",
-        "security policy", "isms", "iso 27001"
+        "security policy", "isms", "iso 27001",
+        # New: 5.1–5.8, 5.35–5.37 sub-control keywords
+        "roles and responsibilities", "isms roles", "security roles",
+        "segregation of duties", "separation of duties", "sod", "dual control",
+        "management commitment", "management responsibilities", "senior management",
+        "contact with authorities", "law enforcement", "regulatory body",
+        "special interest group", "isac", "industry group", "security forum",
+        "project management", "security in projects",
+        "operating procedures", "sop", "documented procedures",
+        "standard operating procedure", "work instructions"
     ],
     "Asset Management Policy": [
         "asset inventory", "asset register", "asset classification", "asset owner",
-        "information asset", "data classification", "asset management"
+        "information asset", "data classification", "asset management",
+        # New: 5.10–5.14 sub-control keywords
+        "acceptable use", "aup", "usage policy", "acceptable use policy", "permitted use",
+        "return of assets", "asset return", "exit assets", "equipment return",
+        "information classification", "classification scheme", "sensitivity label",
+        "data labelling", "information labelling", "marking", "classification marking",
+        "information transfer", "data transfer", "file transfer", "email security",
+        "secure transfer", "ftp", "sftp"
     ],
     "Development / Secure Coding Policy": [
         "secure coding", "sdlc", "development lifecycle", "code review",
-        "penetration test", "security testing", "devops", "ci/cd"
+        "penetration test", "security testing", "devops", "ci/cd",
+        # New: 8.25–8.34 sub-control keywords
+        "secure development", "secure development lifecycle", "secure development policy",
+        "application security", "app security requirements", "security requirements",
+        "security in design", "secure architecture", "security architecture",
+        "engineering principles", "security by design", "architecture review",
+        "coding standard", "owasp", "sast", "dast", "static analysis",
+        "acceptance testing", "uat security", "pre-production testing",
+        "outsourced development", "third party development", "vendor development",
+        "separation of environments", "dev test prod", "environment separation",
+        "non-production", "staging environment",
+        "change management", "change control", "change request", "change advisory board",
+        "cab", "change approval",
+        "test information", "test data", "test data management", "production data in test",
+        "sanitised test data", "audit testing", "audit tools", "audit environment"
     ]
 }
 
@@ -375,6 +470,7 @@ def detect_scope_and_controls(context, llm_model=None):
     if doc_snippet:
         try:
             from src.core.llm_client import get_embedding
+            from src.core.retrieval import _cosine_similarity
 
             # Warm up category embeddings cache (includes custom control descriptions)
             for cat, desc in merged_descriptions.items():
@@ -389,7 +485,7 @@ def detect_scope_and_controls(context, llm_model=None):
                 print(f"[{time.strftime('%H:%M:%S')}] [INFO] Computing semantic scope matches (incl. custom controls)...")
                 for cat, cat_vector in _category_embeddings_cache.items():
                     if cat_vector:
-                        sim = cosine_similarity(doc_vector, cat_vector)
+                        sim = _cosine_similarity(doc_vector, cat_vector)
                         if sim >= 0.645:
                             print(f"   * Semantic Match: {cat} (Similarity: {sim:.3f})")
                             doc_types_set.add(cat)

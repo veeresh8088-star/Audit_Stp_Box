@@ -151,6 +151,9 @@ class UndoDeleteEvidenceRequest(BaseModel):
     file_id: Optional[int] = None
     filename: Optional[str] = None
 
+class DeleteAllEvidenceRequest(BaseModel):
+    session_id: str
+
 # --- Endpoints ---
 
 @router.post("/sessions")
@@ -404,7 +407,7 @@ async def api_upload_evidence(
     instead of 8 separate lock events per user.
     Exponential backoff retry (max 3 attempts) → no infinite hang on DB lock.
     """
-    _require_auth(request)
+    auth_user = _require_auth(request)
     import time
     import random
     import re
@@ -414,7 +417,8 @@ async def api_upload_evidence(
     db = SessionLocal()
     try:
         with force_master():
-            report = get_or_create_audit_report(db, session_id, username=username)
+            report = get_or_create_audit_report(db, session_id, username=username or auth_user.get("username"))
+            _assert_session_access(db, report, auth_user)
             report_id = report.id
 
         # ── REQUEST-LEVEL LIMITS: cap file count and total bytes per upload request.
@@ -752,13 +756,14 @@ def api_get_session_evidence(session_id: str, request: Request):
 @router.post("/evidence/delete")
 def api_delete_evidence_file(req: DeleteEvidenceRequest, request: Request):
     """Soft deletes an evidence file for 1-click Undo capability."""
-    _require_auth(request)
+    auth_user = _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
             report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
             if not report:
                 raise HTTPException(status_code=404, detail="Session not found")
+            _assert_session_access(db, report, auth_user)
             q = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id)
             if req.file_id:
                 q = q.filter(EvidenceFile.id == req.file_id)
@@ -774,16 +779,38 @@ def api_delete_evidence_file(req: DeleteEvidenceRequest, request: Request):
     finally:
         db.close()
 
-@router.post("/evidence/undo-delete")
-def api_undo_delete_evidence_file(req: UndoDeleteEvidenceRequest, request: Request):
-    """Restores a soft-deleted evidence file."""
-    _require_auth(request)
+@router.post("/evidence/delete-all")
+def api_delete_all_evidence_files(req: DeleteAllEvidenceRequest, request: Request):
+    """Soft deletes all active evidence files for the given session ID."""
+    auth_user = _require_auth(request)
     db = SessionLocal()
     try:
         with force_master():
             report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
             if not report:
                 raise HTTPException(status_code=404, detail="Session not found")
+            _assert_session_access(db, report, auth_user)
+            db.query(EvidenceFile).filter(
+                EvidenceFile.report_id == report.id,
+                (EvidenceFile.is_deleted == False) | (EvidenceFile.is_deleted.is_(None))
+            ).update({"is_deleted": True}, synchronize_session=False)
+            db.commit()
+            log_system_event("ALL_FILES_DELETED", "WARNING", f"All evidence files soft-deleted for session '{req.session_id}'", session_id=req.session_id)
+            return {"success": True, "message": "All evidence files deleted"}
+    finally:
+        db.close()
+
+@router.post("/evidence/undo-delete")
+def api_undo_delete_evidence_file(req: UndoDeleteEvidenceRequest, request: Request):
+    """Restores a soft-deleted evidence file."""
+    auth_user = _require_auth(request)
+    db = SessionLocal()
+    try:
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == req.session_id).first()
+            if not report:
+                raise HTTPException(status_code=404, detail="Session not found")
+            _assert_session_access(db, report, auth_user)
             q = db.query(EvidenceFile).filter(EvidenceFile.report_id == report.id)
             if req.file_id:
                 q = q.filter(EvidenceFile.id == req.file_id)
@@ -869,7 +896,8 @@ def api_start_audit(req: StartAuditRequest, request: Request):
     db = SessionLocal()
     try:
         with force_master():
-            report = get_or_create_audit_report(db, req.session_id, username=req.username)
+            report = get_or_create_audit_report(db, req.session_id, username=req.username or auth_user.get("username"))
+            _assert_session_access(db, report, auth_user)
             report_id = report.id
             report_framework = report.framework or ""
 
@@ -983,7 +1011,15 @@ def api_start_audit(req: StartAuditRequest, request: Request):
 @router.post("/stop/{session_id}")
 def api_stop_audit(session_id: str, request: Request):
     """Signal the background audit thread to stop and unblock session execution."""
-    _require_auth(request)
+    auth_user = _require_auth(request)
+    db = SessionLocal()
+    try:
+        with force_master():
+            report = db.query(AuditReport).filter(AuditReport.session_id == session_id).first()
+            if report:
+                _assert_session_access(db, report, auth_user)
+    finally:
+        db.close()
     bg_key = f"bg_{session_id}"
     _bg_stop_flags[session_id] = True
     _bg_stop_flags[bg_key] = True
@@ -1616,6 +1652,33 @@ def api_export_benchmark_excel(request: Request):
         raise HTTPException(status_code=404, detail="Benchmark report not found")
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to generate report. Please try again.")
+
+
+@router.get("/benchmark/export-pdf")
+def api_export_benchmark_pdf(request: Request):
+    """Downloads styled executive PDF benchmark report. Admin-only."""
+    auth_user = _require_auth(request)
+    if auth_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Access denied. Admin only.")
+    try:
+        from fastapi.responses import FileResponse
+        from src.core.token_tracker import get_all_benchmark_records, generate_pdf_benchmark_report
+        records = get_all_benchmark_records()
+        if not records:
+            raise HTTPException(status_code=404, detail="No benchmark data found.")
+        pdf_path = "data/audit_token_benchmark.pdf"
+        generate_pdf_benchmark_report(records, pdf_path)
+        if os.path.exists(pdf_path):
+            return FileResponse(
+                pdf_path,
+                filename="Executive_Audit_Telemetry_Report.pdf",
+                media_type="application/pdf"
+            )
+        raise HTTPException(status_code=404, detail="PDF report generation failed.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF report: {str(e)}")
 
 
 
