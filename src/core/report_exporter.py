@@ -2503,12 +2503,12 @@ def export_docx_report(session_title, findings, resolved_list, status, comments=
         for cell in row_cells:
             _set_cell_borders(cell)
             
-        # Get severity/risk mapping
-        st_val = f.get("status", "Non-Compliant")
+        # Get severity/risk mapping based on final_result / status
+        st_val = str(f.get("final_result") or f.get("status") or "Non-Compliant").strip().upper()
         sev_score = f.get("severity_score", 0.0) or 0.0
-        if st_val == "Compliant":
+        if st_val == "COMPLIANT":
             mapped_risk = "Accepted"
-            risk_text = "Accepted"
+            risk_text = "N/A"
         else:
             sev = f.get("severity", "P3 Medium")
             if "1" in sev or "Critical" in sev or "High" in sev:
@@ -2943,11 +2943,9 @@ def export_pdf_report(session_title, findings, resolved_list, status, comments="
         for f_idx, f in enumerate(active_findings, 1):
             r = table.row()
             
-            # Map risk
-            st_val = str(f.get("status") or "").upper()
-            pol_raw = str(f.get("policy_present") or "").upper()
-            ev_raw = str(f.get("evidence_present") or "").upper()
-            is_comp = st_val in ("COMPLIANT", "ACCEPTED", "PASS") or (pol_raw in ("YES", "COMPLIANT") and ev_raw in ("YES", "COMPLIANT"))
+            # Map risk: final_result is the single source of truth
+            st_val = str(f.get("final_result") or f.get("status") or "").strip().upper()
+            is_comp = (st_val == "COMPLIANT")
 
             sev_score = f.get("severity_score", 0.0) or 0.0
             if is_comp:

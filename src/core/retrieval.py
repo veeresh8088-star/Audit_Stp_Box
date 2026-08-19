@@ -8,6 +8,12 @@ Decoupled from app.py to prevent circular dependencies.
 import os
 import re
 import json
+
+# ── MODULE-LEVEL COMPILED REGEXES (compiled once, not per call) ───────────────
+# Matches numbered section/clause headings and bullet/dash/asterisk list starters.
+_SECTION_START_RE = re.compile(r'^(?:\d+\.\d+|\d+\.\d+\.\d+|\d+\.)\b|^\s*[\u2022\t\-\*]\s')
+# Matches leading section numbers like "5.1", "Clause 5.1", etc.
+_HEADER_RE = re.compile(r'^\s*(?:Clause\s+|Section\s+)?(\d+(?:\.\d+)*)\b', re.IGNORECASE)
 import requests
 import hashlib
 import concurrent.futures
@@ -278,6 +284,19 @@ def load_top_k_config():
             
     return config
 
+# Cache the config at module load time so _retrieve_rag_context() (called once
+# per control, potentially 93x per full audit) doesn't re-read the file and
+# re-print the override log on every single call.
+_TOP_K_CONFIG_CACHE = None
+
+def _get_top_k_config():
+    """Returns the cached retrieval TOP_K config, loading it once on first call."""
+    global _TOP_K_CONFIG_CACHE
+    if _TOP_K_CONFIG_CACHE is None:
+        _TOP_K_CONFIG_CACHE = load_top_k_config()
+    return _TOP_K_CONFIG_CACHE
+
+
 def save_document_chunks(filename, text, report_id=None):
     """Splits a document text into overlapping paragraph windows (> 40 chars), prepends parent section headers, and writes to ShaktiDB.
 
@@ -391,7 +410,7 @@ def save_document_chunks(filename, text, report_id=None):
                 lines = text.split('\n')
                 paragraphs = []
                 cur = []
-                SECTION_START = re.compile(r'^(?:\d+\.\d+|\d+\.\d+\.\d+|\d+\.)\b|^\s*[●○\-\*]\s')
+                SECTION_START = _SECTION_START_RE
                 for l in lines:
                     val = l.strip()
                     if not val:
@@ -414,11 +433,8 @@ def save_document_chunks(filename, text, report_id=None):
                     paragraphs.append(" ".join(cur))
                 paragraphs = [p for p in paragraphs if len(p.split()) >= 8]
                 
-            HEADER_REGEX = re.compile(
-                r'^\s*(?:Clause\s+|Section\s+)?(\d+(?:\.\d+)*)\b', 
-                re.IGNORECASE
-            )
-            
+            HEADER_REGEX = _HEADER_RE  # module-level constant, not re-compiled each call
+
             current_section = ""
             section_aware_paras = []
             for p in paragraphs:
@@ -589,12 +605,12 @@ def _calculate_dynamic_context_budget(controls_batch, mode="standard"):
 
     FALLBACK_TARGET, FALLBACK_HARD_MAX = 3000, 5000
     CHAT_WRAPPER_TOKENS = 26          # measured: Gemma's <start_of_turn>... wrapper
-    COMPLETION_RESERVE_TOKENS = 4096  # worst case -- llm_client.py retries at this size if truncated
-    SAFETY_MARGIN_TOKENS = 500        # absorbs the chunk-selection char/4 estimate's imprecision
+    SAFETY_MARGIN_TOKENS = 300        # absorbs the chunk-selection char/4 estimate's imprecision
 
     try:
         from src.core.llm_client import count_tokens, get_real_num_ctx
         num_ctx = get_real_num_ctx()  # real per-slot context via /props, matches audit_chains.py's get_num_ctx()
+        COMPLETION_RESERVE_TOKENS = min(1536, max(768, int(num_ctx * 0.2)))  # dynamic completion reserve proportional to slot size
 
         template_tokens = _get_template_fixed_tokens(mode)
 
@@ -709,7 +725,7 @@ def _retrieve_rag_context(context, controls_batch, file_names_list, llm_model, K
         type_counts[ftype] = type_counts.get(ftype, 0) + 1
     file_type = max(type_counts, key=type_counts.get) if type_counts else "pdf"
 
-    top_k_config = load_top_k_config()
+    top_k_config = _get_top_k_config()  # cached — reads disk once, not per control
     configured_top_k = top_k_config.get(file_type, 15)
     # Deep mode raises the candidate floor toward the 15-30 range regardless of the
     # per-file-type config; Quick mode keeps whatever's configured (a user-raised config

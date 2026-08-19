@@ -154,6 +154,11 @@ class UndoDeleteEvidenceRequest(BaseModel):
 class DeleteAllEvidenceRequest(BaseModel):
     session_id: str
 
+class ImportAuditeeEvidenceRequest(BaseModel):
+    source_session_id: str
+    target_session_id: str
+    filenames: Optional[List[str]] = None
+
 # --- Endpoints ---
 
 @router.post("/sessions")
@@ -237,8 +242,9 @@ def api_get_sessions(request: Request, username: Optional[str] = None):
 
     db = SessionLocal()
     try:
-        # Enforce max 50 sessions limit (auto-deletes sessions older than top 50)
-        _enforce_max_sessions_limit(db, username, max_sessions=50)
+        # NOTE: _enforce_max_sessions_limit intentionally NOT called here (read path).
+        # It runs on session CREATION only, to avoid an expensive DB scan+delete on
+        # every 10-second UI poll. See api_create_session for the enforcement call.
 
         user = db.query(User).filter(User.username == username).first()
         user_id = user.id if user else None
@@ -295,6 +301,8 @@ def api_get_auditee_sessions(request: Request, username: Optional[str] = None):
     """
     auth_user = _require_auth(request)
     if not username or not username.strip():
+        username = auth_user.get("username")
+    if not username:
         return {"success": True, "sessions": []}
     # Only the account owner, or an auditor/admin (who legitimately browse
     # auditee submissions), may trigger a lookup for a given username.
@@ -350,6 +358,8 @@ def api_get_auditee_sessions(request: Request, username: Optional[str] = None):
                     "session_title": r.session_title,
                     "auditee_username": auditee_username or (r.created_by if is_auditee_caller else "Auditee Client"),
                     "files_count": files_count,
+                    "status": r.status or "Submitted",
+                    "assigned_auditor": r.assigned_auditor_username or "Unassigned",
                     "created_at": str(r.created_at)
                 })
             return {"success": True, "sessions": result}
@@ -522,12 +532,12 @@ async def api_upload_evidence(
                 with force_master():
                     exists = db.query(EvidenceFile).filter(
                         EvidenceFile.report_id == report_id,
-                        EvidenceFile.filename == sub_name
+                        EvidenceFile.filename == safe_filename
                     ).first()
                     if not exists:
                         new_ev = EvidenceFile(
                             report_id=report_id,
-                            filename=sub_name,
+                            filename=safe_filename,
                             file_path=os.path.abspath(dest_path),
                             is_auditor_uploaded=is_auditor_uploaded,
                             status="Completed"
@@ -537,12 +547,12 @@ async def api_upload_evidence(
 
                 # Asynchronously extract text & save chunks in background thread
                 if bg_tasks:
-                    bg_tasks.add_task(_bg_extract_and_chunk, sub_name, sub_bytes, report_id)
+                    bg_tasks.add_task(_bg_extract_and_chunk, safe_filename, sub_bytes, report_id)
                 else:
-                    _bg_extract_and_chunk(sub_name, sub_bytes, report_id)
+                    _bg_extract_and_chunk(safe_filename, sub_bytes, report_id)
 
                 uploaded_details.append({
-                    "filename": sub_name,
+                    "filename": safe_filename,
                     "status": "Processed",
                     "bytes": len(sub_bytes)
                 })
@@ -901,6 +911,31 @@ def api_start_audit(req: StartAuditRequest, request: Request):
             report_id = report.id
             report_framework = report.framework or ""
 
+            # ── STALE CHECKPOINT CLEANUP ───────────────────────────────────────
+            # Discard any leftover checkpoint from a PREVIOUS run on this session
+            # BEFORE the background thread starts. This prevents the old run's
+            # total_controls / selected_sls from bleeding into the new run —
+            # e.g. a prior 4-control crashed session showing "1/4 done" when only
+            # 2 controls are selected this time, or the resume prompt appearing
+            # for a session the user is explicitly starting fresh.
+            # _checkpoint_create() inside the thread also does this, but doing it
+            # here eliminates the race window between API return and thread start.
+            try:
+                _stale_chk_count = db.query(AuditCheckpoint).filter(
+                    AuditCheckpoint.session_id == req.session_id
+                ).delete(synchronize_session=False)
+                if _stale_chk_count:
+                    db.commit()
+                    print(
+                        f"[START AUDIT] Discarded {_stale_chk_count} stale checkpoint(s) "
+                        f"for session {req.session_id} before fresh start.",
+                        flush=True
+                    )
+            except Exception as _chk_err:
+                db.rollback()
+                print(f"[START AUDIT] Stale checkpoint cleanup failed (non-fatal): {_chk_err}", flush=True)
+            # ──────────────────────────────────────────────────────────────────
+
             # Load evidence files text & bytes from disk. Must exclude
             # soft-deleted files here -- this endpoint is what actually feeds
             # the audit run, so without this filter a file removed via
@@ -920,17 +955,10 @@ def api_start_audit(req: StartAuditRequest, request: Request):
                 with open(file_path, "rb") as f:
                     file_bytes = f.read()
 
-                # Force fresh text parsing on every upload (No stale chunk caching)
-                f_like = io.BytesIO(file_bytes)
-                f_like.name = filename
-                text = extract_text(f_like)
-                print(f"[api_start_audit] Fresh extraction for '{filename}' ({len(text)} chars)", flush=True)
-
-                file_registry[filename] = text
                 files_data.append({
                     "name": filename,
                     "bytes": file_bytes,
-                    "text": text
+                    "text": None
                 })
 
         # ── Refuse to start an audit with zero evidence files ──────────────────
@@ -965,6 +993,13 @@ def api_start_audit(req: StartAuditRequest, request: Request):
             is_vapt_std = report_framework in ("VAPT Framework Controls", "VAPT")
             is_tech_only = False
         
+        # Close request database session before thread starts so SQLite locks are immediately released
+        try:
+            db.close()
+            db = None
+        except Exception:
+            pass
+
         # Spawn Background Worker thread
         with _bg_lock:
             _bg_running.add(bg_key)
@@ -990,9 +1025,12 @@ def api_start_audit(req: StartAuditRequest, request: Request):
                 },
                 daemon=True
             )
-        thread.start()
         _mode_label = "VAPT" if is_tech_only else req.audit_mode
-        log_system_event("AUDIT_STARTED", "INFO", f"Audit started (mode: {_mode_label}, controls: {len(req.selected_sls)}, files: {len(files_data)})", session_id=req.session_id, actor=req.username or "Auditor")
+        try:
+            log_system_event("AUDIT_STARTED", "INFO", f"Audit started (mode: {_mode_label}, controls: {len(req.selected_sls)}, files: {len(files_data)})", session_id=req.session_id, actor=req.username or "Auditor")
+        except Exception:
+            pass
+        thread.start()
         return {"success": True, "status": "started", "message": "Background RAG scan initialized."}
     except HTTPException:
         # Deliberate errors raised inside this try block (e.g. the zero-evidence
@@ -1006,7 +1044,11 @@ def api_start_audit(req: StartAuditRequest, request: Request):
         print(f"[START AUDIT ERROR] session={req.session_id} | {e}", flush=True)
         raise HTTPException(status_code=500, detail="Failed to start audit scan. Please try again.")
     finally:
-        db.close()
+        if db is not None:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 @router.post("/stop/{session_id}")
 def api_stop_audit(session_id: str, request: Request):
@@ -1184,7 +1226,11 @@ def api_get_findings(request: Request, session_id: str, role: Optional[str] = No
             cid_clean = (f.control_id or "").strip().upper()
             uc_info = control_catalog.get(cid_clean) or control_catalog.get(cid_clean.split()[0]) or {}
             
-            is_comp = (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS")
+            # final_result is the single source of truth set by validator.py
+            # ("COMPLIANT" | "NON_COMPLIANT"). Fall back to status for older rows
+            # that pre-date the final_result column.
+            _fr = (f.final_result or f.status or "").strip().upper()
+            is_comp = (_fr == "COMPLIANT")
             
             # Smart description fallback hierarchy
             if f.description and len(f.description.strip()) > 5:
@@ -1213,11 +1259,14 @@ def api_get_findings(request: Request, session_id: str, role: Optional[str] = No
             if not ctrl_name or ctrl_name in ("null", "undefined", "None"):
                 ctrl_name = uc_info.get("label") or uc_info.get("use_case") or f.control_id or ""
 
-            # Safe severity fallback
+            # Safe severity fallback — N/A for COMPLIANT, NIST P-scale otherwise
             sev = f.severity
             if not sev or sev in ("null", "undefined", "None"):
-                raw_sev = (uc_info.get("severity") or "MEDIUM").upper()
-                sev = {"CRITICAL": "P1 Critical", "HIGH": "P2 High", "MEDIUM": "P3 Medium", "LOW": "P4 Low"}.get(raw_sev, "P3 Medium")
+                if is_comp:
+                    sev = "N/A"
+                else:
+                    raw_sev = (uc_info.get("severity") or "MEDIUM").upper()
+                    sev = {"CRITICAL": "P1 Critical", "HIGH": "P2 High", "MEDIUM": "P3 Medium", "LOW": "P4 Low"}.get(raw_sev, "P3 Medium")
 
             # Resolve exact evidence document source location (Prioritize explicit evidence_location over all session source_files)
             loc_src = getattr(f, "evidence_location", None) or getattr(f, "evidence_source_file", None) or f.source_files
@@ -1301,13 +1350,27 @@ def api_update_finding(finding_id: int, req: UpdateFindingRequest, request: Requ
                 _assert_session_access(db, report, auth_user)
 
             finding.status = req.status
-            if req.severity: finding.severity = req.severity
-            if req.description: finding.description = req.description
-            if req.evidence_snippet: finding.evidence_snippet = req.evidence_snippet
-            if req.recommendation: finding.recommendation = req.recommendation
-            if req.reasoning: finding.reasoning = req.reasoning
-            if req.policy_present: finding.policy_present = req.policy_present
-            if req.evidence_present: finding.evidence_present = req.evidence_present
+            # Derive final_result from the incoming status so the DB stays in sync
+            # with what the auditor chose in the UI.  validator.py uses the exact
+            # values "COMPLIANT" and "NON_COMPLIANT" — mirror that here.
+            derived_final_result = "COMPLIANT" if req.status.strip().upper() == "COMPLIANT" else "NON_COMPLIANT"
+            finding.final_result = derived_final_result
+
+            # NIST Severity rule (single source of truth = final_result):
+            #   COMPLIANT  → severity = "N/A"  (no actionable risk)
+            #   NON_COMPLIANT → keep the P-scale severity sent by the auditor
+            if derived_final_result == "COMPLIANT":
+                finding.severity = "N/A"
+            elif req.severity is not None:
+                # BUG-05 FIX: use `is not None` so auditor can clear a field by sending ""
+                # (previously `if req.field:` treated "" as falsy and silently kept old value)
+                finding.severity = req.severity
+            if req.description is not None: finding.description = req.description
+            if req.evidence_snippet is not None: finding.evidence_snippet = req.evidence_snippet
+            if req.recommendation is not None: finding.recommendation = req.recommendation
+            if req.reasoning is not None: finding.reasoning = req.reasoning
+            if req.policy_present is not None: finding.policy_present = req.policy_present
+            if req.evidence_present is not None: finding.evidence_present = req.evidence_present
             if req.source_files is not None: finding.source_files = req.source_files
 
             # Policy vs Evidence split (RAG accuracy overhaul, Phase 5/6/7) -- manual overrides
@@ -1466,7 +1529,7 @@ def api_commit_session_findings(session_id: str, request: Request, force: bool =
                 "message": f"Successfully committed {total_ctrls} audit record(s) to Shakthi DB (Compliance Score: {score_pct}%).",
                 "status": report.status,
                 "score_percent": score_pct,
-                "unreviewed_count": len(unreviewed) if force else 0
+                "unreviewed_count": len(unreviewed) if not is_force else 0  # BUG-06 FIX: use is_force (resolved bool), not raw `force` param
             }
     except Exception as e:
         import traceback
@@ -1901,43 +1964,6 @@ def api_import_feedback(request: Request, file: UploadFile = File(...)):
         finally:
             db.close()
 
-@router.get("/auditee-sessions")
-def api_get_auditee_submitted_sessions(request: Request):
-    """Retrieves ONLY sessions that have been submitted/delivered to Auditees or created by Auditee accounts."""
-    user = _require_auth(request)
-    if user.get("role") not in ("admin", "auditor"):
-        raise HTTPException(status_code=403, detail="Access denied.")
-    with force_master():
-        db = SessionLocal()
-        try:
-            from src.db.database import AuditReport, User
-            auditee_users = db.query(User).filter(User.role.in_(["auditee", "client"])).all()
-            auditee_user_ids = [u.id for u in auditee_users]
-
-            reports = db.query(AuditReport).filter(
-                (AuditReport.status.in_(["Pending Review", "Reviewed & Finalized", "Completed"])) |
-                (AuditReport.auditee_id.in_(auditee_user_ids))
-            ).all()
-
-            result = []
-            for r in reports:
-                auditee_name = "auditee@organization.com"
-                if r.auditee_id:
-                    aud_user = db.query(User).filter(User.id == r.auditee_id).first()
-                    if aud_user:
-                        auditee_name = aud_user.username
-
-                result.append({
-                    "session_id": r.session_id,
-                    "session_title": r.session_title,
-                    "auditee_username": auditee_name,
-                    "status": r.status,
-                    "created_at": str(r.created_at) if r.created_at else ""
-                })
-            return {"success": True, "sessions": result}
-        finally:
-            db.close()
-
 @router.get("/chats/sessions")
 def api_get_chat_sessions(request: Request, role: Optional[str] = None, username: Optional[str] = None):
     """Retrieves list of active compliance sessions strictly scoped to the logged-in user."""
@@ -2045,7 +2071,9 @@ def api_clear_chat_session(request: Request, session_id: str = Form(...), userna
             db.commit()
         return {"success": True, "message": "Chat history cleared successfully."}
     except Exception:
-        raise HTTPException(status_code=500, detail="Export failed. Please try again.")
+        raise HTTPException(status_code=500, detail="Chat clear failed. Please try again.")
+    finally:
+        db.close()  # BUG-10 FIX: was missing — every chat clear left a DB connection open
 # ── COMPANY LOGO MANAGEMENT ENDPOINTS ──────────────────────────────────────
 
 @router.post("/upload-logo")
@@ -2295,7 +2323,7 @@ Provide a clear, helpful, professional, and directly relevant answer as an exper
         assistant_reply = ""
         try:
             from src.core.llm_client import query_llm
-            assistant_reply = query_llm(prompt_with_context, model=req.model_choice or "Gemma 4 (e4b)", timeout=90)
+            assistant_reply = query_llm(prompt_with_context, model=req.model_choice or "Gemma 4 (e4b)", timeout=10)
 
         except Exception:
             try:
@@ -2440,9 +2468,10 @@ def api_export_pdf(
                 else:
                     c_sev, sev_score = "MEDIUM", 5.5
                     
-                pol_pres = f.policy_present or ("Compliant" if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") else "No")
-                ev_pres = f.evidence_present or ("Compliant" if (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") else "No")
-                is_comp = (f.status or "").upper() in ("COMPLIANT", "ACCEPTED", "PASS") or (pol_pres == "Compliant" and ev_pres == "Compliant")
+                pol_pres = f.policy_present or ("Compliant" if (f.final_result or f.status or "").upper() == "COMPLIANT" else "No")
+                ev_pres = f.evidence_present or ("Compliant" if (f.final_result or f.status or "").upper() == "COMPLIANT" else "No")
+                # final_result is the single source of truth for COMPLIANT vs NON_COMPLIANT
+                is_comp = (f.final_result or f.status or "").strip().upper() == "COMPLIANT"
 
                 # CIA impact / risk category / developer-actionable remediation: read the
                 # real saved columns first (populated for anything scanned since the VAPT

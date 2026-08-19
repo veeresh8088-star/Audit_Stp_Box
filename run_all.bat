@@ -99,8 +99,13 @@ if exist "%~dp0tools\redis\redis-server.exe" (
 )
 docker ps > nul 2>&1
 if %errorlevel% equ 0 (
-    echo [v] Docker detected. Starting ShaktiDB PostgreSQL container...
-    docker-compose up -d shakthidb > nul 2>&1
+    echo [v] Docker detected. Starting ShaktiDB PostgreSQL container (port 15234 only -- port 8000 stays for native uvicorn^)...
+    docker start shakthidb_service > nul 2>&1
+    if errorlevel 1 (
+        docker stop shakthidb_service > nul 2>&1
+        docker rm   shakthidb_service > nul 2>&1
+        docker run -d --name shakthidb_service -e POSTGRES_PASSWORD=ShakthiDB@2026 -e POSTGRES_DB=shakthidb -p 15234:15234 -v audittest_box_pgdata:/var/lib/postgresql/data --restart always aicyberauditbox-shakthidb:2.1 postgres -p 15234 -c shared_buffers=512MB -c work_mem=32MB -c max_connections=200 > nul 2>&1
+    )
     call :DoBackup
 ) else (
     echo [i] Docker is offline/not running. Continuing with local SQLite fallback database.
@@ -120,10 +125,11 @@ set OLLAMA_MAX_LOADED_MODELS=3
 :: rejected clearly past that instead of queuing indefinitely at the LLM server.
 set /a MAX_CONCURRENT_AUDITS=%LLM_SLOTS%*2
 set REDIS_URL=redis://127.0.0.1:6380/0
-:: Lowered from resource_guard.py's 8% default -- this machine typically runs
-:: close to that line already, so 8% was blocking new audits too eagerly.
-:: 5% still leaves a real buffer above the 0.5GB absolute floor.
-set RESOURCE_GUARD_CRITICAL_PERCENT=5
+:: Resource guard thresholds: lowered so audits aren't paused or blocked prematurely on tight host RAM.
+:: 2% free / 0.5GB absolute floor prevents OOM while avoiding false alarms on 16GB machines.
+set RESOURCE_GUARD_CRITICAL_PERCENT=2
+set RESOURCE_GUARD_CRITICAL_FLOOR_GB=0.5
+set RESOURCE_GUARD_WARN_PERCENT=5
 :: JWT_SECRET intentionally not set here -- that hardcoded value was a real,
 :: exploitable credential (forge any session, including admin) once committed
 :: to source control. src/api/endpoints/auth.py generates and persists a
@@ -142,6 +148,23 @@ echo   Local URL: http://localhost:8000/
 echo   Press Ctrl+C in this terminal to stop server.
 echo   Full output also saved to: %RUN_LOG%
 echo ==================================================
+
+:: Safety net: stop any Docker container that is still occupying port 8000.
+:: This covers the case where shakthidb_service was already running with the
+:: old port mapping (before this script restarted it with the override), or
+:: the aicyberauditbox_app container is running and inheriting that binding.
+:: We stop those specific containers rather than killing Docker wholesale.
+docker ps --format "{{.Names}} {{.Ports}}" 2>nul | findstr /C:"->8000" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo [i] Found Docker container^(s^) still bound to port 8000 -- stopping them so native uvicorn can bind...
+    for /f "tokens=1" %%c in ('docker ps --format "{{.Names}} {{.Ports}}" 2^>nul ^| findstr /C:"->8000"') do (
+        echo     Stopping container: %%c
+        docker stop %%c > nul 2>&1
+    )
+    echo [v] Port 8000 freed from Docker.
+    timeout /t 2 >nul
+)
+
 start http://localhost:8000/
 :: PYTHONUNBUFFERED so output stays real-time in the console even though it's
 :: piped through Tee-Object below -- Python defaults to block-buffered stdout

@@ -289,16 +289,20 @@ pad the list with repeated or near-duplicate excerpts for the same requirement j
 the count — quality and distinctness matter, not quantity. If a requirement has no supporting
 evidence, simply do not include an item for it.
 
+CRITICAL FOR EXCERPTS: Each <excerpt> must be a complete, self-contained verbatim sentence directly
+from the document. Never cut off quotes mid-sentence or end on trailing conjunctions/prepositions.
+Quote the entire complete sentence up to its concluding punctuation.
+
 <evidence_items>
   <evidence_item>
     <source>Document Name</source>
     <page>Page Number</page>
-    <excerpt>Supporting evidence text / verbatim quote</excerpt>
+    <excerpt>Complete, unclipped verbatim sentence from the document</excerpt>
   </evidence_item>
   <evidence_item>
     <source>Document Name</source>
     <page>Page Number</page>
-    <excerpt>A second distinct supporting excerpt, if one exists</excerpt>
+    <excerpt>A second distinct complete verbatim sentence from the document, if one exists</excerpt>
   </evidence_item>
 </evidence_items>
 
@@ -330,40 +334,52 @@ YOUR ONLY JOBS ARE:
 ORIGINAL AUDIT CHECK QUESTION: {checklist_question}
 {column_source_hint}
 CORE AUDIT PRINCIPLE: evaluate POLICY and EVIDENCE separately within these pre-extracted paragraphs.
-STATUS (was it found in the text below) is different from ASSESSMENT (does it actually satisfy the
-requirement). FOUND does NOT mean COMPLIANT. Policy = a documented requirement/procedure. Evidence =
-proof it actually happened (a policy statement alone is not evidence).
+STATUS (FOUND | NOT_FOUND) is whether relevant material exists in the text below.
+ASSESSMENT (COMPLIANT | NON_COMPLIANT) is whether it satisfies the requirement. FOUND does NOT mean COMPLIANT.
+Policy = what should happen (documented requirements, procedures, authorization rules).
+Evidence = proof it actually happened or is operating (logs, screenshots, records -- a policy statement alone is not evidence for operational controls).
+A statement like "Security will audit logs daily" is POLICY, not operational evidence.
+
+DOCUMENT SCOPE VS CONTROL SCOPE:
+Do NOT assume one document must cover every aspect of an ISO control. A physical-access policy is valid policy coverage for the physical portion of 5.15 Access Control without needing logical IT terms. Do NOT mark it FALSE_POSITIVE or policy NON_COMPLIANT merely because logical access is absent from a physical policy.
 
 ISO 27001 AUDITOR REASONING RULES:
 
-APPLICABILITY CHECK (run first)
-* If the control is NOT applicable to this content, return FALSE_POSITIVE.
+APPLICABILITY CHECK (run first):
+* Applicability must be determined from agreed audit scope, not from whether a submitted document happens to be narrow.
+* If the control is genuinely OUT OF SCOPE for the agreed audit scope, return FALSE_POSITIVE.
 
-POLICY_STATUS/POLICY_ASSESSMENT: FOUND/NOT_FOUND, then COMPLIANT/NON_COMPLIANT only if the located
-policy text actually addresses this specific control's requirement (not just a related topic).
+POLICY_STATUS/POLICY_ASSESSMENT:
+* POLICY_STATUS: FOUND or NOT_FOUND.
+* POLICY_ASSESSMENT: COMPLIANT only if the policy text adequately defines the applicable control requirement it is intended to address.
+* POLICY_GAP: Explain the deficiency, or write exactly "No policy gap identified."
 
-EVIDENCE_STATUS/EVIDENCE_ASSESSMENT/EVIDENCE_RELEVANCE: FOUND/NOT_FOUND, then COMPLIANT/NON_COMPLIANT
-only if the located text demonstrates actual implementation (or approved versioned policy document for governance controls like 5.1/5.37 or checklist policy inquiries), not just a stated future intent. EVIDENCE_RELEVANCE
-is DIRECT/PARTIAL/RELATED/IRRELEVANT -- DIRECT includes equivalent/alternative implementations in
-different terminology that still satisfy the objective, not literal keyword matching. Only DIRECT
-evidence should support EVIDENCE_ASSESSMENT=COMPLIANT.
+EVIDENCE_STATUS/EVIDENCE_ASSESSMENT/EVIDENCE_RELEVANCE:
+* EVIDENCE_STATUS: FOUND or NOT_FOUND (if only policy text is in the locked evidence, EVIDENCE_STATUS = NOT_FOUND).
+* EVIDENCE_ASSESSMENT: COMPLIANT only if the text demonstrates actual implementation/operation (or approved policy document for governance controls like 5.1/5.37), not just stated policy.
+* EVIDENCE_RELEVANCE: DIRECT / PARTIAL / RELATED / IRRELEVANT. DIRECT includes equivalent/alternative implementations in different terminology that satisfy the objective. Only DIRECT evidence should support EVIDENCE_ASSESSMENT=COMPLIANT.
+* EVIDENCE_GAP: Explain what is missing (e.g. "No operational evidence was provided to demonstrate implementation."), or write exactly "No evidence gap identified."
 
-POLICY_VALIDITY/EVIDENCE_FRESHNESS: CURRENT/EXPIRED/REVIEW_OVERDUE/UNKNOWN and
-CURRENT/STALE/EXPIRED/UNKNOWN respectively -- only when the text states dates: never invent one, use
-UNKNOWN if it cannot be determined from the text below.
+MISSING EVIDENCE VS FAILED IMPLEMENTATION:
+* If no operational evidence was submitted, write: "No operational evidence was provided to demonstrate implementation." Do not claim the control failed or is not implemented.
 
-FINAL_RESULT = COMPLIANT only if POLICY_STATUS=FOUND AND POLICY_ASSESSMENT=COMPLIANT AND
-EVIDENCE_STATUS=FOUND AND EVIDENCE_ASSESSMENT=COMPLIANT AND validity/freshness are acceptable,
-else NON_COMPLIANT. <status> should equal FINAL_RESULT unless FALSE_POSITIVE applies.
+SPECIFIC CASE: POLICY ADEQUATE, OPERATIONAL EVIDENCE MISSING:
+* POLICY_STATUS=FOUND, POLICY_ASSESSMENT=COMPLIANT, POLICY_GAP="No policy gap identified."
+* EVIDENCE_STATUS=NOT_FOUND, EVIDENCE_ASSESSMENT=NON_COMPLIANT, EVIDENCE_GAP="No operational evidence was provided to demonstrate implementation."
+* FINAL_RESULT=NON_COMPLIANT
+* Finding: "Policy requirements are adequately documented, but no operational evidence was provided to demonstrate implementation."
+* Recommendation: "Provide appropriate operational evidence such as access logs, visitor records, access approval records, or completed access-review records demonstrating implementation."
 
-* Never speculate. Never assume undocumented controls exist. Never invent dates, clauses, or content
-  not present in the paragraphs below.
+POLICY_VALIDITY/EVIDENCE_FRESHNESS:
+* CURRENT / EXPIRED / REVIEW_OVERDUE / UNKNOWN and CURRENT / STALE / EXPIRED / UNKNOWN respectively -- only when the text states dates. Never invent dates; use UNKNOWN if undetermined.
+
+FINAL_RESULT = COMPLIANT only if POLICY_STATUS=FOUND AND POLICY_ASSESSMENT=COMPLIANT AND EVIDENCE_STATUS=FOUND AND EVIDENCE_ASSESSMENT=COMPLIANT AND validity/freshness are acceptable, else NON_COMPLIANT. <status> should equal FINAL_RESULT unless FALSE_POSITIVE applies.
+
+* Never speculate. Never assume undocumented controls exist. Never invent dates, clauses, or content not present in the paragraphs below.
 * Evaluate only against the specific ISO 27001 control being audited.
 * Prioritize intent-based evaluation over keyword matching.
 * Do NOT use confidence scores or retrieval scores to determine compliance.
 * Every identified gap must be traceable to a specific requirement of the evaluated control.
-* POLICY_GAP/EVIDENCE_GAP must explain the actual deficiency, never just "Yes"/"No" -- use exactly
-  "No policy gap identified." / "No evidence gap identified." when there is none.
 
 COMPLIANCE STATUS: Strictly binary — COMPLIANT or NON_COMPLIANT.
 
@@ -432,16 +448,20 @@ excerpt. Do NOT pad the list with repeated or near-duplicate excerpts for the sa
 just to increase the count — quality and distinctness matter, not quantity. If a requirement has
 no supporting evidence, simply do not include an item for it.
 
+CRITICAL FOR EXCERPTS: Each <excerpt> must be a complete, self-contained verbatim sentence directly
+from the pre-extracted paragraphs. Never cut off quotes mid-sentence or end on trailing conjunctions/prepositions.
+Quote the entire complete sentence up to its concluding punctuation.
+
 <evidence_items>
   <evidence_item>
     <source>Exact filename from locked file(s)</source>
     <page>Page Number or Section</page>
-    <excerpt>Verbatim quote from the pre-extracted paragraphs above</excerpt>
+    <excerpt>Complete, unclipped verbatim sentence from the pre-extracted paragraphs above</excerpt>
   </evidence_item>
   <evidence_item>
     <source>Exact filename from locked file(s)</source>
     <page>Page Number or Section</page>
-    <excerpt>A second distinct verbatim quote from the pre-extracted paragraphs above, if one exists</excerpt>
+    <excerpt>A second distinct complete verbatim sentence from the pre-extracted paragraphs above, if one exists</excerpt>
   </evidence_item>
 </evidence_items>
 
@@ -1236,16 +1256,18 @@ class NativeOllamaChain:
         # "exceed_context_size_error" 400 response.
         try:
             from src.core.llm_client import count_tokens, get_real_num_ctx
-            MAX_PROMPT_TOKENS = get_real_num_ctx() - 4096 - 300  # same worst-case completion reserve as retrieval.py, minus a small buffer
+            real_ctx = get_real_num_ctx()
+            completion_reserve = min(1536, max(768, int(real_ctx * 0.2)))
+            MAX_PROMPT_TOKENS = max(3000, real_ctx - completion_reserve - 200)
             _trim_attempts = 0
-            while count_tokens(prompt) > MAX_PROMPT_TOKENS and _trim_attempts < 10:
+            while count_tokens(prompt) > MAX_PROMPT_TOKENS and _trim_attempts < 15:
                 ctx = input_dict.get("condensed_context") or ""
                 if not ctx:
                     break  # nothing left to trim
-                # Cut the lowest-priority tail (chunks were assembled best-first) --
-                # remove 20% of what's left each pass rather than a fixed amount, so
-                # it converges quickly regardless of how far over budget it started.
-                new_len = max(0, int(len(ctx) * 0.8))
+                current_tokens = count_tokens(prompt)
+                excess = current_tokens - MAX_PROMPT_TOKENS
+                chars_to_remove = max(100, int(excess * 4.2))
+                new_len = max(0, len(ctx) - chars_to_remove)
                 input_dict["condensed_context"] = ctx[:new_len]
                 prompt = active_template.format(**input_dict)
                 _trim_attempts += 1

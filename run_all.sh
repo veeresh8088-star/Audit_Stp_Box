@@ -27,8 +27,7 @@ nohup "$LLAMA_SERVER_EXE" --port 11435 -m "./nomic-embed-text-v1.5.f16.gguf" -t 
 
 echo ""
 echo "[4/5] Starting Docker Database Service (ShaktiDB)..."
-docker rm -f shakthidb_service >/dev/null 2>&1
-docker-compose up -d
+docker start shakthidb_service >/dev/null 2>&1 || docker-compose -f docker-compose.yml -f docker-compose.local-db.yml up -d shakthidb
 
 echo ""
 echo "Waiting 12 seconds for models to load in RAM..."

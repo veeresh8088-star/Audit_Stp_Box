@@ -97,12 +97,31 @@ def _ensure_llama_server_running(port=11434):
         print(f"[AUTO-START LLM] Could not locate llama-server.exe in candidates.", flush=True)
         return False
 
+    # Auto-detect CPU cores at runtime — never hardcode a thread count.
+    # llama-server gets all available logical cores, just like any other app.
+    _cpu_threads = str(os.cpu_count() or 4)
+
+    # Auto-detect parallel slots (-np) based on available RAM at startup.
+    # Formula: (available_ram - 4GB model) / ~500MB per KV-cache slot, clamped 1–8.
+    # Same "no pinning" philosophy as threads — use what the machine actually has.
+    try:
+        import psutil as _psutil
+        _avail_gb = _psutil.virtual_memory().available / (1024 ** 3)
+        _model_gb = 4.0          # approximate model weight footprint in RAM
+        _slot_gb  = 0.5          # ~500MB KV-cache per slot at -c 32768
+        _np = max(1, min(8, int((_avail_gb - _model_gb) / _slot_gb)))
+        print(f"[AUTO-START LLM] Detected {_avail_gb:.1f}GB free RAM -> using -np {_np} parallel slots", flush=True)
+    except Exception:
+        _np = 2                  # safe fallback if psutil unavailable
+        print(f"[AUTO-START LLM] RAM detection unavailable -> using -np {_np} parallel slots (fallback)", flush=True)
+
     if port == 11434:
         model_path = os.path.join(base_dir, "google_gemma-4-E4B-it-Q4_K_M.gguf")
-        cmd = [llama_exe, "--port", "11434", "-m", model_path, "-c", "32768", "-np", "8", "-t", "4", "--cont-batching"]
+        _total_ctx = str(max(32768, 16384 * _np))
+        cmd = [llama_exe, "--port", "11434", "-m", model_path, "-c", _total_ctx, "-np", str(_np), "-t", _cpu_threads, "-b", "2048", "-ub", "512", "--flash-attn", "on", "--cont-batching"]
     else:
         model_path = os.path.join(base_dir, "nomic-embed-text-v1.5.f16.gguf")
-        cmd = [llama_exe, "--port", "11435", "-m", model_path, "-t", "4", "--embedding"]
+        cmd = [llama_exe, "--port", "11435", "-m", model_path, "-t", _cpu_threads, "--embedding"]
 
     try:
         creation_flag = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
@@ -162,12 +181,13 @@ def get_real_num_ctx(host=None, timeout=10):
                 _real_num_ctx_cache[resolved_host] = n_ctx
                 return n_ctx
     except Exception as e:
-        print(f"[LLM CLIENT] Could not query real n_ctx from {resolved_host}/props: {e}", flush=True)
+        pass
 
+    _real_num_ctx_cache[resolved_host] = 4096
     return 4096
 
 
-def count_tokens(text, host=None, timeout=10):
+def count_tokens(text, host=None, timeout=1.5):
     """
     Real token count via llama-server's own /tokenize endpoint -- ground truth,
     not an estimate. Falls back to a chars/4 approximation if the server is

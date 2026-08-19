@@ -125,10 +125,12 @@ def api_get_framework_controls(request: Request):
         raise HTTPException(status_code=500, detail="Failed to load framework controls.")
 
 @router.post("/parse-scope-excel")
-async def api_parse_scope_excel(file: UploadFile = File(...)):
+async def api_parse_scope_excel(request: Request, file: UploadFile = File(...)):
     """Parses an uploaded auditor scope Excel mapping (.xlsx/.xls) and returns mapped control SLs and custom evidence."""
+    _require_auth(request)
     if not file.filename.lower().endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are supported.")
+
         
     try:
         import os
@@ -157,6 +159,15 @@ async def api_parse_scope_excel(file: UploadFile = File(...)):
         # BUG FIX: Use LIST not SET — two rows with same ctrl_id (e.g. two 8.17 NTP checks)
         # must each appear so progress counter and control loop both get 8 items, not 6.
         matched_sls_list = []
+        import re as _re
+        from src.core.excel_scoping_parser import (
+            _resolve_control_by_direct_map as _kw_resolve,
+            _resolve_control_by_name as _name_resolve,
+        )
+
+        def _norm(t: str) -> str:
+            """Lowercase + strip punctuation for fuzzy comparisons."""
+            return _re.sub(r'[^a-z0-9\s]', ' ', str(t or '').lower()).strip()
 
         for item in items:
             ctrl_id = item.get("control_id")
@@ -167,11 +178,61 @@ async def api_parse_scope_excel(file: UploadFile = File(...)):
             files_str = ", ".join(files) if isinstance(files, list) else str(files)
 
             matched_uc = None
+
+            # --- Pass 1: exact numeric ID match or exact use_case string match ---
             for uc in USE_CASES:
                 uc_id = uc["use_case"].split(" ")[0]
                 if uc_id == ctrl_id or uc["use_case"] == ctrl_label:
                     matched_uc = uc
                     break
+
+            # --- Pass 2: strip leading numeric ID from ctrl_label and compare ---
+            # Handles the case where the parser resolved via keyword/embedding and
+            # ctrl_id == "UNKNOWN" but ctrl_label == "5.15 Access Control" (a valid
+            # ISO label whose numeric prefix still uniquely identifies the control).
+            if not matched_uc and ctrl_label and ctrl_label != "UNKNOWN":
+                label_id_match = _re.match(r'^(VAPT\s*-?\s*\d+|\d{1,2}\.\d{1,2}(?:\.\d{1,2})?)', str(ctrl_label).strip(), _re.IGNORECASE)
+                if label_id_match:
+                    label_prefix = label_id_match.group(1).strip().upper()
+                    for uc in USE_CASES:
+                        uc_id = uc["use_case"].split(" ")[0].upper()
+                        if uc_id == label_prefix:
+                            matched_uc = uc
+                            break
+
+            # --- Pass 2.5: re-run the parser's rich keyword map on the question ---
+            # The parser already ran _resolve_control_by_direct_map on resolution_text
+            # but returned UNKNOWN when that text was empty or the question column was
+            # detected differently from what the backend stores in item["question"].
+            # Re-running here covers question-based rows like "Is MFA enabled?" or
+            # "Are backups taken daily?" that carry domain keywords (mfa -> 8.5,
+            # backup -> 8.13, ntp -> 8.17) that the word-overlap pass below would miss
+            # because it only compares against USE_CASES label words, not audit terms.
+            if not matched_uc and question:
+                matched_uc = _kw_resolve(question, USE_CASES)
+
+            # Also try _resolve_control_by_name on the question text (handles cases
+            # like "Clock Synchronization" or "Backup and Recovery" as plain text).
+            if not matched_uc and question:
+                matched_uc = _name_resolve(question, USE_CASES)
+
+            # --- Pass 3: word-overlap fallback on ctrl_label text ---
+            # Final resort when neither ID, label-prefix, nor keyword/name pass matched
+            # (e.g. a highly domain-specific or abbreviated question).
+            if not matched_uc:
+                search_text = _norm(" ".join(filter(None, [ctrl_label, question])))
+                search_words = [w for w in search_text.split() if len(w) > 2]
+                if search_words:
+                    best_uc, best_score = None, 0
+                    for uc in USE_CASES:
+                        uc_text = _norm(uc.get("label", "") + " " + uc.get("use_case", ""))
+                        uc_words = set(uc_text.split())
+                        overlap = len(set(search_words) & uc_words)
+                        if overlap > best_score:
+                            best_score, best_uc = overlap, uc
+                    min_req = 1 if len(search_words) <= 2 else 2
+                    if best_score >= min_req:
+                        matched_uc = best_uc
 
             if matched_uc:
                 uc_key = matched_uc["use_case"]
@@ -194,12 +255,24 @@ async def api_parse_scope_excel(file: UploadFile = File(...)):
 
         custom_evidence["excel_items"] = items
 
+        unmatched_count = len(items) - len(matched_sls_list)
+        warning = None
+        if len(items) > 0 and len(matched_sls_list) == 0:
+            warning = (
+                "No ISO controls could be matched from the Excel sheet. "
+                "Please ensure the sheet has a column containing ISO control IDs (e.g. '5.15') "
+                "or recognisable control names."
+            )
+        elif unmatched_count > 0:
+            warning = f"{unmatched_count} row(s) could not be matched to a known ISO control and were skipped."
+
         return {
             "success": True,
             "matched_sls": matched_sls_list,        # list with duplicates — 8 items, not 6
             "custom_evidence": custom_evidence,
             "custom_documents": custom_documents,
             "total_rows": len(items),
+            "warning": warning,
             "message": f"Successfully loaded {len(items)} Excel audit checklist items ({len(set(matched_sls_list))} unique ISO controls)."
         }
     except HTTPException:

@@ -1,0 +1,42 @@
+[
+  {
+    "id": "TC001",
+    "title": "upload_iso_policy_documents_validation",
+    "description": "Test POST /api/audit/upload endpoint with valid ISO policy and evidence documents to ensure successful upload and 200 response confirmation."
+  },
+  {
+    "id": "TC002",
+    "title": "upload_iso_policy_documents_invalid_format",
+    "description": "Test POST /api/audit/upload endpoint with malformed or unsupported document data to verify it returns 400 or 415 error indicating upload validation failure."
+  },
+  {
+    "id": "TC003",
+    "title": "start_iso_27001_audit_evaluation_success",
+    "description": "Test POST /api/audit/start endpoint with valid session payload and usable evidence to confirm 200 response with ISO 27001 audit findings generated."
+  },
+  {
+    "id": "TC004",
+    "title": "start_iso_27001_audit_evaluation_no_evidence",
+    "description": "Test POST /api/audit/start endpoint without usable evidence to verify it returns 400 Bad Request due to insufficient audit input or zero-evidence guard."
+  },
+  {
+    "id": "TC005",
+    "title": "upload_vapt_scan_logs_validation",
+    "description": "Test POST /api/audit/upload endpoint with valid VAPT scan logs and technical evidence to ensure successful ingestion and 200 confirmation response."
+  },
+  {
+    "id": "TC006",
+    "title": "upload_vapt_scan_logs_invalid_content",
+    "description": "Test POST /api/audit/upload endpoint with corrupted logs or malicious file content to verify it returns 400 or 415 error from ingestion validation."
+  },
+  {
+    "id": "TC007",
+    "title": "start_vapt_vulnerability_analysis_success",
+    "description": "Test POST /api/audit/start endpoint with uploaded VAPT session context to confirm 200 response with VAPT findings, CVSS scoring, and control mappings."
+  },
+  {
+    "id": "TC008",
+    "title": "start_vapt_vulnerability_analysis_no_valid_evidence",
+    "description": "Test POST /api/audit/start endpoint with no valid technical evidence to verify it returns 400 Bad Request indicating the analysis cannot proceed."
+  }
+]

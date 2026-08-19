@@ -29,20 +29,26 @@ def log_system_event(event_type, severity, details, session_id=None, actor="Syst
     action, so attributing them to one specific hardcoded email was both
     misleading and a minor accuracy/privacy issue in the admin log trail.
     """
-    try:
-        with force_master():
-            db = SessionLocal()
-            db.add(SystemEvent(
-                event_type=event_type,
-                severity=severity,
-                actor=actor or "System",
-                session_id=session_id or "System",
-                meta=details
-            ))
-            db.commit()
-            db.close()
-    except Exception as _e:
-        print(f"[SYSTEM EVENT LOG ERROR] {_e}", flush=True)
+    for attempt in range(3):
+        try:
+            with force_master():
+                db = SessionLocal()
+                try:
+                    db.add(SystemEvent(
+                        event_type=event_type,
+                        severity=severity,
+                        actor=actor or "System",
+                        session_id=session_id or "System",
+                        meta=details
+                    ))
+                    db.commit()
+                    return
+                finally:
+                    db.close()
+        except Exception as _e:
+            if attempt == 2:
+                print(f"[SYSTEM EVENT LOG ERROR] {_e}", flush=True)
+            time.sleep(0.15)
 from src.core.controls_data import USE_CASES
 from src.core.control_keywords import CONTROL_KEYWORDS
 from src.core.input_guardrail import scan_document
@@ -476,7 +482,7 @@ def get_num_ctx(model_name: str) -> int:
     if "3b" in name:
         return 4096
     if "e4b" in name:
-        return 8192  # Gemma 4 e4b: server runs -c 32768 / -np 8 → 8192 per slot
+        return 32768  # server runs -c 32768 → full 32k context available per request
     return 4096
 
 def _generate_context_summary(context, llm_model):
@@ -1525,17 +1531,31 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         # ── Pre-flight: verify LLM server is reachable (3s timeout) ──────────
         import os as _os
         import requests as _req
-        from src.core.llm_client import get_llm_backend, _resolve_host
+        from src.core.llm_client import get_llm_backend, _resolve_host, _ensure_llama_server_running
         _backend = get_llm_backend()
         _is_llamacpp = _backend in ("llama.cpp", "llamacpp")
         _llm_host = _resolve_host()
         _health_url = f"{_llm_host}/health" if _is_llamacpp else f"{_llm_host}/api/tags"
+        _healthy = False
         try:
             _hr = _req.get(_health_url, timeout=3)
-            if _hr.status_code not in (200, 201):
-                raise Exception(f"Server returned HTTP {_hr.status_code} on {_health_url}")
-            print(f"[_run_ollama_bg] LLM server health check OK ({_health_url}): {_hr.status_code}", flush=True)
-        except Exception as _hc_err:
+            if _hr.status_code in (200, 201):
+                _healthy = True
+                print(f"[_run_ollama_bg] LLM server health check OK ({_health_url}): {_hr.status_code}", flush=True)
+        except Exception:
+            pass
+
+        if not _healthy and _is_llamacpp:
+            _ensure_llama_server_running(11434)
+            try:
+                _hr = _req.get(_health_url, timeout=5)
+                if _hr.status_code in (200, 201):
+                    _healthy = True
+                    print(f"[_run_ollama_bg] LLM server self-healed and online ({_health_url}): {_hr.status_code}", flush=True)
+            except Exception:
+                pass
+
+        if not _healthy:
             _backend_label = "llama.cpp" if _is_llamacpp else "Ollama"
             _err_msg = (
                 f"Cannot connect to {_backend_label} server at {_llm_host}. "
@@ -1572,6 +1592,8 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
 
         ctx = ""
         file_names_list = []
+        if file_registry is None:
+            file_registry = {}
         for f_data in files_data:
             name = f_data["name"]
             file_bytes = f_data["bytes"]
@@ -1592,6 +1614,8 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
             text = f_data.get("text")
             if not text:
                 text = extract_text(f_like)
+                f_data["text"] = text
+            file_registry[name] = text
 
             ctx += f"--- FILE: {name} ---\n{text}\n\n"
             save_document_chunks(name, text, report_id=_report_id_for_ingest)
@@ -1638,7 +1662,11 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
         # decision -- but confusing and worth matching reality. Re-derives the
         # same list generate_ollama_findings will build (cheap: no LLM calls,
         # just dict construction) so the two totals agree.
-        _total_ctrl_count = len(_build_controls_for_audit(selected_sls_copy, custom_evidence))
+        # PERF: Build controls list once and take its len -- previously called
+        # _build_controls_for_audit() a second time here solely for the count,
+        # rebuilding the entire list just to get a display number.
+        _controls_for_count = _build_controls_for_audit(selected_sls_copy, custom_evidence)
+        _total_ctrl_count = len(_controls_for_count)
         _batch_sz = 1 if ("7B" in ai_model or "8B" in ai_model or "9B" in ai_model or "Escalation" in ai_model) else 4
 
         # On fresh start: create a new checkpoint.
@@ -1790,9 +1818,9 @@ def _run_ollama_bg(bg_key, files_data, selected_sls_copy, ai_model, session_id=N
                 ))
                 
                 report.status = "Pending Review"
-                
-            db_write.commit()
-            db_write.close()
+                # Commit and close INSIDE force_master() so writes go to the primary
+                db_write.commit()
+                db_write.close()
 
         except Exception as e:
             print(f"[PIPELINE] Failed to save findings and complete files update: {e}", flush=True)

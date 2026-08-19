@@ -29,3 +29,5 @@ scratch/
 *.exe
 *.pem
 gemma-2-2b-it-Q4_K_M.gguf
+*.tar
+*.zip

@@ -53,13 +53,13 @@ class Finding(Base):
     __tablename__ = "findings"
     id                    = Column(Integer, primary_key=True, autoincrement=True)
     report_id             = Column(Integer, index=True) # links to audit_reports.id
-    control_id            = Column(String(100)) # e.g. A.12.6.1
-    control_name          = Column(String(200)) # e.g. Access Restriction
+    control_id            = Column(String(500)) # e.g. A.12.6.1 or custom checklist question
+    control_name          = Column(String(500)) # e.g. Access Restriction
     severity              = Column(String(100)) # P1 Critical -> P4 Low
     description           = Column(Text) # finding description details
     gap_detected          = Column(Text) # detected gap text
     relevance_score       = Column(Integer, default=0)
-    evidence_found        = Column(String(100))
+    evidence_found        = Column(String(500))
     evidence_snippet      = Column(Text)
     recommendation        = Column(Text)
     reasoning             = Column(Text)
@@ -890,6 +890,8 @@ def init_db():
         try:
             with eng_sqlite.connect() as conn:
                 conn.execute(text("PRAGMA journal_mode=WAL;"))
+                conn.execute(text("PRAGMA busy_timeout=30000;"))
+                conn.execute(text("PRAGMA synchronous=NORMAL;"))
         except Exception:
             pass
         reconcile_schemas(eng_sqlite)
@@ -967,7 +969,7 @@ class RoutingSession(Session):
         except Exception as e:
             # Automated Failover: If Master fails (not replication), promote Slave 1 to Master
             if "Replication failed" not in str(e):
-                if promoted_master_engine is None:
+                if promoted_master_engine is None and engine_master is not None and engine_master.dialect.name != "sqlite":
                     print(f"[FAILOVER PROMOTION] Master database write failed: {e}. Promoting Slave 1 to Master...")
                     promoted_master_engine = engine_slave1
                     # Log the failover event

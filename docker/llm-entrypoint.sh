@@ -98,16 +98,20 @@ if [ "$LLM_MODE" = "embedding" ]; then
 fi
 
 # completion mode
-FIXED_OVERHEAD_GB="${RESOURCE_GUARD_FIXED_OVERHEAD_GB:-8}"
-PER_SLOT_GB="${RESOURCE_GUARD_PER_SLOT_GB:-2.5}"
+# These MUST stay in sync with resource_guard.py and llm_client.py:
+# model_gb=4.0, slot_gb=0.5 — if you change one, change all three.
+FIXED_OVERHEAD_GB="${RESOURCE_GUARD_FIXED_OVERHEAD_GB:-4.5}"
+PER_SLOT_GB="${RESOURCE_GUARD_PER_SLOT_GB:-0.5}"
 SAFETY_MARGIN="${RESOURCE_GUARD_SAFETY_MARGIN:-0.85}"
 
 TOTAL_GB=$(detect_total_mem_gb)
-SLOTS=$(awk -v t="$TOTAL_GB" -v o="$FIXED_OVERHEAD_GB" -v p="$PER_SLOT_GB" -v m="$SAFETY_MARGIN" '
+MAX_SLOTS=8   # cap matches llm_client.py: max(1, min(8, ...))
+SLOTS=$(awk -v t="$TOTAL_GB" -v o="$FIXED_OVERHEAD_GB" -v p="$PER_SLOT_GB" -v m="$SAFETY_MARGIN" -v max="$MAX_SLOTS" '
     BEGIN {
         usable = (t * m) - o
         slots = int(usable / p)
-        if (slots < 1) slots = 1
+        if (slots < 1)    slots = 1
+        if (slots > max)  slots = max
         print slots
     }
 ')
@@ -125,8 +129,8 @@ echo "[LLM ENTRYPOINT] Detected ${DETECTED_CORES} CPU core(s) -> using ${LLM_T} 
 exec /app/llama-server \
     --host 0.0.0.0 --port 11434 \
     -m /models/google_gemma-4-E4B-it-Q4_K_M.gguf \
-    -c 0 -np "$SLOTS" \
+    -c 32768 -np "$SLOTS" \
     -t "$LLM_T" \
-    -b 2048 -ub 512 \
+    -b 512 -ub 256 \
     --cont-batching \
     --flash-attn on

@@ -144,8 +144,10 @@ Write-Host "=== Creating companion ZIP -> $companionZip ===" -ForegroundColor Cy
 
 if (Test-Path $companionZip) { Remove-Item $companionZip -Force }
 
-# Compress-Archive is fine here - these two files are < 50 KB total
-Compress-Archive -Path @("docker-compose.customer.yml", $readmeFile) `
+# Compress-Archive is fine here - these files are < 100 KB total
+$companionFiles = @("docker-compose.customer.yml", $readmeFile)
+if (Test-Path "DEPLOYMENT_GUIDE.md") { $companionFiles += "DEPLOYMENT_GUIDE.md" }
+Compress-Archive -Path $companionFiles `
                  -DestinationPath $companionZip `
                  -CompressionLevel Optimal
 

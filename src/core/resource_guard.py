@@ -25,14 +25,16 @@ try:
 except ImportError:
     psutil = None
 
-FIXED_OVERHEAD_GB = float(os.environ.get("RESOURCE_GUARD_FIXED_OVERHEAD_GB", "8.0"))
-PER_SLOT_GB = float(os.environ.get("RESOURCE_GUARD_PER_SLOT_GB", "0.8"))
+# These must stay in sync with the -np auto-detection formula in llm_client.py:
+# model_gb=4.0, slot_gb=0.5 — if you change one, change both.
+FIXED_OVERHEAD_GB = float(os.environ.get("RESOURCE_GUARD_FIXED_OVERHEAD_GB", "4.5"))  # model(4GB) + OS/Postgres/Redis(0.5GB)
+PER_SLOT_GB = float(os.environ.get("RESOURCE_GUARD_PER_SLOT_GB", "0.5"))             # KV-cache per slot at -c 32768
 SAFETY_MARGIN = float(os.environ.get("RESOURCE_GUARD_SAFETY_MARGIN", "0.85"))
 MIN_SLOTS = 1
 
-WARNING_AVAILABLE_PERCENT = float(os.environ.get("RESOURCE_GUARD_WARN_PERCENT", "15"))
-CRITICAL_AVAILABLE_PERCENT = float(os.environ.get("RESOURCE_GUARD_CRITICAL_PERCENT", "8"))
-CRITICAL_ABSOLUTE_FLOOR_GB = float(os.environ.get("RESOURCE_GUARD_CRITICAL_FLOOR_GB", "0.5"))
+WARNING_AVAILABLE_PERCENT = float(os.environ.get("RESOURCE_GUARD_WARN_PERCENT", "2"))    # warn at <2% free
+CRITICAL_AVAILABLE_PERCENT = float(os.environ.get("RESOURCE_GUARD_CRITICAL_PERCENT", "0.5"))  # block at <0.5% free
+CRITICAL_ABSOLUTE_FLOOR_GB = float(os.environ.get("RESOURCE_GUARD_CRITICAL_FLOOR_GB", "0.10"))  # block if <0.10GB free
 
 
 _CGROUP_V2_MAX = "/sys/fs/cgroup/memory.max"

@@ -1,6 +1,19 @@
 // ── AICyberAuditBox Client Application ──
 var API_BASE = window.location.origin + "/api";
 
+// ── SECURITY UTILITY: HTML-escape user/server strings before inserting into innerHTML ──
+// Called throughout the app but was never defined, causing ReferenceErrors that silently
+// swallowed the entire innerHTML assignment and left filenames/titles blank.
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 var currentUser = typeof currentUser !== "undefined" ? currentUser : null;
 var selectedRole = typeof selectedRole !== "undefined" ? selectedRole : "auditor";
 var activeTab = typeof activeTab !== "undefined" ? activeTab : "";
@@ -89,6 +102,14 @@ document.addEventListener("DOMContentLoaded", () => {
     // Setup Edit Finding Modal form
     const editForm = document.getElementById("edit-finding-form");
     if (editForm) editForm.addEventListener("submit", handleEditFindingSubmit);
+
+    // Live update severity row visibility when auditor changes the Status dropdown
+    const editStatusSel = document.getElementById("edit-finding-status");
+    if (editStatusSel) {
+        editStatusSel.addEventListener("change", function () {
+            _updateSeverityVisibility(this.value);
+        });
+    }
 });
 
 function updateHeaderClock() {
@@ -205,8 +226,9 @@ async function handleLoginSubmit(e) {
                 body: JSON.stringify({ username, password, role: selectedRole })
             });
 
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || "Registration failed.");
+            let data = {};
+            try { data = await response.json(); } catch (_) {}
+            if (!response.ok) throw new Error(data.detail || `Registration failed (HTTP ${response.status}). Please try again.`);
 
             // Show QR Setup
             document.getElementById("login-form").style.display = "none";
@@ -221,8 +243,9 @@ async function handleLoginSubmit(e) {
                 body: JSON.stringify({ username, password })
             });
 
-            const data = await response.json();
-            if (!response.ok) throw new Error(data.detail || "Authentication failed.");
+            let data = {};
+            try { data = await response.json(); } catch (_) {}
+            if (!response.ok) throw new Error(data.detail || `Authentication failed (HTTP ${response.status}). Please try again.`);
 
             // Switch to OTP verify
             document.getElementById("login-form").style.display = "none";
@@ -457,6 +480,7 @@ function switchTab(tabId, tabBtn) {
         loadFindings();
     } else if (tabId === "tab-audit-report") {
         renderAuditReportPreview();
+        populateAuditeeSelector();
     } else if (tabId === "tab-admin-logs") {
         loadSystemEvents();
         loadDeveloperLogs();
@@ -1110,8 +1134,35 @@ async function loadOrCreateSession(user) {
     // doesn't, auditee has its own separate upload-driven flow), and only
     // when there's neither a session to resume nor an interrupted one to
     // recover, so this never stacks on top of the interrupted-session modal.
-    if (!lastSid && !showedInterruptedModal && user && user.role === "auditor") {
-        openNewSessionModal();
+    if (!lastSid && !showedInterruptedModal && user) {
+        if (user.role === "auditor") {
+            openNewSessionModal();
+        } else if (user.role === "auditee") {
+            // Auditees need a session to upload evidence. Auto-create one so
+            // they are never blocked by "Active session missing" on first login.
+            try {
+                const body = new FormData();
+                body.append("session_title", `Evidence Upload — ${user.username}`);
+                body.append("framework", "ISO 27001");
+                body.append("username", user.username);
+                const res = await authFetch(`${API_BASE}/audit/sessions`, { method: "POST", body });
+                const data = await res.json();
+                if (data.success && data.session_id) {
+                    activeSessionId = data.session_id;
+                    activeSessionTitle = data.session_title || "Evidence Upload Session";
+                    try {
+                        localStorage.setItem(`last_active_session_id${userKey}`, activeSessionId);
+                        localStorage.setItem(`last_active_session_title${userKey}`, activeSessionTitle);
+                    } catch (e) {}
+                    const badgeEl = document.getElementById("active-session-badge");
+                    const titleEl = document.getElementById("workspace-title");
+                    if (badgeEl) badgeEl.innerText = `Session ID: ${activeSessionId.slice(0, 14)}...`;
+                    if (titleEl) titleEl.innerText = activeSessionTitle;
+                }
+            } catch (e) {
+                console.warn("[Auditee] Auto session create failed:", e);
+            }
+        }
     }
 }
 
@@ -1218,7 +1269,7 @@ async function populateAuditeeSelector() {
     if (!select) return;
 
     try {
-        const userRes = await fetch(`${API_BASE}/auth/auditees`);
+        const userRes = await authFetch(`${API_BASE}/auth/auditees`); // BUG-01 FIX: was bare fetch() — no JWT sent, caused 401
         const userData = await userRes.json();
 
         if (userData.success && userData.auditees && userData.auditees.length > 0) {
@@ -1252,9 +1303,12 @@ function preventDefaults(e) {
 }
 
 function handleFileDrop(e) {
+    preventDefaults(e);
     const dt = e.dataTransfer;
-    const files = dt.files;
-    processEvidenceFiles(files);
+    const files = dt ? dt.files : null;
+    if (files && files.length > 0) {
+        uploadFiles(Array.from(files));
+    }
 }
 
 async function processEvidenceFiles(files) {
@@ -1316,7 +1370,7 @@ function renderUploadedFilesList() {
     const countBadge = document.getElementById("evidence-count-badge");
     if (!registry) return;
 
-    if (countBadge) countBadge.innerText = `${uploadedFilesList.length} files`;
+    if (countBadge) countBadge.innerText = `${uploadedFilesList.length} files`.trim();
 
     if (uploadedFilesList.length === 0) {
         registry.innerHTML = `<div class="empty-state" style="font-size: 0.78rem; color: var(--text-muted); text-align: center; padding: 24px;">No files uploaded yet. Drag files to begin audit.</div>`;
@@ -1333,14 +1387,14 @@ function renderUploadedFilesList() {
             <div style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1;">
                 <span class="file-icon-badge ${file.iconClass}" style="width: 32px; height: 32px; font-size: 0.65rem; border-radius: 8px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;">${file.type}</span>
                 <div style="overflow: hidden;">
-                    <div style="font-size: 0.82rem; font-weight: 600; color: #f1f5f9; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${file.name}</div>
+                    <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-main); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;">${file.name}</div>
                     <div style="font-size: 0.7rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
                         <span>${file.size}</span>
                         <span style="color: #34d399; font-weight: 600;">✓ Attached</span>
                     </div>
                 </div>
             </div>
-            <button type="button" onclick="deleteEvidenceFile(${idx})" style="background: transparent; border: none; color: #ef4444; font-size: 0.95rem; cursor: pointer; padding: 4px;" title="Remove ${file.name}">🗑️</button>
+            <button type="button" onclick="deleteEvidenceFile(${idx})" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.15s;" title="Remove file" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#94a3b8'" aria-label="Remove ${escapeHtml(file.name)}"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
         `;
         registry.appendChild(item);
     });
@@ -1734,13 +1788,17 @@ async function handleExcelScopeUpload(e) {
     formData.append("file", file);
 
     try {
-        const response = await fetch(`${API_BASE}/controls/parse-scope-excel`, {
+        const response = await authFetch(`${API_BASE}/controls/parse-scope-excel`, {
             method: "POST",
             body: formData
         });
 
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.detail || "Failed to parse Excel file.");
+        }
         const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || "Failed to parse Excel file.");
+
 
         customEvidenceMappings = data.custom_evidence || null;
         customControlDocuments = data.custom_documents || null;
@@ -1767,11 +1825,21 @@ function filterCheckboxList() {
     const accordions = document.querySelectorAll(".clause-accordion-card");
 
     if (!q) {
-        // When query is empty, show all items inside accordions
+        // GLITCH-05 FIX: when clearing search, restore ALL items AND collapse accordions back
         document.querySelectorAll("#controls-checkbox-container .checkbox-item").forEach(row => {
             row.style.display = "flex";
         });
-        // Leave accordions in their current state or default
+        // Collapse all accordion sections back to their default closed state
+        accordions.forEach(acc => {
+            acc.style.display = "block";
+            const body = acc.querySelector(".clause-body");
+            if (body) body.style.display = "none";
+            const header = acc.querySelector(".clause-header");
+            if (header) {
+                const arrow = header.querySelector(".clause-arrow");
+                if (arrow) arrow.innerText = "›";
+            }
+        });
         return;
     }
 
@@ -1795,7 +1863,9 @@ function filterCheckboxList() {
             if (hasMatch) {
                 body.style.display = "block";
                 acc.style.display = "block";
-                if (toggleIcon) toggleIcon.innerText = "v";
+                // GLITCH-02 FIX: was .clause-toggle-icon which doesn't exist — correct class is .clause-arrow
+                const arrow = acc.querySelector(".clause-arrow");
+                if (arrow) arrow.innerText = "v";
             } else {
                 acc.style.display = "none";
             }
@@ -1865,52 +1935,58 @@ function syncControlsScopeFromFindings(findings) {
 // ── EVIDENCE FILE UPLOAD ──
 
 function setupFileDropZone() {
-    const dropZone = document.getElementById("drop-zone");
-    if (!dropZone) return;
+    const dropZones = document.querySelectorAll(".drop-zone");
+    if (!dropZones || dropZones.length === 0) return;
 
-    dropZone.addEventListener("dragover", e => {
-        e.preventDefault();
-        dropZone.style.borderColor = "var(--primary)";
-    });
+    dropZones.forEach(dropZone => {
+        dropZone.addEventListener("dragover", e => {
+            preventDefaults(e);
+            dropZone.style.borderColor = "var(--primary, #3b82f6)";
+            dropZone.style.background = "rgba(37, 99, 235, 0.15)";
+        });
 
-    dropZone.addEventListener("dragleave", () => {
-        dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
-    });
+        dropZone.addEventListener("dragleave", e => {
+            preventDefaults(e);
+            dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
+            dropZone.style.background = "";
+        });
 
-    dropZone.addEventListener("drop", async e => {
-        e.preventDefault();
-        dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
+        dropZone.addEventListener("drop", async e => {
+            preventDefaults(e);
+            dropZone.style.borderColor = "rgba(148, 163, 184, 0.25)";
+            dropZone.style.background = "";
 
-        const items = e.dataTransfer.items;
-        let filesToUpload = [];
+            const items = e.dataTransfer.items;
+            let filesToUpload = [];
 
-        if (items && items.length > 0) {
-            const entryPromises = [];
-            for (let i = 0; i < items.length; i++) {
-                const item = items[i];
-                if (item.kind === "file") {
-                    const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
-                    if (entry) {
-                        entryPromises.push(readEntryRecursively(entry));
-                    } else {
-                        const file = item.getAsFile();
-                        if (file) filesToUpload.push(file);
+            if (items && items.length > 0) {
+                const entryPromises = [];
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    if (item.kind === "file") {
+                        const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+                        if (entry) {
+                            entryPromises.push(readEntryRecursively(entry));
+                        } else {
+                            const file = item.getAsFile();
+                            if (file) filesToUpload.push(file);
+                        }
                     }
                 }
+                if (entryPromises.length > 0) {
+                    const results = await Promise.all(entryPromises);
+                    results.forEach(fArr => filesToUpload.push(...fArr));
+                }
             }
-            if (entryPromises.length > 0) {
-                const results = await Promise.all(entryPromises);
-                results.forEach(fArr => filesToUpload.push(...fArr));
+
+            if (filesToUpload.length === 0 && e.dataTransfer.files.length > 0) {
+                filesToUpload = Array.from(e.dataTransfer.files);
             }
-        }
 
-        if (filesToUpload.length === 0 && e.dataTransfer.files.length > 0) {
-            filesToUpload = Array.from(e.dataTransfer.files);
-        }
-
-        if (filesToUpload.length > 0) {
-            uploadFiles(filesToUpload);
-        }
+            if (filesToUpload.length > 0) {
+                uploadFiles(filesToUpload);
+            }
+        });
     });
 }
 
@@ -1948,16 +2024,7 @@ function handleEvidenceFolderUpload(e) {
 
 
 async function uploadFiles(files) {
-    // Auditees must route their evidence to a specific auditor before uploading --
-    // otherwise the files land in a session nobody is looking for. Only applies to
-    // the auditee flow; the auditor's own workspace upload has no such selector.
-    if (currentUser && currentUser.role === "auditee") {
-        const targetAuditorSelector = document.getElementById("target-auditor-selector");
-        if (!targetAuditorSelector || !targetAuditorSelector.value) {
-            alert("⚠️ Please select a Target Auditor before uploading evidence.");
-            return;
-        }
-    }
+    if (!files || files.length === 0) return;
 
     const dropZone = document.getElementById("drop-zone");
     const countBadge = document.getElementById("evidence-count-badge");
@@ -2031,8 +2098,14 @@ async function uploadFiles(files) {
             body: body
         });
 
+        // BUG-03 FIX: check response.ok BEFORE calling .json() — a 502/503 returns HTML not JSON,
+        // so .json() throws SyntaxError before we can show the real error message.
+        if (!response.ok) {
+            let errMsg = `Upload failed (HTTP ${response.status})`;
+            try { const errData = await response.json(); errMsg = formatApiError(errData.detail, errMsg); } catch (_) {}
+            throw new Error(errMsg);
+        }
         const data = await response.json();
-        if (!response.ok) throw new Error(formatApiError(data.detail, "Upload failed."));
 
         const processedCount = (data.files || []).length;
         const blocked = data.blocked || [];
@@ -2155,14 +2228,14 @@ async function loadEvidenceFileList() {
                         <div style="display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1;">
                             <div class="file-icon-badge ${fileClass}" style="width: 32px; height: 32px; font-size: 0.65rem; border-radius: 8px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;">${fileIconText}</div>
                             <div style="overflow: hidden;">
-                                <div style="font-size: 0.82rem; font-weight: 600; color: #f1f5f9; text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${escapeHtml(fn)}">${escapeHtml(fn)}</div>
+                                <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-main); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;" title="${escapeHtml(fn)}">${escapeHtml(fn)}</div>
                                 <div style="font-size: 0.7rem; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
                                     <span>${escapeHtml(f.size_str || 'Ready')}</span>
                                     <span style="color: #34d399; font-weight: 600;">✓ Attached</span>
                                 </div>
                             </div>
                         </div>
-                        <button type="button" onclick="deleteServerEvidenceFile('${requestSessionId}', ${f.id}, '${safeFnEsc}')" style="background: transparent; border: none; color: #ef4444; font-size: 0.95rem; cursor: pointer; padding: 4px;" title="Remove ${escapeHtml(fn)}">🗑️</button>
+                        <button type="button" onclick="deleteServerEvidenceFile('${requestSessionId}', ${f.id}, '${safeFnEsc}')" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; padding: 4px; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: color 0.15s;" title="Remove file" onmouseover="this.style.color='#ef4444'" onmouseout="this.style.color='#94a3b8'" aria-label="Remove ${escapeHtml(fn)}"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
                     `;
                     registry.appendChild(card);
                 });
@@ -2210,15 +2283,17 @@ async function triggerAuditAnalysis() {
     }
 
     // Count evidence: both files uploaded in THIS browser session (uploadedFilesList)
-    // AND files already attached server-side from a previous session/page load
-    // (rendered in the #uploaded-files-registry by loadEvidenceFileList).
-    // Previously only uploadedFilesList was checked, so a page reload with
-    // pre-existing server files would always fail this guard.
+    // AND files already attached server-side from a previous session/page load.
+    // Always refresh from the server first so the badge and DOM are up-to-date
+    // (stale badge text like "0\n   files" caused parseInt to return 0 even when
+    // files were present, triggering a false "no evidence" alert).
+    await loadEvidenceFileList();
+
     const serverAttachedCount = (() => {
         // Primary source: the badge that loadEvidenceFileList sets
         const badge = document.getElementById("evidence-count-badge");
         if (badge) {
-            const n = parseInt(badge.innerText);
+            const n = parseInt(badge.innerText.trim());
             if (!isNaN(n)) return n;
         }
         // Fallback: count rendered file cards in the registry
@@ -2413,12 +2488,16 @@ function showToast(message, type = "info") {
         document.body.appendChild(toast);
     }
 
-    if (type === "warning") {
+    if (type === "warning" || type === "warn") {
         toast.style.borderColor = "rgba(245, 158, 11, 0.6)";
         toast.style.boxShadow = "0 4px 20px rgba(245, 158, 11, 0.2)";
     } else if (type === "error") {
         toast.style.borderColor = "rgba(239, 68, 68, 0.6)";
         toast.style.boxShadow = "0 4px 20px rgba(239, 68, 68, 0.2)";
+    } else if (type === "success") {
+        // GLITCH-04 FIX: add green branch for "success" type (was falling through to default blue)
+        toast.style.borderColor = "rgba(16, 185, 129, 0.6)";
+        toast.style.boxShadow = "0 4px 20px rgba(16, 185, 129, 0.2)";
     } else {
         toast.style.borderColor = "rgba(59, 130, 246, 0.6)";
         toast.style.boxShadow = "0 4px 20px rgba(59, 130, 246, 0.2)";
@@ -3376,7 +3455,7 @@ async function renderAuditReportPreview() {
                     <div><span style="font-size:0.72rem; opacity:0.8; display:block; margin-bottom: 2px;">Compliance Score</span><b style="font-size:1.1rem; color:${scorePercent >= 70 ? '#10b981' : '#f59e0b'};">${scorePercent}% Compliance</b></div>
                 </div>
 
-                <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom:12px;" class="preview-ctrl-title">Audit Control Evaluation Details (${findings.length} controls evaluated)</h4>
+                <h4 style="font-size: 0.95rem; font-weight: 700; margin-bottom:12px;" class="preview-ctrl-title">Audit Control Evaluation Details (${reportFindings.length} controls evaluated)</h4>
                 <div style="overflow-x: auto; margin-bottom: 20px; border: 1px solid rgba(148, 163, 184, 0.15); border-radius: 10px;">
                     <table style="width:100%; border-collapse:collapse; font-size:0.8rem; text-align:left;" class="report-preview-table">
                         <thead>
@@ -3966,10 +4045,14 @@ function renderFindingsList() {
         const hasPolicyFields = policyStatusVal && policyAssessVal;
         const hasEvidenceFields = evidenceStatusVal && evidenceAssessVal;
 
+        const isFp = backendFinalResult === "FALSE_POSITIVE" || String(f.status || "").toUpperCase() === "FALSE_POSITIVE";
+
         const policyBadgeHtml = hasPolicyFields
-            ? (policyAssessVal === "COMPLIANT"
-                ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Policy ${policyStatusVal === 'FOUND' ? 'Found' : 'Not Found'}: Compliant</span>`
-                : `<span class="badge badge-danger" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✕ Policy ${policyStatusVal === 'FOUND' ? 'Found' : 'Not Found'}: Non-Compliant</span>`)
+            ? (policyStatusVal === "NOT_FOUND"
+                ? `<span class="badge badge-warning" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">⚠ Policy: Not Found</span>`
+                : (policyAssessVal === "COMPLIANT"
+                    ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Policy Found: Compliant</span>`
+                    : `<span class="badge badge-danger" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✕ Policy Found: Non-Compliant</span>`))
             : (isComp
                 ? `<span class="badge badge-success" style="background:rgba(16,185,129,0.15); color:#10b981; border:1px solid rgba(16,185,129,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Policy: Compliant</span>`
                 : `<span class="badge badge-danger" style="background:rgba(239,68,68,0.15); color:#f87171; border:1px solid rgba(239,68,68,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✕ Policy: Non-Compliant</span>`);
@@ -3986,9 +4069,11 @@ function renderFindingsList() {
                     : `<span class="badge badge-info" style="background:rgba(59,130,246,0.15); color:#3b82f6; border:1px solid rgba(59,130,246,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">✓ Evidence: Present</span>`)
                 : `<span class="badge badge-warning" style="background:rgba(245,158,11,0.15); color:#f59e0b; border:1px solid rgba(245,158,11,0.3); font-weight:700; padding:3px 8px; border-radius:4px; font-size:0.75rem;">⚠ Evidence: Missing</span>`);
 
-        const mainBadgeHtml = isComp
-            ? `<span class="badge badge-success" style="background:#10b981; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">COMPLIANT</span>`
-            : `<span class="badge badge-danger" style="background:#ef4444; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">NON_COMPLIANT</span>`;
+        const mainBadgeHtml = isFp
+            ? `<span class="badge" style="background:#8b5cf6; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">OUT_OF_SCOPE</span>`
+            : (isComp
+                ? `<span class="badge badge-success" style="background:#10b981; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">COMPLIANT</span>`
+                : `<span class="badge badge-danger" style="background:#ef4444; color:#ffffff; font-weight:800; padding:4px 10px; border-radius:4px; font-size:0.78rem;">NON_COMPLIANT</span>`);
 
         const isVapt = isVaptFinding(f);
 
@@ -4433,16 +4518,22 @@ function openEditFindingModal(finding) {
     const sevSelect = document.getElementById("edit-finding-severity");
     const rawSev = (finding.severity || "").toUpperCase().trim();
 
+    // Detect nil/empty/N/A severity — these need a prompt so the user can pick
+    const severityIsNil = !rawSev || rawSev === "NIL" || rawSev === "N/A" || rawSev === "NULL" || rawSev === "NONE" || rawSev === "UNKNOWN";
+
     if (isVapt) {
         // VAPT CVSS v3.1 Score Scale
         sevSelect.innerHTML = `
+            ${severityIsNil ? '<option value="" disabled selected style="color:var(--text-muted);">— Select Severity —</option>' : ''}
             <option value="Critical (CVSS 9.0-10.0)">Critical (CVSS 9.0 - 10.0)</option>
             <option value="High (CVSS 7.0-8.9)">High (CVSS 7.0 - 8.9)</option>
             <option value="Medium (CVSS 4.0-6.9)">Medium (CVSS 4.0 - 6.9)</option>
             <option value="Low (CVSS 0.1-3.9)">Low (CVSS 0.1 - 3.9)</option>
             <option value="Informational (CVSS 0.0)">Informational (CVSS 0.0)</option>
         `;
-        if (rawSev.includes("CRIT") || rawSev.includes("9.") || rawSev.includes("10.")) {
+        if (severityIsNil) {
+            sevSelect.value = "";
+        } else if (rawSev.includes("CRIT") || rawSev.includes("9.") || rawSev.includes("10.")) {
             sevSelect.value = "Critical (CVSS 9.0-10.0)";
         } else if (rawSev.includes("HIGH") || rawSev.includes("7.") || rawSev.includes("8.")) {
             sevSelect.value = "High (CVSS 7.0-8.9)";
@@ -4456,12 +4547,15 @@ function openEditFindingModal(finding) {
     } else {
         // ISO NIST Priority Scale (P1-P4)
         sevSelect.innerHTML = `
+            ${severityIsNil ? '<option value="" disabled selected style="color:var(--text-muted);">— Select Severity —</option>' : ''}
             <option value="P1 Critical">P1 Critical (Critical Gap)</option>
             <option value="P2 High">P2 High (Major Non-Compliance)</option>
             <option value="P3 Medium">P3 Medium (Minor Non-Compliance)</option>
             <option value="P4 Low">P4 Low (Opportunity for Improvement)</option>
         `;
-        if (rawSev.includes("P1") || rawSev.includes("CRITICAL")) {
+        if (severityIsNil) {
+            sevSelect.value = "";
+        } else if (rawSev.includes("P1") || rawSev.includes("CRITICAL")) {
             sevSelect.value = "P1 Critical";
         } else if (rawSev.includes("P2") || rawSev.includes("HIGH")) {
             sevSelect.value = "P2 High";
@@ -4471,6 +4565,10 @@ function openEditFindingModal(finding) {
             sevSelect.value = "P3 Medium";
         }
     }
+
+    // 5. Show/hide severity row based on compliance status
+    // NIST rule: COMPLIANT / ACCEPTED / PASS / Out-of-scope have no actionable severity.
+    _updateSeverityVisibility(targetStatusVal);
 
     const descElem = document.getElementById("edit-finding-desc");
     if (descElem) descElem.value = finding.description || finding.gap_detected || "";
@@ -4487,6 +4585,58 @@ function openEditFindingModal(finding) {
     document.getElementById("edit-finding-modal").classList.add("active");
 }
 
+/** Hide/show the Severity Score Scale row depending on whether the current status is compliant.
+ *  Called both when opening the modal and when the auditor changes the Status dropdown live.
+ *  When severity is nil/empty, the row is ALWAYS kept editable regardless of status so the
+ *  user can explicitly assign a severity that was previously missing.
+ */
+function _updateSeverityVisibility(statusVal) {
+    // NIST rule: only "Compliant" (exact dropdown value) has no actionable severity.
+    // Non-Compliant, Partially Compliant, Out Of Scope all retain their P-scale severity.
+    const isComp = (statusVal || "").trim() === "Compliant";
+    // Find the form-group that wraps the severity select (parent of the <label> + <select>)
+    const sevEl = document.getElementById("edit-finding-severity");
+    const sevRow = sevEl && sevEl.closest(".form-group");
+    if (!sevRow) return;
+
+    // If the current severity value is nil/empty, always keep the row editable so the
+    // auditor can assign a severity — never disable it when there's nothing set yet.
+    const currentSevVal = sevEl ? sevEl.value : "";
+    const severityIsNil = !currentSevVal || currentSevVal === "" || currentSevVal === "nil" || currentSevVal === "N/A";
+
+    if (isComp && !severityIsNil) {
+        sevRow.style.opacity = "0.45";
+        sevRow.style.pointerEvents = "none";
+        sevRow.title = "Severity is N/A for Compliant findings";
+        // Inject a read-only badge so the auditor can see the value is N/A
+        let badge = sevRow.querySelector(".severity-na-badge");
+        if (!badge) {
+            badge = document.createElement("span");
+            badge.className = "severity-na-badge";
+            badge.style.cssText = "display:inline-block;margin-top:4px;padding:2px 10px;background:rgba(16,185,129,0.13);color:#10b981;border-radius:5px;font-size:0.78rem;font-weight:700;";
+            sevRow.appendChild(badge);
+        }
+        badge.textContent = "N/A — Not Applicable (Compliant)";
+        badge.style.display = "inline-block";
+    } else {
+        sevRow.style.opacity = "";
+        sevRow.style.pointerEvents = "";
+        sevRow.title = severityIsNil ? "⚠️ Severity not set — please select one" : "";
+        const badge = sevRow.querySelector(".severity-na-badge");
+        if (badge) badge.style.display = "none";
+
+        // If severity is nil, highlight the row label to draw attention
+        const label = sevRow.querySelector("label");
+        if (label) {
+            if (severityIsNil) {
+                label.innerHTML = 'Severity Score Scale <span style="color:#f59e0b;font-size:0.8rem;font-weight:700;">⚠️ Not set — please select</span>';
+            } else {
+                label.textContent = "Severity Score Scale";
+            }
+        }
+    }
+}
+
 function closeEditFindingModal() {
     document.getElementById("edit-finding-modal").classList.remove("active");
 }
@@ -4496,12 +4646,18 @@ async function handleEditFindingSubmit(e) {
     const id = document.getElementById("edit-finding-id").value;
     const descValue = document.getElementById("edit-finding-reasoning").value;
     const srcFileValue = document.getElementById("edit-finding-source-files") ? document.getElementById("edit-finding-source-files").value : "";
+    const chosenStatus = document.getElementById("edit-finding-status").value;
+
+    // NIST Severity rule: only "Compliant" sends "N/A" severity.
+    // Non-Compliant, Partially Compliant, Out Of Scope keep their P-scale severity.
+    const statusIsCompliant = chosenStatus.trim() === "Compliant";
+    const resolvedSeverity = statusIsCompliant ? "N/A" : document.getElementById("edit-finding-severity").value;
 
     const body = {
-        status: document.getElementById("edit-finding-status").value,
+        status: chosenStatus,
         policy_present: document.getElementById("edit-finding-policy").value,
         evidence_present: document.getElementById("edit-finding-evidence").value,
-        severity: document.getElementById("edit-finding-severity").value,
+        severity: resolvedSeverity,
         description: descValue,
         source_files: srcFileValue,
         evidence_snippet: document.getElementById("edit-finding-snippet").value,
@@ -4928,6 +5084,11 @@ async function printAuditReportPreview() {
         if (!previewEl) return;
 
         const printWindow = window.open('', '_blank');
+        // BUG-12 FIX: popup blockers return null from window.open() — guard before use
+        if (!printWindow) {
+            alert("⚠️ Please allow popups in your browser to print the audit report.");
+            return;
+        }
         printWindow.document.write(`
             <html>
                 <head>
@@ -5136,7 +5297,11 @@ async function loadSidebarAuditeeFiles() {
                 opt.innerText = `👤 Auditee: ${auditeeName} — ${s.session_title || 'Audit Session'} (${dateStr})${fileStr}`;
                 sessionSelect.appendChild(opt);
             });
-            if (currentVal) sessionSelect.value = currentVal;
+            if (currentVal) {
+                sessionSelect.value = currentVal;
+            } else if (data.sessions.length === 1) {
+                sessionSelect.value = data.sessions[0].session_id;
+            }
         } else {
             sessionSelect.innerHTML = `<option value="">— No Auditee Evidences Yet —</option>`;
             fileList.innerHTML = `<div style="font-size:0.74rem;color:var(--text-muted);text-align:center;padding:8px;">No auditee evidences found yet.</div>`;
@@ -5197,58 +5362,57 @@ function selectAllSidebarAuditeeDocs(checked) {
 async function addAuditeeFilesToWorkspace() {
     const checked = Array.from(document.querySelectorAll(".sidebar-auditee-doc-cb:checked"));
     if (checked.length === 0) {
-        showToast("⚠️ Please select at least one file first.", "warn");
+        showToast("⚠️ Please select at least one file first.", "warning");
         return;
     }
 
     const sessionSelect = document.getElementById("sidebar-auditee-session-select");
-    const sessId = sessionSelect ? sessionSelect.value : "";
-    if (sessId) {
-        // Switch active session to the selected auditee session
-        activeSessionId = sessId;
-        const badge = document.getElementById("active-session-badge");
-        if (badge) badge.innerText = `Session ID: ${activeSessionId}`;
+    const srcSessId = sessionSelect ? sessionSelect.value : "";
+    if (!srcSessId) {
+        showToast("⚠️ Please select an auditee session from the dropdown first.", "warning");
+        return;
     }
 
-    // Add each selected file to the main workspace uploaded-files-registry
-    const registry = document.getElementById("uploaded-files-registry");
-    let addedCount = 0;
+    // Ensure active workspace session exists for the auditor
+    if (!activeSessionId && currentUser) {
+        await loadOrCreateSession(currentUser);
+    }
+    if (!activeSessionId) {
+        showToast("⚠️ Active workspace session missing. Please create or open an audit session first.", "warning");
+        return;
+    }
 
-    checked.forEach(cb => {
-        const fn = cb.value;
-        const ext = fn.split('.').pop().toLowerCase();
-        const iconMap = { pdf: "PDF", doc: "DOC", docx: "DOC", xls: "XLS", xlsx: "XLS", csv: "XLS", xml: "XML", txt: "TXT" };
-        const classMap = { pdf: "file-type-pdf", doc: "file-type-doc", docx: "file-type-doc", xls: "file-type-xls", xlsx: "file-type-xls", csv: "file-type-xls", xml: "file-type-xml" };
-        const iconText = iconMap[ext] || "FILE";
-        const fileClass = classMap[ext] || "file-type-xml";
+    const selectedFilenames = checked.map(cb => cb.value);
 
-        // Skip if already in registry
-        if (registry && document.querySelector(`[data-filename="${CSS.escape(fn)}"]`)) return;
+    // Call backend API to import files & chunks safely into the auditor's active session
+    try {
+        const res = await authFetch(`${API_BASE}/audit/import-auditee-evidence`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                source_session_id: srcSessId,
+                target_session_id: activeSessionId,
+                filenames: selectedFilenames
+            })
+        });
+        const data = await res.json();
 
-        const card = document.createElement("div");
-        card.className = "file-card";
-        card.setAttribute("data-filename", fn);
-        card.style.cssText = "display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: rgba(30,41,59,0.5); border: 1px solid rgba(99,102,241,0.3); border-radius: 10px; position: relative;";
-        card.innerHTML = `
-            <div class="file-icon-badge ${fileClass}" style="flex-shrink:0;">${iconText}</div>
-            <div style="flex:1;min-width:0;">
-                <div style="font-weight:700;font-size:0.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${fn}">${fn}</div>
-                <div style="font-size:0.7rem;color:#818cf8;margin-top:2px;">📥 Auditee Submission</div>
-            </div>
-            <span class="badge-pill" style="color:#818cf8;border-color:rgba(99,102,241,0.3);font-size:0.65rem;white-space:nowrap;">SUBMITTED</span>
-        `;
-        if (registry) registry.appendChild(card);
-        addedCount++;
-    });
+        if (data.success) {
+            // Smoothly refresh the workspace file list from server
+            await loadEvidenceFileList();
 
-    // Refresh the actual file list from server
-    await loadEvidenceFileList();
+            // Switch to Scan workspace tab
+            const scanTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Scan"));
+            if (scanTabBtn) switchTab("tab-scan-workspace", scanTabBtn);
 
-    // Switch to Scan workspace tab
-    const scanTabBtn = Array.from(document.querySelectorAll("#tabs-bar button")).find(b => b.innerText.includes("Scan"));
-    if (scanTabBtn) switchTab("tab-scan-workspace", scanTabBtn);
-
-    showToast(`✅ ${addedCount} file(s) added from auditee submission to workspace!`, "info");
+            showToast(`✅ ${data.imported_count || selectedFilenames.length} auditee file(s) added to workspace!`, "success");
+        } else {
+            showToast(`❌ Failed to add files: ${data.detail || "Unknown error"}`, "error");
+        }
+    } catch (err) {
+        console.error("Error importing auditee evidence:", err);
+        showToast("❌ Network error adding files to workspace.", "error");
+    }
 }
 
 async function runAnalysisOnSelectedAuditeeDocs() {
@@ -5834,11 +5998,15 @@ async function exportFindingsCSV() {
         const rows = [headers.join(",")];
 
         findings.forEach(f => {
+            // NIST Severity rule: only status="Compliant" shows N/A in CSV export.
+            // Non-Compliant, Partially Compliant, Out Of Scope retain P-scale severity.
+            const isFComp = (f.status || "").trim() === "Compliant";
+            const csvSev = isFComp ? "N/A" : (f.severity || "");
             const row = [
                 `"${csvSafeCell(f.control_id)}"`,
                 `"${csvSafeCell(f.control_name)}"`,
                 `"${csvSafeCell(f.status)}"`,
-                `"${csvSafeCell(f.severity)}"`,
+                `"${csvSafeCell(csvSev)}"`,
                 `"${csvSafeCell(f.policy_present)}"`,
                 `"${csvSafeCell(f.evidence_present)}"`,
                 `"${csvSafeCell(f.description || f.gap_detected)}"`,
@@ -6174,7 +6342,7 @@ async function handleActivateLicenseSubmit(e) {
     if (!key) return;
 
     try {
-        const res = await fetch(`${API_BASE}/license/activate`, {
+        const res = await authFetch(`${API_BASE}/license/activate`, { // BUG-08 FIX: was bare fetch() — no JWT header sent
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ license_key: key })
@@ -6292,14 +6460,16 @@ function toggleModalControlSelection(ctrlId) {
 }
 
 function updateModalSelectedCounter() {
-    const badge = document.getElementById("modal-selected-count-badge");
+    // GLITCH-06 FIX: use actual DOM count instead of hardcoded 108
     const count = modalSelectedControls.size;
-    if (badge) badge.innerText = `${count} of 108 Controls Selected`;
+    const badge = document.getElementById("modal-selected-count-badge");
+    const gridSize = document.querySelectorAll(".modal-ctrl-card").length || 108;
+    if (badge) badge.innerText = `${count} of ${gridSize} Controls Selected`;
 
     const sidebarBadge = document.getElementById("sidebar-scope-count-badge");
     const totalBadge = document.getElementById("total-scope-badge");
-    if (sidebarBadge) sidebarBadge.innerText = `${count}/108 · Edit`;
-    if (totalBadge) totalBadge.innerText = `${count} / 108 selected`;
+    if (sidebarBadge) sidebarBadge.innerText = `${count}/${gridSize} · Edit`;
+    if (totalBadge) totalBadge.innerText = `${count} / ${gridSize} selected`;
 }
 
 function filterModalControlsGrid() {
@@ -6341,8 +6511,8 @@ function saveScopeFromModal() {
     alert(`✅ Scope saved successfully! ${count} controls selected for audit.`);
 }
 
-async function selectRecentSessionScope() {
-    const btn = event ? event.target : null;
+async function selectRecentSessionScope(ev) { // BUG-13 FIX: use explicit ev param instead of deprecated window.event global
+    const btn = ev ? ev.target : null;
     if (btn) {
         btn.innerText = "⚡ Loading...";
         btn.style.opacity = "0.7";
@@ -6470,7 +6640,7 @@ async function handleScopingExcelUpload(event) {
         const formData = new FormData();
         formData.append("file", file);
 
-        const res = await fetch(`${API_BASE}/controls/parse-scope-excel`, {
+        const res = await authFetch(`${API_BASE}/controls/parse-scope-excel`, { // BUG-07 FIX: was bare fetch() — no JWT sent, caused silent 401 + fallback to 5-control default
             method: "POST",
             body: formData
         });
@@ -6498,6 +6668,19 @@ async function handleScopingExcelUpload(event) {
             setScopingMode('Excel Scoping');
             const totalExcelItems = (data.custom_evidence && data.custom_evidence.excel_items) ? data.custom_evidence.excel_items.length : data.matched_sls.length;
             showToastBanner(`EXCEL SCOPING APPLIED: ${totalExcelItems} Checklist Items Scoped from Excel ("${file.name}")`);
+
+            // Surface any partial-match warning (e.g. some rows could not be resolved)
+            if (data.warning) {
+                setTimeout(() => alert(`⚠️ ${data.warning}`), 600);
+            }
+        } else if (data.success && data.total_rows > 0 && (!data.matched_sls || data.matched_sls.length === 0)) {
+            // Backend parsed rows but could not map any to known controls.
+            // Do NOT fall through to parseClientSideCsvScope — that function
+            // expects plain-text CSV; feeding it binary xlsx data produces garbage.
+            const msg = data.warning ||
+                `No ISO controls could be matched in "${file.name}". ` +
+                `Please ensure the sheet contains a column with ISO control IDs (e.g. 5.15) or recognisable control names.`;
+            alert(`⚠️ Excel Scoping: ${msg}`);
         } else {
             parseClientSideCsvScope(file);
         }
@@ -6562,14 +6745,34 @@ function parseClientSideCsvScope(file) {
 
 
 // ── SESSION-WISE BENCHMARK EXPORTER ──
-function downloadSelectedSessionBenchmark() {
+async function downloadSelectedSessionBenchmark() { // BUG-09 FIX: must be async (uses await authFetch)
     const select = document.getElementById("benchmark-session-select");
     let val = select ? select.value : "all";
     if (val === "active") {
         val = activeSessionId || "all";
     }
     const downloadUrl = `${API_BASE}/audit/export-token-benchmark?session_id=${encodeURIComponent(val)}`;
-    window.location.href = downloadUrl;
+    // BUG-09 FIX: window.location.href bypasses authFetch — JWT is never sent, causing 401.
+    // Use the same authenticated blob-download pattern as PDF/DOCX exports.
+    const btn = document.getElementById ? document.getElementById("btn-download-benchmark") : null;
+    if (btn) { btn.innerText = "⏳ Exporting..."; btn.style.opacity = "0.7"; }
+    try {
+        const response = await authFetch(downloadUrl);
+        if (!response.ok) throw new Error(`Server returned ${response.status}`);
+        const blob = await response.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = `audit_token_benchmark_${val.slice(0, 8)}.xlsx`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+    } catch (err) {
+        alert(`❌ Benchmark export failed: ${err.message}`);
+    } finally {
+        if (btn) { btn.innerText = "📥 Export Benchmark"; btn.style.opacity = "1"; }
+    }
 }
 
 async function populateBenchmarkSessionSelector() {
@@ -6782,6 +6985,73 @@ async function assignTargetAuditorToActiveSession() {
         }
     } catch (err) {
         console.error("Error assigning target auditor:", err);
+    }
+}
+
+async function sendEvidenceToAuditor() {
+    const selector = document.getElementById("target-auditor-selector");
+    const btn = document.getElementById("send-to-auditor-btn");
+
+    // Validate auditor selected
+    const assignedAuditor = selector ? selector.value : "";
+    if (!assignedAuditor) {
+        showToast("⚠️ Please select a Target Auditor from the dropdown first.", "warning");
+        if (selector) selector.focus();
+        return;
+    }
+
+    // Validate session exists
+    if (!activeSessionId) {
+        showToast("⚠️ No active session found. Please refresh and try again.", "warning");
+        return;
+    }
+
+    // Check that at least one file has been uploaded in this session
+    let fileCount = 0;
+    try {
+        const checkRes = await authFetch(`${API_BASE}/audit/evidence?session_id=${activeSessionId}`);
+        const checkData = await checkRes.json();
+        fileCount = (checkData.files || []).filter(f => !f.is_deleted).length;
+    } catch (e) {
+        console.warn("[SendEvidence] Could not check file count:", e);
+    }
+
+    if (fileCount === 0) {
+        showToast("⚠️ Please upload at least one evidence document before sending to the auditor.", "warning");
+        return;
+    }
+
+    // Disable button to prevent double-click
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span style="display:inline-block;animation:spin 1s linear infinite">⏳</span> Sending…`;
+    }
+
+    try {
+        const res = await authFetch(`${API_BASE}/audit/assign-auditor`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                session_id: activeSessionId,
+                assigned_auditor_username: assignedAuditor
+            })
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            showToast(`✅ Evidence session successfully sent to Auditor '${assignedAuditor}'! (${fileCount} file${fileCount !== 1 ? 's' : ''} submitted)`, "success");
+            loadAuditeeDocumentHistory();
+        } else {
+            showToast(`❌ Failed to send: ${data.detail || data.message || "Unknown error"}`, "error");
+        }
+    } catch (err) {
+        console.error("Error sending evidence to auditor:", err);
+        showToast("❌ Network error while sending. Please check your connection and try again.", "error");
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = `<span>📤</span> Send to Auditor`;
+        }
     }
 }
 

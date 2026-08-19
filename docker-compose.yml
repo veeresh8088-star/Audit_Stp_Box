@@ -24,7 +24,7 @@
     # has hardcoded, with zero changes to src/db/database.py.
     command: postgres -p 15234 -c shared_buffers=512MB -c work_mem=32MB -c max_connections=200
     volumes:
-      - pgdata:/var/lib/postgresql
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -p 15234 -U postgres"]
       interval: 3s
@@ -77,7 +77,7 @@
     build:
       context: .
       dockerfile: Dockerfile.app
-    image: aicyberauditbox-app:3.8
+    image: aicyberauditbox-app:3.9
     container_name: aicyberauditbox_app
     # Shares shakthidb's network namespace so "localhost:15234" inside this
     # container genuinely reaches Postgres, matching database.py's hardcoded

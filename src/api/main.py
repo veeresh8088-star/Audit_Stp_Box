@@ -93,7 +93,8 @@ class NoCacheMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(NoCacheMiddleware)
 
-# CORS: restrict to production domain only (no wildcard)
+# CORS: restrict to localhost/127.0.0.1 only (no wildcard -- "*" + allow_credentials=True
+# is an invalid CORS combination that browsers reject with a network error)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -105,7 +106,6 @@ app.add_middleware(
         "http://127.0.0.1:8000",
         "https://localhost:443",
         "https://127.0.0.1:443",
-        "*"
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],

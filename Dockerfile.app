@@ -72,21 +72,21 @@ RUN mkdir -p /app/data
 # LLM_HOSTS/EMBEDDING_HOST, exactly like it already talks to llama-server.exe
 # natively today.
 
-RUN chown -R appuser:appuser /app
+# Bake doctr OCR and SentenceTransformer Reranker model caches directly into the image
+# so they are baked into the container for 100% offline air-gapped operation without build-time internet dependency.
+COPY --chown=appuser:appuser docker/cache/doctr /home/appuser/.cache/doctr
+COPY --chown=appuser:appuser docker/cache/huggingface /home/appuser/.cache/huggingface
+
+RUN chown -R appuser:appuser /app /home/appuser/.cache
 USER appuser
 
-# Pre-download doctr OCR and SentenceTransformer Reranker models during build time
-# so they are baked into the image cache for 100% offline air-gapped operation.
-RUN python -c "from doctr.models import ocr_predictor; ocr_predictor(pretrained=True); from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); CrossEncoder('BAAI/bge-reranker-base')"
-
 # Hard offline guarantee at container runtime: the models above are already
-# cached in this image layer, but without these flags transformers/
-# sentence-transformers/huggingface-hub can still attempt an outbound
-# metadata call on cold start before falling back to cache -- on a network
-# that hard-blocks DNS (the customer's actual air-gapped site) that's a
-# hang/delay, not a clean local-only load. Set only after the download step
-# above, which still needs real network access at build time.
-ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+# cached in this image layer, so transformers/sentence-transformers/huggingface-hub/doctr
+# operate strictly offline with zero external network attempts.
+ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 DOCTR_CACHE_DIR=/home/appuser/.cache/doctr
+
+# Verify model loading in pure offline mode during build
+RUN python -c "from doctr.models import ocr_predictor; ocr_predictor(pretrained=True); from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); CrossEncoder('BAAI/bge-reranker-base')"
 
 EXPOSE 8000
 

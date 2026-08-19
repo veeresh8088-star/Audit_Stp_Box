@@ -3,8 +3,8 @@
 # Unlike docker-compose.yml (the dev version, which builds images from
 # source), this one only references pre-built images -- no `build:` section
 # anywhere. Pair this file with the exported image bundle
-# (aicyberauditbox_bundle_v3.8.tar): the customer loads that bundle first
-# (`docker load -i aicyberauditbox_bundle_v3.8.tar`), then runs this file.
+# (aicyberauditbox_bundle_v3.9.tar): the customer loads that bundle first
+# (`docker load -i aicyberauditbox_bundle_v3.9.tar`), then runs this file.
 
 # No internet access, no separate installs, nothing to build.
 
@@ -25,9 +25,9 @@ services:
       - "8000:8000"
     command: postgres -p 15234 -c shared_buffers=2GB -c work_mem=64MB -c max_connections=200
     volumes:
-      - pgdata:/var/lib/postgresql
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -p 15234 -U postgres"]
+      test: [ "CMD-SHELL", "pg_isready -p 15234 -U postgres" ]
       interval: 3s
       timeout: 3s
       retries: 20
@@ -70,7 +70,7 @@ services:
     restart: always
 
   app:
-    image: aicyberauditbox-app:3.8
+    image: aicyberauditbox-app:3.9
     container_name: aicyberauditbox_app
 
     network_mode: "service:shakthidb"

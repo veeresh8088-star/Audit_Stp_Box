@@ -3,6 +3,9 @@
 Strict Forensic Compliance Auditor - Validation Module
 Implements the core grounding, leakage, confidence, and consistency checks.
 """
+import re
+import difflib
+import json
 
 def check_grounding(evidence, document_text):
     """
@@ -48,6 +51,61 @@ def clean_alphanumeric(text):
     text = re.sub(r'[^a-z0-9\s]', ' ', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
+
+
+def expand_to_complete_sentence(prefix: str, source_text: str, max_chars: int = 450) -> str:
+    """
+    Expands a verified quote prefix anchor into the full, authentic sentence/clause directly from the source text.
+    Prevents chopped quotes ending mid-sentence (e.g. '...when entering a', '...i.e. BreezN or').
+    """
+    if not prefix or not source_text:
+        return prefix
+    prefix_clean = prefix.strip()
+    if len(prefix_clean) < 8:
+        return prefix_clean
+
+    import re
+    # Try finding exact, case-insensitive, or whitespace-normalized match in source_text
+    idx = source_text.find(prefix_clean)
+    if idx == -1:
+        idx = source_text.lower().find(prefix_clean.lower())
+
+    if idx == -1:
+        # Try finding using the first 4 words of the prefix
+        words = prefix_clean.split()
+        if len(words) >= 4:
+            first_few = " ".join(words[:4])
+            idx = source_text.lower().find(first_few.lower())
+            if idx == -1:
+                clean_first = clean_alphanumeric(first_few)
+                clean_src = clean_alphanumeric(source_text)
+                if clean_first and clean_first in clean_src:
+                    for w in words[:2]:
+                        p = source_text.lower().find(w.lower())
+                        if p != -1:
+                            idx = p
+                            break
+
+    if idx != -1:
+        remainder = source_text[idx:]
+        pref_len = len(prefix_clean)
+
+        # Look forward in remainder beyond prefix length up to max_chars
+        search_region = remainder[pref_len:min(len(remainder), pref_len + max_chars)]
+
+        # Search for sentence boundary: period/question/exclamation followed by space/newline,
+        # or double newline (paragraph break), or bullet boundary
+        m = re.search(r'(?<!\b[A-Za-z])(?<!\bi\.e)(?<!\be\.g)(?<!\bvs)\.[\s\n\r"”\']|\n\n|\r\n\r\n|\n(?=[0-9]+\.[0-9]+)|\Z', search_region)
+        if m:
+            end_pos = pref_len + m.end()
+            completed = remainder[:end_pos].strip()
+            completed = completed.rstrip(' "\'\n\r')
+            if completed and not completed.endswith(('.', '!', '?', '"', '”', "'", '’', ')')):
+                completed = completed + "."
+            if len(completed) >= len(prefix_clean):
+                return completed
+
+    return prefix_clean
 
 
 def check_prompt_leakage(evidence, hints, threshold=0.75):
@@ -468,6 +526,18 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     print(f"[VALIDATOR DEBUG] RAW LLM Gap: {raw_gap}", flush=True)
     print(f"{'='*60}", flush=True)
     
+    raw_status_upper = str(raw_status).upper().strip()
+    is_false_positive_or_inapplicable = any(fp_kw in raw_status_upper for fp_kw in ["FALSE_POSITIVE", "FALSE POSITIVE", "OUT_OF_SCOPE", "OUT OF SCOPE", "INAPPLICABLE"])
+
+    if is_false_positive_or_inapplicable:
+        finding["status"] = "FALSE_POSITIVE"
+        finding["hallucination_check"] = "OUT_OF_SCOPE"
+        finding["validator_note"] = "Control evaluated as FALSE_POSITIVE / INAPPLICABLE"
+        finding["severity"] = "N/A"
+        finding["recommendation"] = "No recommendation required. This control has been identified as not applicable to the agreed audit scope."
+        print(f"[VALIDATOR DEBUG] [OK] {control_id}: PASSED all gates as FALSE_POSITIVE / INAPPLICABLE!", flush=True)
+        return check_consistency(apply_confidence_gate(finding))
+
     evidence = finding.get("evidence_quote") or "NOT_FOUND"
     evidence_clean = evidence.strip().strip('"').strip("'").strip('“').strip('”').strip()
     if not evidence_clean or evidence_clean == "NOT_FOUND":
@@ -477,7 +547,7 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
     finding["evidence_quote"] = evidence_clean
     finding["evidence_snippet"] = evidence_clean if evidence_clean != "NOT_FOUND" else ""
     finding["chunk_id"] = None
-    
+
     if evidence_clean == "NOT_FOUND":
         # NOT_FOUND must never be silently auto-approved. This used to check for a loose
         # keyword match anywhere in the full combined document text (all uploaded files,
@@ -504,6 +574,22 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         finding["requires_human_review"] = True
         finding["requires_review"] = True
         finding["confidence"] = 1
+
+        pol_stat = str(finding.get("policy_status") or "").upper()
+        pol_assess = str(finding.get("policy_assessment") or "").upper()
+        if pol_stat == "FOUND" and pol_assess == "COMPLIANT":
+            gap_text = "Policy requirements are adequately documented, but no operational evidence was provided to demonstrate implementation."
+            finding["validator_note"] = gap_text
+            finding["review_note"] = gap_text
+            finding["finding"] = gap_text
+            finding["severity"] = "P3 Medium"
+            finding["recommendation"] = (
+                f"A policy for {control_id} was found and is adequately documented, but no operational evidence "
+                f"of implementation was provided. Provide appropriate operational evidence such as access logs, "
+                f"visitor records, access approval records, or completed access-review records demonstrating implementation."
+            )
+            return finding
+
         if has_keyword_hit:
             gap_text = (
                 f"The uploaded documents reference related terms, but do not contain {expected_text}."
@@ -634,6 +720,7 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
                 if norm_item in norm_chunk:
                     item_grounded = True
                     matched_chunk_id = matched_chunk_id or chunk.id
+                    item_final_text = expand_to_complete_sentence(item_text, chunk.content)
                     # Extract source details from metadata_json if present (to map to specific files inside a ZIP)
                     if chunk.metadata_json:
                         try:
@@ -653,12 +740,14 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
             norm_doc = normalize_text(document_text)
             if norm_item in norm_doc:
                 item_grounded = True
+                item_final_text = expand_to_complete_sentence(item_text, document_text)
             else:
                 # Fallback: check via alphanumeric-only match to handle smart quote / encoding differences
                 alpha_item = clean_alphanumeric(item_text)
                 alpha_doc = clean_alphanumeric(document_text)
                 if alpha_item and alpha_item in alpha_doc:
                     item_grounded = True
+                    item_final_text = expand_to_complete_sentence(item_text, document_text)
                     print(f"[VALIDATOR] Grounding matched via alphanumeric fallback for control {control_id}", flush=True)
                 else:
                     # Look for the longest prefix of THIS item (word by word) that exists in the document
@@ -667,15 +756,15 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
                         prefix = " ".join(words[:i])
                         norm_prefix = normalize_text(prefix)
                         if norm_prefix in norm_doc:
-                            item_final_text = prefix
+                            item_final_text = expand_to_complete_sentence(prefix, document_text)
                             item_grounded = True
-                            print(f"[VALIDATOR] Longest matching quote prefix accepted: '{prefix}'", flush=True)
+                            print(f"[VALIDATOR] Longest matching quote prefix expanded to complete sentence: '{item_final_text}'", flush=True)
                             break
                         alpha_prefix = clean_alphanumeric(prefix)
                         if alpha_prefix and alpha_prefix in alpha_doc:
-                            item_final_text = prefix
+                            item_final_text = expand_to_complete_sentence(prefix, document_text)
                             item_grounded = True
-                            print(f"[VALIDATOR] Longest matching quote prefix accepted (alphanumeric): '{prefix}'", flush=True)
+                            print(f"[VALIDATOR] Longest matching quote prefix expanded (alphanumeric): '{item_final_text}'", flush=True)
                             break
 
         if item_grounded:
@@ -943,6 +1032,8 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
         _rec_lower = finding.get("recommendation", "").lower()
         if not finding.get("recommendation") or _rec_lower.startswith("establish") or _is_stale_no_action_recommendation(_rec_lower):
             from src.core.controls_data import USE_CASES
+
+            # ── Base recommendation from USE_CASES (control-specific fallback) ──
             rec = ""
             for uc in USE_CASES:
                 if uc["use_case"] == control_id or uc["label"] == control_id:
@@ -955,16 +1046,67 @@ def validate_only(finding, document_text, expected_evidence_map, db_chunks=None)
                         break
             if not rec:
                 rec = f"Establish, document, and implement procedures to satisfy {control_id}."
-            
-            # Format explicit ambiguity note if evidence quote is present but status is NON_COMPLIANT
-            quote_text = str(finding.get("evidence_quote") or finding.get("evidence_snippet") or "").strip()
-            if quote_text and quote_text.upper() != "NOT_FOUND" and finding.get("status") == "NON_COMPLIANT":
-                short_q = quote_text[:120].replace('\n', ' ')
+
+            # ── Smart recommendation: diagnose WHY it failed, give targeted advice ──
+            # Priority order: OCR/image quality → wrong document → missing policy →
+            # missing evidence → insufficient evidence → fallback to USE_CASES rec.
+            _ev_gap   = str(finding.get("evidence_gap")   or "").lower()
+            _pol_gap  = str(finding.get("policy_gap")     or "").lower()
+            _ev_rel   = str(finding.get("evidence_relevance") or "").upper()
+            _ev_stat  = str(finding.get("evidence_status")    or "").upper()
+            _pol_stat = str(finding.get("policy_status")      or "").upper()
+            _ev_snip  = str(finding.get("evidence_snippet") or finding.get("evidence_quote") or "").lower()
+
+            # 1. OCR / image quality issue — blurry, unreadable, garbled text
+            _ocr_signals = ("cannot read", "unreadable", "unclear", "blurry", "illegible",
+                            "ocr", "poor quality", "low resolution", "garbled", "distorted",
+                            "text not extracted", "no text", "image quality", "scan quality")
+            if any(s in _ev_gap for s in _ocr_signals) or any(s in _ev_snip for s in _ocr_signals):
                 rec = (
-                    f"Documented quote ('{short_q}...') is ambiguous. "
-                    f"Update the policy/document to explicitly define precise technical implementation "
-                    f"and configuration rules to satisfy {control_id}."
+                    f"The uploaded image/scan could not be read clearly by OCR. "
+                    f"Re-upload a higher-resolution scan or a text-based PDF for {control_id}. "
+                    f"Ensure the document is at least 150 DPI and not password-protected."
                 )
+
+            # 2. Wrong document type — evidence is IRRELEVANT to this control
+            elif _ev_rel == "IRRELEVANT":
+                rec = (
+                    f"The uploaded document does not contain evidence relevant to {control_id}. "
+                    f"Upload the correct document type. Expected: "
+                    f"{next((uc.get('expected','') for uc in USE_CASES if uc['use_case']==control_id or uc['label']==control_id), 'appropriate evidence for this control')}."
+                )
+
+            # 3. Policy missing, evidence present → need a policy statement
+            elif _pol_stat == "NOT_FOUND" and _ev_stat == "FOUND":
+                rec = (
+                    f"Evidence of implementation was found but no formal policy statement was identified for {control_id}. "
+                    f"Document a written policy or procedure that mandates this control requirement."
+                )
+
+            # 4. Policy present, evidence missing → need operational proof
+            elif _pol_stat == "FOUND" and _ev_stat == "NOT_FOUND":
+                rec = (
+                    f"A policy for {control_id} was found but no operational evidence of implementation was provided. "
+                    f"Upload records, logs, screenshots, or reports that demonstrate the policy is actively followed."
+                )
+
+            # 5. Both missing — nothing found at all
+            elif _pol_stat == "NOT_FOUND" and _ev_stat == "NOT_FOUND":
+                rec = (
+                    f"No policy or evidence was found for {control_id}. "
+                    f"Upload both: (1) a documented policy or procedure, and (2) operational evidence "
+                    f"such as logs, reports, or screenshots that prove implementation."
+                )
+
+            # 6. Both found but insufficient — use gap text if available
+            elif _ev_gap and _ev_gap not in ("no evidence gap identified.", "none", "n/a", ""):
+                # Use the LLM's own gap description trimmed to 200 chars
+                _gap_summary = _ev_gap[:200].rstrip("., ")
+                rec = (
+                    f"For {control_id}: {_gap_summary.capitalize()}. "
+                    f"Address this specific gap and re-upload supporting evidence."
+                )
+
             finding["recommendation"] = rec
 
     return finding
@@ -1239,43 +1381,85 @@ def post_process(finding, document_text, expected_evidence_map=None, db_chunks=N
                   f"evidence_status={evidence_status}, evidence_assessment={evidence_assessment}, "
                   f"evidence_freshness={evidence_freshness} -> NON_COMPLIANT", flush=True)
 
-            # ── FOUND vs NOT FOUND DETERMINATION (unchanged from before) ──────
-            # "Found" = Document was uploaded & read, but fails control requirements
-            # "Not Found" = Document completely missing from uploaded evidence
+            # ── FOUND vs NOT FOUND & POLICY vs EVIDENCE MAPPING ──────
             doc_text_present = bool(str(finding.get("condensed_context") or
                                        finding.get("evidence_snippet") or
                                        finding.get("justification") or "").strip())
             pol_found = policy_status == "FOUND"
             ev_found = evidence_status == "FOUND"
 
-            if pol_found or ev_found or doc_text_present:
-                # Document uploaded and read, but fails control — orange badge
-                finding["policy_present"] = "Found"
-                finding["evidence_present"] = "Found"
-                rec_str = str(finding.get("recommendation") or "").lower()
-                if not rec_str or _is_stale_no_action_recommendation(rec_str):
+            # Separate presence mapping for policy and evidence
+            if pol_found:
+                finding["policy_present"] = "Compliant" if policy_assessment == "COMPLIANT" else "Found"
+            else:
+                finding["policy_present"] = "Not Found"
+
+            if ev_found:
+                finding["evidence_present"] = "Compliant" if evidence_assessment == "COMPLIANT" else "Found"
+            else:
+                finding["evidence_present"] = "Not Found"
+
+            # Targeted smart recommendation for NON_COMPLIANT findings
+            rec_str = str(finding.get("recommendation") or "").lower()
+            if pol_found and policy_assessment == "COMPLIANT" and not ev_found:
+                if not rec_str or "operational evidence" not in rec_str or _is_stale_no_action_recommendation(rec_str):
+                    finding["recommendation"] = (
+                        f"A policy for {cname} (ISO 27001 Control {cid}) was found and is adequately documented, "
+                        f"but no operational evidence of implementation was provided. Provide appropriate "
+                        f"operational evidence such as access logs, visitor records, access approval records, "
+                        f"or completed access-review records demonstrating implementation."
+                    )
+            elif not rec_str or _is_stale_no_action_recommendation(rec_str):
+                if not pol_found and ev_found:
+                    finding["recommendation"] = (
+                        f"Operational evidence was found for {cname} (ISO 27001 Control {cid}), but no formal "
+                        f"policy statement was identified. Document and approve a written policy or standard "
+                        f"that mandates this control requirement."
+                    )
+                elif pol_found or ev_found or doc_text_present:
                     finding["recommendation"] = (
                         f"The uploaded document was read but does not fully satisfy {cname} "
                         f"(ISO 27001 Control {cid}). Review and update the existing policy to address "
                         f"the identified gaps, strengthen evidence logging, and ensure all required "
                         f"control objectives are explicitly covered."
                     )
-            else:
-                # Document completely absent — red badge
-                finding["policy_present"] = "Not Found"
-                finding["evidence_present"] = "Not Found"
-                # Clear misleading snippet if evidence absent
-                snip_lower = str(finding.get("evidence_snippet") or "").lower()
-                if any(neg in snip_lower for neg in ["no evidence", "not found", "focuses entirely on", "exclusively details"]):
-                    finding["evidence_snippet"] = ""
-                rec_str = str(finding.get("recommendation") or "").lower()
-                if not rec_str or _is_stale_no_action_recommendation(rec_str):
+                else:
+                    # Clear misleading snippet if evidence absent
+                    snip_lower = str(finding.get("evidence_snippet") or "").lower()
+                    if any(neg in snip_lower for neg in ["no evidence", "not found", "focuses entirely on", "exclusively details"]):
+                        finding["evidence_snippet"] = ""
                     finding["recommendation"] = (
                         f"No policy or evidence document was uploaded for {cname} "
                         f"(ISO 27001 Control {cid}). Create a formally approved policy document, "
                         f"implement technical controls, establish evidence logging procedures, "
                         f"and upload the documentation before the next audit cycle."
                     )
+
+            # Safeguard: if marked NON_COMPLIANT, ensure severity is never "N/A"
+            if not finding.get("severity") or finding.get("severity") == "N/A":
+                score = float(finding.get("severity_score", 0.0) or 0.0)
+                if score >= 9.0:
+                    finding["severity"] = "P1 Critical"
+                elif score >= 7.0:
+                    finding["severity"] = "P2 High"
+                elif score >= 4.0:
+                    finding["severity"] = "P3 Medium"
+                elif score >= 0.1:
+                    finding["severity"] = "P4 Low"
+                else:
+                    from src.core.controls_data import USE_CASES
+                    uc_severity = "MEDIUM"
+                    for uc in USE_CASES:
+                        if uc["use_case"] == cid or uc["label"] == cid or uc["use_case"].startswith(cid):
+                            uc_severity = uc.get("severity", "MEDIUM")
+                            break
+                    severity_map = {
+                        "CRITICAL": "P1 Critical",
+                        "HIGH": "P2 High",
+                        "MEDIUM": "P3 Medium",
+                        "LOW": "P4 Low"
+                    }
+                    finding["severity"] = severity_map.get(uc_severity.upper(), "P3 Medium")
 
     return finding
 

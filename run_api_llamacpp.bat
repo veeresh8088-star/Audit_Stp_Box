@@ -48,8 +48,10 @@ goto :check_docker
 
 :docker_success
 echo [v] OK: Docker is running. Starting ShaktiDB container...
-docker rm -f shakthidb_service > nul 2>&1
-docker-compose up -d
+docker start shakthidb_service > nul 2>&1
+if errorlevel 1 (
+    docker-compose -f docker-compose.yml -f docker-compose.local-db.yml up -d shakthidb
+)
 goto :docker_done
 
 :docker_fail

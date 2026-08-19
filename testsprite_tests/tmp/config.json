@@ -1,0 +1,17 @@
+{
+  "status": "init",
+  "scope": "codebase",
+  "type": "backend",
+  "localEndpoint": "http://localhost:8000/",
+  "serverPort": 52242,
+  "executionArgs": {
+    "projectName": "audit test_box",
+    "projectPath": "c:\\Users\\HP\\Desktop\\audit test_box",
+    "testIds": [],
+    "additionalInstruction": "Backend is running on http://127.0.0.1:8000. Default admin username is admin. Test login, OTP verification, session creation, evidence document upload, ISO audit start/status, and report retrieval.",
+    "envs": {
+      "API_KEY": "sk-member-_pn6PQBXxeCifCkQ4dKx4IEsJMAmkAC1Se8e0asOWXc"
+    }
+  },
+  "proxy": "http://ceeb6d15-65fd-47e4-8ff7-098845f083a7:0hEK8GPDk48LWQlhk7fy33Mja21Ys5DS@tun.testsprite.com:8080"
+}
