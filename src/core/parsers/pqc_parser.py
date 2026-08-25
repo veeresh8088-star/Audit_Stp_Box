@@ -52,7 +52,8 @@ _PQC_KEYWORDS = (
 # Config-export filename extensions -- still content-gated (never filename-only,
 # per every other parser's can_parse() convention), just given a lower keyword
 # bar since the extension itself is already a meaningful signal.
-_PQC_CONFIG_EXTENSIONS = (".conf", ".cnf", ".pem", ".crt", ".cer", ".key", ".p12", ".pfx", ".jks")
+_PQC_CONFIG_EXTENSIONS = (".conf", ".cnf", ".pem", ".crt", ".cer", ".key", ".p12", ".pfx", ".jks",
+                          ".config", ".ini", ".cfg")
 
 
 def _count_pqc_signals(sample_lower: str) -> int:
@@ -185,6 +186,38 @@ ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, 
      "Falcon / FN-DSA", "SAFE", "PQC Digital Signature (NIST-selected)", _SEV_INFO),
     ("chacha20", re.compile(r'\bChaCha20[\s\-]?Poly1305\b', re.IGNORECASE),
      "ChaCha20-Poly1305", "SAFE", "Symmetric Cipher (AEAD)", _SEV_INFO),
+
+    # ── DATABASE / SERVER TLS CONFIG PATTERNS ──────────────────────────────────
+    # Catches MySQL/MariaDB/PostgreSQL config files that enable SSL/TLS transport
+    # but do not specify a PQC-ready cipher suite.
+    # Rule: any line setting ssl-cert or ssl-key without an explicit cipher list
+    # in the same file (the absence check is done at parse-time via a post-filter).
+    ("db-ssl-cert",
+     re.compile(r'^\s*ssl[\-_]cert\s*=\s*.+', re.IGNORECASE | re.MULTILINE),
+     "Database TLS - SSL Certificate (no cipher suite specified)",
+     "VULNERABLE",
+     "Database TLS Configuration",
+     "HIGH"),
+    ("db-ssl-key",
+     re.compile(r'^\s*ssl[\-_]key\s*=\s*.+', re.IGNORECASE | re.MULTILINE),
+     "Database TLS - SSL Private Key (no cipher suite specified)",
+     "VULNERABLE",
+     "Database TLS Configuration",
+     "HIGH"),
+    # Catches TLS 1.2-only or TLS 1.2+1.3 without PQC cipher suite in DB configs.
+    ("db-tls12",
+     re.compile(r'\btls[_\-]?version\s*=\s*["\']?TLSv1\.2["\']?', re.IGNORECASE),
+     "TLS 1.2 (Database config - quantum-vulnerable key exchange)",
+     "VULNERABLE",
+     "Protocol Version",
+     "HIGH"),
+    # TLS 1.3 in a DB config still uses classical key exchange (no PQC KEMs).
+    ("db-tls13-no-pqc",
+     re.compile(r'\btls[_\-]?version\s*=\s*["\']?TLSv1\.3["\']?', re.IGNORECASE),
+     "TLS 1.3 (Database config - classical key exchange only, no PQC KEM)",
+     "VULNERABLE",
+     "Protocol Version",
+     "MEDIUM"),
 ]
 
 # Per-algorithm precise remediation (overrides generic _REMEDIATION_VULNERABLE where matched).
@@ -308,6 +341,22 @@ _REMEDIATION_BY_ALGO = [
         "  4. Migrate to ML-KEM-768 (FIPS 203) for all new key exchange implementations.\n"
         "  NIST Reference: FIPS 203, NIST SP 800-56A Rev 3."
     ),
+    # -- Database TLS config (no cipher suite / classical-only TLS) -----------
+    ("database tls",
+        "Database TLS configuration uses classical cryptography only and lacks a PQC-ready cipher suite.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Verify the database TLS certificate algorithm -- if RSA or ECDSA, plan migration to ML-DSA.\n"
+        "  2. For MySQL 9.x / MariaDB: specify tls_ciphersuites using TLS 1.3 AEAD cipher suites:\n"
+        "     tls_ciphersuites = TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256\n"
+        "  3. Lock tls_version to TLSv1.3 only (remove TLSv1.2 if still listed):\n"
+        "     tls_version = TLSv1.3\n"
+        "  4. Verify ssl-cert references a certificate signed by a quantum-safe CA once available.\n"
+        "  5. Track MySQL / MariaDB PQC roadmaps -- as of 2026, no mainstream DB engine ships\n"
+        "     native ML-KEM/ML-DSA support; monitor OpenSSL 3.x + MySQL upstream announcements.\n"
+        "  6. Apply network-layer controls (private VPC, mTLS, certificate pinning) as compensating\n"
+        "     controls while awaiting PQC-capable DB engine releases.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), NIST SP 800-52 Rev 2."
+    ),
 ]
 
 
@@ -328,6 +377,13 @@ def _get_remediation_vulnerable(algo_name: str, crypto_category: str) -> str:
     return _REMEDIATION_VULNERABLE
 
 
+_REMEDIATION_VULNERABLE = (
+    "This algorithm is broken by Shor's algorithm on a sufficiently large quantum computer. "
+    "Inventory all usages and plan migration to NIST-selected post-quantum algorithms: "
+    "ML-KEM (FIPS 203) for key exchange / encapsulation, ML-DSA (FIPS 204) for digital signatures, "
+    "or SLH-DSA (FIPS 205) as an alternative signature scheme. "
+    "NIST Reference: FIPS 203, FIPS 204, FIPS 205, NIST IR 8413."
+)
 _REMEDIATION_WEAK = (
     "Disable this deprecated/weak cryptographic algorithm or protocol version immediately and "
     "replace it with a modern, non-deprecated alternative (AES-256-GCM, SHA-384+, TLS 1.2+ with "
