@@ -18,7 +18,17 @@ algorithm strings and classifies each hit as:
 design principle as nessus_parser.py / trivy_parser.py for VAPT scanner
 findings: identifying a known algorithm string is exact pattern matching, not
 judgment, so there is nothing for an LLM to usefully add here.
+
+Supported input formats (as of this version):
+  - Plain text / config exports (.conf, .cnf, .ini, .cfg, .properties, .yaml,
+    .yml, .toml, .sh, .bat, .ps1, .reg)
+  - PDF documents (.pdf)  -- text-layer extracted via pdfplumber; scanned
+    PDFs fall back to doctr OCR
+  - Microsoft Word documents (.docx)  -- paragraphs + table cells extracted
+    via python-docx
+  - Images (.png, .jpg, .jpeg, .webp, .bmp, .tiff, .tif)  -- OCR via doctr
 """
+import io
 import json
 import os
 import re
@@ -60,6 +70,75 @@ _PQC_CONFIG_EXTENSIONS = (".conf", ".cnf", ".pem", ".crt", ".cer", ".key", ".p12
                           ".sh", ".bat", ".ps1",  # Shell/PowerShell startup scripts with JVM -D flags
                           ".reg")                 # Windows CryptoAPI / CNG registry exports
 
+# Binary document formats that require text extraction before regex scanning.
+# PQCParser handles these natively via pqc_extract_text().
+_PQC_BINARY_EXTENSIONS = (
+    ".pdf",                                    # PDF -- text layer + OCR fallback
+    ".docx", ".doc",                           # Microsoft Word
+    ".png", ".jpg", ".jpeg",                   # Raster images (OCR)
+    ".webp", ".bmp", ".tiff", ".tif",          # Additional image formats
+)
+
+
+def pqc_extract_text(filename: str, raw_bytes: bytes) -> str:
+    """Extract plain text from a binary document for PQC regex scanning.
+
+    Dispatch table (by extension):
+      .pdf          pdfplumber text layer → doctr OCR fallback for scanned PDFs
+      .docx / .doc  python-docx paragraphs + table cells
+      .png/.jpg/... doctr OCR (via existing doc_parsers.extract_text)
+
+    Returns extracted plain text, or empty string on any error.
+    """
+    ext = os.path.splitext(filename.lower())[1]
+
+    # ── PDF ────────────────────────────────────────────────────────────────────
+    if ext == ".pdf":
+        text = ""
+        try:
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(raw_bytes)) as pdf:
+                pages = [p.extract_text() or "" for p in pdf.pages]
+            text = "\n".join(pages).strip()
+        except Exception:
+            text = ""
+        # Fallback to OCR for scanned / image-only PDFs
+        if not text or len(text.strip()) < 50:
+            try:
+                from src.core.parsers.doc_parsers import extract_text
+                buf = io.BytesIO(raw_bytes)
+                buf.name = filename
+                text = extract_text(buf) or ""
+            except Exception:
+                pass
+        return text
+
+    # ── DOCX / DOC ─────────────────────────────────────────────────────────────
+    if ext in (".docx", ".doc"):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(raw_bytes))
+            parts = [p.text for p in doc.paragraphs if p.text.strip()]
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        if cell.text.strip():
+                            parts.append(cell.text)
+            return "\n".join(parts)
+        except Exception:
+            return ""
+
+    # ── PNG / JPG / JPEG / WEBP / BMP / TIFF ───────────────────────────────────
+    if ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif"):
+        try:
+            from src.core.parsers.doc_parsers import extract_text
+            buf = io.BytesIO(raw_bytes)
+            buf.name = filename
+            return extract_text(buf) or ""
+        except Exception:
+            return ""
+
+    return ""
 
 def _count_pqc_signals(sample_lower: str) -> int:
     return sum(1 for kw in _PQC_KEYWORDS if kw in sample_lower)
@@ -1103,9 +1182,19 @@ class PQCParser(BaseParser):
     """
 
     def can_parse(self, filename: str, content: str) -> bool:
+        # ── Binary document formats (PDF, DOCX, images) ─────────────────────
+        # These require text extraction before keyword matching. We accept them
+        # by extension alone -- text will be extracted inside parse().
+        ext_lower = os.path.splitext(filename.lower())[1]
+        if ext_lower in _PQC_BINARY_EXTENSIONS:
+            # Images with PQC-relevant names (e.g. 'nist_pqc_cert.png') are
+            # valid PQC evidence. Accept them -- parse() will run OCR.
+            return True
+
+        # ── Plain-text / config formats ──────────────────────────────────────
         if not content:
             return False
-        # Guard: reject image files regardless of their filename.
+        # Guard: reject image files that somehow slipped through (content garbage)
         if is_image_file(filename):
             return False
 
@@ -1123,6 +1212,41 @@ class PQCParser(BaseParser):
         return False
 
     def parse(self, filename: str, content: str) -> Tuple[List[Finding], List[Finding]]:
+        # ── Binary document: extract text first ──────────────────────────────
+        ext_lower = os.path.splitext(filename.lower())[1]
+        if ext_lower in _PQC_BINARY_EXTENSIONS:
+            # content may be empty (binary was passed as bytes from bg_worker
+            # then decoded as garbage, or it's genuinely empty)
+            raw_bytes: Optional[bytes] = None
+            if isinstance(content, (bytes, bytearray)):
+                raw_bytes = bytes(content)
+            elif not content or len(content.strip()) < 20:
+                # Nothing useful in content string -- signal caller to provide bytes
+                print(
+                    f"[PQC PARSER] '{filename}' is a binary document but no usable "
+                    f"text was supplied. Call pqc_extract_text(filename, raw_bytes) "
+                    f"before passing to parse().",
+                    flush=True,
+                )
+                return [], []
+            else:
+                # content is already extracted text (bg_worker did it upstream)
+                pass
+            if raw_bytes is not None:
+                content = pqc_extract_text(filename, raw_bytes)
+            if not content or not content.strip():
+                print(
+                    f"[PQC PARSER] Could not extract text from '{filename}' "
+                    f"(empty after extraction). No PQC findings generated.",
+                    flush=True,
+                )
+                return [], []
+            print(
+                f"[PQC PARSER] Extracted {len(content)} chars from binary '{filename}' "
+                f"(ext: {ext_lower}).",
+                flush=True,
+            )
+
         if not content:
             return [], []
 

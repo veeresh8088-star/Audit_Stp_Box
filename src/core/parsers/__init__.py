@@ -11,7 +11,7 @@ from .nmap_parser import NmapParser
 from .burp_parser import BurpParser
 from .qualys_parser import QualysParser
 from .trivy_parser import TrivyParser
-from .pqc_parser import PQCParser
+from .pqc_parser import PQCParser, pqc_extract_text, _PQC_BINARY_EXTENSIONS
 
 ALL_PARSERS = [
     NessusParser(),
@@ -30,28 +30,42 @@ def parse_tool_file(filename: str, content: str) -> Tuple[List[Finding], Any]:
     Auto-detects file type and dispatches to the appropriate security tool parser.
 
     Detection strategy (in order):
-    1. Image files (PNG, JPG, JPEG, WEBP, BMP, TIFF etc.) are routed directly to
-       the caller for OCR processing via extract_text(). They are NEVER passed to
-       XML/HTML parsers regardless of what keywords appear in their filename.
-       This eliminates false VAPT PARSER WARNINGs for screenshots named after tools
-       (e.g. 'shot_burp_sqli.png' would previously match BurpParser by filename).
-    2. All other files are tried against ALL_PARSERS using content-signature detection
-       (magic bytes + structural XML/text tags). No filename keyword matching.
-    3. If no parser claims the file, NessusParser handles it as a fallback (general
-       HTML/XML). This is safe because NessusParser is the most format-agnostic.
+    1. PDF / DOCX / image files with binary extensions are tried through ALL_PARSERS
+       FIRST (PQCParser.can_parse() returns True for these extensions immediately).
+       If PQCParser claims the file, it extracts text internally and scans it.
+    2. Image files NOT claimed by PQCParser are returned early with [] -- they are
+       visual PoC evidence screenshots with no XML/HTML scanner structure.
+    3. All other files are tried against ALL_PARSERS using content-signature detection.
+    4. If no parser claims the file, NessusParser handles it as a fallback.
 
     Returns (actionable_findings, extra_info/inventory).
     """
-    # ── Stage 1: Image fast-path ──────────────────────────────────────────────
-    # Images are visual PoC evidence screenshots. They carry no XML/CSV scanner
-    # structure so no parser should ever claim them. Route to caller for OCR.
+    # ── Stage 1: Binary document fast-path (PDF / DOCX / images) ─────────────
+    # Route to PQCParser FIRST for PQC-relevant binary formats. PQCParser.can_parse()
+    # accepts binary extensions without needing text content. If PQCParser fires and
+    # finds PQC findings, return them directly. Otherwise fall through to VAPT path.
+    ext_lower = __import__('os').path.splitext(filename.lower())[1]
+    if ext_lower in _PQC_BINARY_EXTENSIONS:
+        pqc_p = ALL_PARSERS[-1]  # PQCParser is always last
+        if pqc_p.can_parse(filename, content):
+            res = pqc_p.parse(filename, content)
+            findings, extra = res if isinstance(res, tuple) else (res, None)
+            if findings:
+                map_pqc_findings_list(findings)
+                return findings, extra
+        # PQCParser got nothing from this binary -- if it's an image, the
+        # VAPT path handles it (OCR in bg_worker). If PDF/DOCX with no PQC
+        # content, fall through to VAPT parsers below.
+        if is_image_file(filename):
+            # Images with no PQC content: route to caller for VAPT OCR.
+            return [], None
+
+    # ── Stage 2: Image fast-path for VAPT (non-PQC images) ───────────────────
+    # Images with no binary-extension claim above are visual PoC screenshots.
     if is_image_file(filename):
-        # Return empty findings — the caller (bg_worker / retrieval pipeline)
-        # already handles image OCR via extract_text(). Returning [] here avoids
-        # the false-positive "extracted 0 findings" warning log.
         return [], None
 
-    # ── Stage 2: Content-signature parser dispatch ────────────────────────────
+    # ── Stage 3: Content-signature parser dispatch (text-based files) ────────
     for p in ALL_PARSERS:
         if p.can_parse(filename, content):
             res = p.parse(filename, content)
@@ -86,5 +100,5 @@ def parse_tool_file(filename: str, content: str) -> Tuple[List[Finding], Any]:
 __all__ = [
     "Finding", "BaseParser", "is_image_file", "map_finding_to_control", "map_findings_list",
     "NessusParser", "NmapParser", "BurpParser", "QualysParser", "TrivyParser", "PQCParser",
-    "parse_tool_file"
+    "parse_tool_file", "pqc_extract_text",
 ]

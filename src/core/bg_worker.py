@@ -2146,7 +2146,25 @@ def _run_fast_technical_vapt_bg(bg_key, files_data, selected_sls, file_registry=
             if file_registry is not None and fname:
                 file_registry[fname] = ftext
 
+            # ── PQC pre-extraction for binary formats ────────────────────────────
+            # PDF, DOCX and images may have empty ftext at this point if the
+            # branches above didn't fire (e.g. a .pdf uploaded in PQC mode that
+            # bypassed the pypdf block, or a .jpg that the OCR block above set to
+            # empty). Run pqc_extract_text() as a final safety net so PQCParser
+            # always receives usable plain text for binary file types.
+            if not ftext and fd.get("bytes") and fname_lower.endswith(
+                (".pdf", ".docx", ".doc", ".png", ".jpg", ".jpeg",
+                 ".webp", ".bmp", ".tiff", ".tif")
+            ):
+                try:
+                    from src.core.parsers import pqc_extract_text
+                    ftext = pqc_extract_text(fname, fd["bytes"]) or ""
+                except Exception:
+                    ftext = ""
+
             actionable, info = parse_tool_file(fname, ftext or "")
+
+
             # parse_tool_file's second return value differs by parser: a list of
             # informational (non-actionable) findings for Nessus/Burp, None for
             # Qualys/Trivy -- but nmap_parser.py returns an AssetInventory object
