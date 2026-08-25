@@ -1692,7 +1692,7 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
         pdf.set_fill_color(*PQC_BLUE)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 7, clean_text(f"  4.{idx}  {ctrl_id}  —  {title}"), fill=True,
+        pdf.cell(0, 7, clean_text(f"  4.{idx}  {ctrl_id}  -  {title}"), fill=True,
                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
@@ -1878,8 +1878,22 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
         _ts = tier_styles.get(tier_name, body_style)
         pdf.set_font("Helvetica", "B", 9)
         pdf.set_text_color(*DARK_TEXT)
-        pdf.set_fill_color(*(_ts.fill_color if hasattr(_ts, "fill_color") and _ts.fill_color else GREY_BG))
-        pdf.cell(0, 6, clean_text(f"  Tier {tier_name} — {len(tier_items)} asset(s)"), fill=True,
+        # Use a safe plain RGB tuple for fill colour (DeviceRGB objects cannot be * unpacked)
+        _ts_fill = _ts.fill_color
+        if _ts_fill is None:
+            _fill_rgb = GREY_BG
+        elif isinstance(_ts_fill, (list, tuple)):
+            _fill_rgb = tuple(int(v) for v in _ts_fill[:3])
+        else:
+            # fpdf DeviceRGB / similar: extract .r .g .b (0-1 float) and scale to 0-255
+            try:
+                _fill_rgb = (int(getattr(_ts_fill, 'r', 0.8) * 255),
+                             int(getattr(_ts_fill, 'g', 0.8) * 255),
+                             int(getattr(_ts_fill, 'b', 0.8) * 255))
+            except Exception:
+                _fill_rgb = GREY_BG
+        pdf.set_fill_color(*_fill_rgb)
+        pdf.cell(0, 6, clean_text(f"  Tier {tier_name} - {len(tier_items)} asset(s)"), fill=True,
                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.set_font("Helvetica", "", 8)
         pdf.set_text_color(*BODY_TEXT)
@@ -1888,7 +1902,7 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
             algo_n  = clean_text(str(tf.get("ca_algorithm") or tf.get("key_algorithm") or
                                      tf.get("control_id") or "")[:40])
             pdf.cell(0, 4.5,
-                f"  • {asset_n}  [{algo_n}]",
+                clean_text(f"  * {asset_n}  [{algo_n}]"),
                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         if len(tier_items) > 15:
             pdf.cell(0, 4, f"  ... and {len(tier_items) - 15} more", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -1919,9 +1933,9 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
     pdf.set_font("Helvetica", "", 8.5)
     pdf.set_text_color(*BODY_TEXT)
     nist_rows = [
-        ["FIPS 203", "ML-KEM (CRYSTALS-Kyber)", "Key Encapsulation Mechanism — key exchange replacement"],
-        ["FIPS 204", "ML-DSA (CRYSTALS-Dilithium)", "Digital Signature — RSA/ECDSA signature replacement"],
-        ["FIPS 205", "SLH-DSA (SPHINCS+)", "Stateless Hash-based Signature — alternative signature scheme"],
+        ["FIPS 203", "ML-KEM (CRYSTALS-Kyber)", "Key Encapsulation Mechanism - key exchange replacement"],
+        ["FIPS 204", "ML-DSA (CRYSTALS-Dilithium)", "Digital Signature - RSA/ECDSA signature replacement"],
+        ["FIPS 205", "SLH-DSA (SPHINCS+)", "Stateless Hash-based Signature - alternative signature scheme"],
         ["NIST IR 8413", "Falcon (FN-DSA)", "Compact lattice-based digital signature"],
     ]
     with pdf.table(col_widths=(25, 55, 100), text_align="L") as tbl:
@@ -1939,13 +1953,13 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
     pdf.set_text_color(*DARK_TEXT)
     pdf.cell(0, 5, "8.3 Glossary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     gloss = [
-        ("CBOM",    "Cryptographic Bill of Materials — inventory of all cryptographic assets"),
-        ("QBOM",    "Quantum Bill of Materials — CBOM annotated with quantum readiness status"),
-        ("HNDL",    "'Harvest Now, Decrypt Later' — adversaries capture data today to decrypt post-quantum"),
+        ("CBOM",    "Cryptographic Bill of Materials - inventory of all cryptographic assets"),
+        ("QBOM",    "Quantum Bill of Materials - CBOM annotated with quantum readiness status"),
+        ("HNDL",    "Harvest Now, Decrypt Later - adversaries capture data today to decrypt post-quantum"),
         ("ML-KEM",  "Module-Lattice Key Encapsulation Mechanism (CRYSTALS-Kyber, FIPS 203)"),
         ("ML-DSA",  "Module-Lattice Digital Signature Algorithm (CRYSTALS-Dilithium, FIPS 204)"),
         ("SLH-DSA", "Stateless Hash-based Digital Signature Algorithm (SPHINCS+, FIPS 205)"),
-        ("PQC",     "Post-Quantum Cryptography — algorithms secure against quantum computer attacks"),
+        ("PQC",     "Post-Quantum Cryptography - algorithms secure against quantum computer attacks"),
     ]
     pdf.set_font("Helvetica", "", 8)
     for term, defn in gloss:

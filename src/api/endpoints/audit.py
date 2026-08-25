@@ -2983,8 +2983,20 @@ def api_export_pdf(
             }
 
             if is_vapt:
-                # PQC sessions get their dedicated report template (separate from VAPT)
-                is_pqc_session = "PQC" in (report.framework or "").upper()
+                # Detect PQC sessions: check framework name AND finding-level PQC fields,
+                # so sessions work regardless of how the framework string is spelled.
+                _fw_upper = (report.framework or "").upper()
+                is_pqc_session = (
+                    "PQC" in _fw_upper or
+                    "POST-QUANTUM" in _fw_upper or
+                    "POST QUANTUM" in _fw_upper or
+                    any(
+                        bool(f.get("quantum_status") or f.get("asset_name") or
+                             f.get("ca_algorithm") or f.get("key_algorithm") or
+                             str(f.get("control_id", "") or "").upper().startswith("PQC"))
+                        for f in findings_mapped
+                    )
+                )
                 if is_pqc_session:
                     from src.core.report_exporter import _export_pqc_pdf
                     pdf_bytes = _export_pqc_pdf(
