@@ -55,8 +55,10 @@ _PQC_KEYWORDS = (
 _PQC_CONFIG_EXTENSIONS = (".conf", ".cnf", ".pem", ".crt", ".cer", ".key", ".p12", ".pfx", ".jks",
                           ".config", ".ini", ".cfg",
                           ".yaml", ".yml",        # Kubernetes, Docker Compose, Ansible
-                          ".properties",          # Spring Boot / Java
-                          ".toml")                # Rust / server configs (rustls, actix, etc.)
+                          ".properties",          # Spring Boot / Java / Kafka
+                          ".toml",                # Rust / server configs (rustls, actix, etc.)
+                          ".sh", ".bat", ".ps1",  # Shell/PowerShell startup scripts with JVM -D flags
+                          ".reg")                 # Windows CryptoAPI / CNG registry exports
 
 
 def _count_pqc_signals(sample_lower: str) -> int:
@@ -282,6 +284,85 @@ ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, 
      re.compile(r'\bmin[_\-]?(?:tls[_\-]?)?version\s*[=:]\s*["\']?(?:TLSv?)?1\.2["\']?', re.IGNORECASE),
      "TLS 1.2 minimum version (config - quantum-vulnerable key exchange)",
      "VULNERABLE", "Protocol Version", "HIGH"),
+
+    # ── APACHE KAFKA TLS CONFIGURATION ────────────────────────────────────
+    # Kafka broker.properties uses 'ssl.' prefix (not 'server.ssl.' like Spring Boot).
+    # Catches keystore config, keystore type, enabled protocols without PQC cipher.
+    ("kafka-ssl-keystore",
+     re.compile(r'^\s*ssl\.keystore\.location\s*=\s*.+', re.IGNORECASE | re.MULTILINE),
+     "Kafka Broker TLS - Keystore configured (no PQC cipher suite specified)",
+     "VULNERABLE", "Application TLS Configuration", "HIGH"),
+    ("kafka-ssl-keystore-type",
+     re.compile(r'^\s*ssl\.keystore\.type\s*=\s*(?:JKS|PKCS12)', re.IGNORECASE | re.MULTILINE),
+     "Kafka Broker TLS - JKS/PKCS12 Keystore (RSA/ECDSA certificate assumed, no PQC)",
+     "VULNERABLE", "Application TLS Configuration", "HIGH"),
+    ("kafka-ssl-protocol",
+     re.compile(r'^\s*ssl\.protocol\s*=\s*TLS', re.IGNORECASE | re.MULTILINE),
+     "Kafka Broker TLS - TLS protocol enabled (no PQC cipher suite specified)",
+     "VULNERABLE", "Application TLS Configuration", "MEDIUM"),
+    ("kafka-ssl-enabled-protocols",
+     re.compile(r'^\s*ssl\.enabled\.protocols\s*=\s*.*TLSv?1\.2', re.IGNORECASE | re.MULTILINE),
+     "Kafka Broker TLS - TLS 1.2 in enabled protocols (quantum-vulnerable key exchange)",
+     "VULNERABLE", "Protocol Version", "HIGH"),
+
+    # ── GnuTLS PRIORITY STRINGS ───────────────────────────────────────────
+    # GnuTLS uses '+VERS-TLS1.2', 'NORMAL:%NO_TICKETS' etc. style priority strings.
+    # The presence of VERS-TLS1.2 without a PQC KEM group = quantum-vulnerable.
+    ("gnutls-tls12",
+     re.compile(r'VERS-TLS1\.2', re.IGNORECASE),
+     "GnuTLS Priority String - TLS 1.2 (quantum-vulnerable key exchange)",
+     "VULNERABLE", "Protocol Version", "HIGH"),
+    ("gnutls-tls10",
+     re.compile(r'VERS-TLS1\.0', re.IGNORECASE),
+     "GnuTLS Priority String - TLS 1.0 (deprecated, quantum-vulnerable)",
+     "WEAK", "Protocol Version", "CRITICAL"),
+    ("gnutls-no-pqc",
+     re.compile(r'GnuTLS[:\s].*(?:NORMAL|SECURE)', re.IGNORECASE),
+     "GnuTLS NORMAL/SECURE profile (classical key exchange only - no PQC KEM)",
+     "VULNERABLE", "Protocol Version", "MEDIUM"),
+
+    # ── HAPROXY DH PARAM SIZE ───────────────────────────────────────────
+    # HAProxy sets a custom static DH parameter size instead of using ECDHE.
+    # Any static DH param (even 4096-bit) is quantum-vulnerable via Shor's algorithm.
+    ("haproxy-dh-param",
+     re.compile(r'tune\.ssl\.default-dh-param\s+(\d+)', re.IGNORECASE),
+     lambda m: f"HAProxy static DH parameter: {m.group(1)}-bit (classical Diffie-Hellman - quantum-vulnerable)",
+     "VULNERABLE", "Key Exchange (Diffie-Hellman)",
+     lambda m: "CRITICAL" if int(m.group(1)) <= 2048 else "HIGH"),
+
+    # ── JVM / JDK SYSTEM PROPERTIES (shell/batch startup scripts) ─────────────
+    # JVM startup flags that explicitly configure TLS protocol versions or disable
+    # algorithms -- found in start.sh, catalina.bat, startup.ps1, Dockerfile CMD lines.
+    ("jvm-https-protocols",
+     re.compile(r'-Dhttps?\.protocols\s*=\s*[\w,.]*TLSv?1\.2', re.IGNORECASE),
+     "JVM -Dhttps.protocols = TLSv1.2 (quantum-vulnerable key exchange)",
+     "VULNERABLE", "Protocol Version", "HIGH"),
+    ("jvm-disabled-algorithms",
+     re.compile(r'-Djdk\.tls\.disabledAlgorithms\s*=\s*\S+', re.IGNORECASE),
+     "JVM -Djdk.tls.disabledAlgorithms flag detected (review disabled algorithm list for PQC gaps)",
+     "VULNERABLE", "Application TLS Configuration", "MEDIUM"),
+    ("jvm-tls-version",
+     re.compile(r'-Djavax\.net\.ssl\.(?:trustStore|keyStore)\w*\s*=\s*.+', re.IGNORECASE),
+     "JVM JSSE keystore/truststore system property (RSA/ECDSA assumed, no PQC)",
+     "VULNERABLE", "Application TLS Configuration", "HIGH"),
+
+    # ── WINDOWS CRYPTOAPI / CNG REGISTRY EXPORTS (.reg) ──────────────────
+    # Windows registry exports from regedit showing Schannel / CNG crypto provider config.
+    # Windows registry .reg files use single backslash in paths.
+    # Simplified SCHANNEL anchor is more reliable than full-path regex.
+    ("winreg-schannel-tls10",
+     re.compile(r'SCHANNEL[\\]+Protocols[\\]+TLS 1\.0', re.IGNORECASE),
+     "Windows Schannel TLS 1.0 registry key (deprecated, quantum-vulnerable)",
+     "WEAK", "Protocol Version", "CRITICAL"),
+    ("winreg-schannel-tls12",
+     re.compile(r'SCHANNEL[\\]+Protocols[\\]+TLS 1\.2', re.IGNORECASE),
+     "Windows Schannel TLS 1.2 registry key (quantum-vulnerable key exchange)",
+     "VULNERABLE", "Protocol Version", "HIGH"),
+    # CNG RSA: matches HKEY path containing CNG and RSA (used in CNG algorithm provider entries)
+    ("winreg-cng-rsa",
+     re.compile(r'(?:HKEY_LOCAL_MACHINE|HKLM).*CNG.*RSA', re.IGNORECASE),
+     "Windows CNG RSA provider registry entry (quantum-vulnerable asymmetric key)",
+     "VULNERABLE", "Asymmetric Encryption (RSA)", "HIGH"),
 ]
 
 # Per-algorithm precise remediation (overrides generic _REMEDIATION_VULNERABLE where matched).
@@ -462,6 +543,77 @@ _REMEDIATION_BY_ALGO = [
         "  3. For libreswan: set ikev2_allow_narrowing=yes and enable PQC KEM groups.\n"
         "  4. Check StrongSwan release notes for liboqs plugin supporting ML-KEM.\n"
         "  NIST Reference: FIPS 203 (ML-KEM), RFC 9370, NIST SP 800-77 Rev 1."
+    ),
+    # -- Kafka Broker TLS ---------------------------------------------------
+    ("kafka broker tls",
+        "Apache Kafka broker uses classical TLS without a PQC-ready cipher suite.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Upgrade Kafka keystore to use an ML-DSA certificate when your CA supports it.\n"
+        "  2. Lock TLS to 1.3 only in broker.properties:\n"
+        "     ssl.enabled.protocols=TLSv1.3\n"
+        "  3. Set cipher suites (Kafka 3.x+):\n"
+        "     ssl.cipher.suites=TLS_AES_256_GCM_SHA384,TLS_CHACHA20_POLY1305_SHA256\n"
+        "  4. Prefer ECDHE over static DH: ssl.keystore.type=PKCS12\n"
+        "  5. Monitor Apache Kafka / Apache Flink PQC roadmap for ML-KEM KEM group support.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), NIST SP 800-52 Rev 2."
+    ),
+    # -- GnuTLS priority strings -------------------------------------------
+    ("gnutls",
+        "GnuTLS priority string specifies classical TLS version without PQC KEM support.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Update GnuTLS priority string to use TLS 1.3 only:\n"
+        "     NORMAL:-VERS-TLS1.0:-VERS-TLS1.1:-VERS-TLS1.2\n"
+        "  2. Monitor GnuTLS roadmap for ML-KEM/ML-DSA key exchange group support.\n"
+        "  3. Use GnuTLS >= 3.8.x for TLS 1.3 with X25519 (interim, not yet PQC-safe).\n"
+        "  4. For libgnutls-based apps: set GNUTLS_SYSTEM_PRIORITY_FILE to enforce TLS 1.3.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), NIST SP 800-52 Rev 2."
+    ),
+    # -- HAProxy static DH param -------------------------------------------
+    ("haproxy static dh",
+        "HAProxy is configured with a static Diffie-Hellman parameter (tune.ssl.default-dh-param).\n"
+        "Static DH (even at 4096-bit) is quantum-vulnerable via Shor's algorithm.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Remove tune.ssl.default-dh-param and switch to ECDHE cipher suites:\n"
+        "     ssl-default-bind-options no-sslv3 no-tlsv10 no-tlsv11 no-tlsv12\n"
+        "     ssl-default-bind-ciphers TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256\n"
+        "  2. Disable DHE in favor of ECDHE to avoid static DH entirely:\n"
+        "     ssl-default-bind-ciphers ECDHE:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!3DES:!MD5:!PSK\n"
+        "  3. Monitor HAProxy + OpenSSL PQC roadmap for ML-KEM KEM group support.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), NIST SP 800-77 Rev 1."
+    ),
+    # -- JVM JSSE system properties ----------------------------------------
+    ("jvm",
+        "JVM JSSE system properties configure classical TLS without PQC algorithm support.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Update https.protocols to TLSv1.3 only:\n"
+        "     -Dhttps.protocols=TLSv1.3\n"
+        "  2. Review jdk.tls.disabledAlgorithms - ensure RSA < 2048, DH < 2048 are disabled:\n"
+        "     jdk.tls.disabledAlgorithms=SSLv3,TLSv1,TLSv1.1,RC4,DES,MD5withRSA\n"
+        "  3. Use Java 21+ with BouncyCastle PQC provider for ML-KEM/ML-DSA prototype testing.\n"
+        "  4. Migrate JSSE keystore to ML-DSA certificate when your CA supports FIPS 204.\n"
+        "  5. Monitor OpenJDK PQC roadmap (JEP 496 - ML-KEM) for native ML-KEM TLS support.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), NIST SP 800-52 Rev 2."
+    ),
+    # -- Windows Schannel / CNG registry -----------------------------------
+    ("windows schannel",
+        "Windows Schannel TLS registry configuration uses classical cryptography only.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Disable TLS 1.0 and TLS 1.1 in Schannel registry:\n"
+        "     HKLM\\SYSTEM\\CurrentControlSet\\Control\\SecurityProviders\\SCHANNEL\\Protocols\\TLS 1.0\\Server - Enabled = 0\n"
+        "  2. Use IISCrypto or PowerShell DSC to enforce TLS 1.3 only on Windows Server 2022+.\n"
+        "  3. Plan migration of Windows certificate store to ML-DSA when Microsoft CA supports FIPS 204.\n"
+        "  4. Monitor Microsoft CNG PQC roadmap for ML-KEM/ML-DSA provider availability.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), NIST SP 800-52 Rev 2."
+    ),
+    # -- Windows CNG registry RSA ------------------------------------------
+    ("windows cng rsa",
+        "Windows CNG RSA provider registry entry detected - quantum-vulnerable asymmetric key.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Audit all Windows certificates using RSA: certutil -store My\n"
+        "  2. Plan migration to ML-DSA (FIPS 204) certificates when Microsoft CA supports them.\n"
+        "  3. Use Windows Hello for Business or Azure Key Vault for interim key management.\n"
+        "  4. Monitor Microsoft CNG PQC roadmap for ML-KEM/ML-DSA provider.\n"
+        "  NIST Reference: FIPS 204 (ML-DSA), NIST IR 8413."
     ),
 ]
 
