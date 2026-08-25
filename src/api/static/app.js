@@ -4639,14 +4639,26 @@ function renderFindingsList() {
             const sevText = f.severity || "N/A";
             let sevBadgeHtml = "";
             const sUpper = sevText.toUpperCase();
-            if (sUpper.includes("CRITICAL") || sUpper.includes("P1")) {
-                sevBadgeHtml = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Critical (CVSS 9.8)</span>`;
-            } else if (sUpper.includes("HIGH") || sUpper.includes("P2")) {
-                sevBadgeHtml = `<span class="badge" style="background:rgba(249,115,22,0.2); color:#f97316; border:1px solid rgba(249,115,22,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">High (CVSS 7.5)</span>`;
-            } else if (sUpper.includes("MEDIUM") || sUpper.includes("P3")) {
-                sevBadgeHtml = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Medium (CVSS 5.3)</span>`;
+            if (isPqc) {
+                if (sUpper.includes("CRITICAL") || sUpper.includes("P1")) {
+                    sevBadgeHtml = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">🔴 P1 Critical</span>`;
+                } else if (sUpper.includes("HIGH") || sUpper.includes("P2")) {
+                    sevBadgeHtml = `<span class="badge" style="background:rgba(249,115,22,0.2); color:#f97316; border:1px solid rgba(249,115,22,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">🟠 P2 High</span>`;
+                } else if (sUpper.includes("MEDIUM") || sUpper.includes("P3")) {
+                    sevBadgeHtml = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">🟡 P3 Medium</span>`;
+                } else {
+                    sevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.2); color:#3b82f6; border:1px solid rgba(59,130,246,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">🔵 P4 Low</span>`;
+                }
             } else {
-                sevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.2); color:#3b82f6; border:1px solid rgba(59,130,246,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Low (CVSS 2.5)</span>`;
+                if (sUpper.includes("CRITICAL") || sUpper.includes("P1")) {
+                    sevBadgeHtml = `<span class="badge" style="background:rgba(239,68,68,0.2); color:#ef4444; border:1px solid rgba(239,68,68,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Critical (CVSS 9.8)</span>`;
+                } else if (sUpper.includes("HIGH") || sUpper.includes("P2")) {
+                    sevBadgeHtml = `<span class="badge" style="background:rgba(249,115,22,0.2); color:#f97316; border:1px solid rgba(249,115,22,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">High (CVSS 7.5)</span>`;
+                } else if (sUpper.includes("MEDIUM") || sUpper.includes("P3")) {
+                    sevBadgeHtml = `<span class="badge" style="background:rgba(245,158,11,0.2); color:#f59e0b; border:1px solid rgba(245,158,11,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Medium (CVSS 5.3)</span>`;
+                } else {
+                    sevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.2); color:#3b82f6; border:1px solid rgba(59,130,246,0.4); font-weight:800; padding:3px 8px; border-radius:4px; font-size:0.75rem;">Low (CVSS 2.5)</span>`;
+                }
             }
 
             card.innerHTML = `
@@ -4746,7 +4758,7 @@ function renderFindingsList() {
                         <div style="margin-top: 4px;">${cveBadges}</div>
                     </div>
 
-                    ${_cvssVec ? `
+                    ${_cvssVec && !isPqc ? `
                     <div class="finding-detail-row" style="margin-bottom: 10px;">
                         <label style="font-weight:700; font-size:0.78rem; color:#94a3b8; text-transform:uppercase; letter-spacing:0.5px; display:block; margin-bottom:4px;">📊 CVSS Vector</label>
                         <p style="font-family: monospace; font-size: 0.82rem; color: #a78bfa; margin: 2px 0;">
@@ -5079,13 +5091,11 @@ function openEditFindingModal(finding) {
     // 4. Determine Session Type (VAPT/PQC vs ISO) & populate Severity Options.
     // PQC findings use the same CVSS-style severity scale as VAPT (they come
     // from the same deterministic scanner-parser pipeline, not the LLM/RAG path).
-    const isVapt = (
+    const isPqc = isPqcFinding(finding);
+    const isVapt = !isPqc && (
         (finding.control_id && String(finding.control_id).toUpperCase().includes("VAPT")) ||
         (finding.category && String(finding.category).toUpperCase().includes("VAPT")) ||
-        (typeof activeSessionTitle !== "undefined" && activeSessionTitle && String(activeSessionTitle).toUpperCase().includes("VAPT")) ||
-        (finding.control_id && String(finding.control_id).toUpperCase().includes("PQC")) ||
-        (finding.category && String(finding.category).toUpperCase().includes("PQC")) ||
-        (typeof activeSessionTitle !== "undefined" && activeSessionTitle && String(activeSessionTitle).toUpperCase().includes("PQC"))
+        (typeof activeSessionTitle !== "undefined" && activeSessionTitle && String(activeSessionTitle).toUpperCase().includes("VAPT"))
     );
 
     const sevSelect = document.getElementById("edit-finding-severity");
@@ -5094,7 +5104,30 @@ function openEditFindingModal(finding) {
     // Detect nil/empty/N/A severity — these need a prompt so the user can pick
     const severityIsNil = !rawSev || rawSev === "NIL" || rawSev === "N/A" || rawSev === "NULL" || rawSev === "NONE" || rawSev === "UNKNOWN";
 
-    if (isVapt) {
+    if (isPqc) {
+        // PQC Post-Quantum Risk Band Scale (P1-P4) — No CVSS scores
+        sevSelect.innerHTML = `
+            ${severityIsNil ? '<option value="" disabled selected style="color:var(--text-muted);">— Select Severity —</option>' : ''}
+            <option value="P1 Critical">P1 Critical (Quantum-Vulnerable)</option>
+            <option value="P2 High">P2 High (Major Quantum Risk)</option>
+            <option value="P3 Medium">P3 Medium (Moderate Quantum Risk)</option>
+            <option value="P4 Low">P4 Low (Minor Quantum Risk)</option>
+            <option value="Informational">Informational (Quantum-Safe / Info)</option>
+        `;
+        if (severityIsNil) {
+            sevSelect.value = "";
+        } else if (rawSev.includes("P1") || rawSev.includes("CRIT")) {
+            sevSelect.value = "P1 Critical";
+        } else if (rawSev.includes("P2") || rawSev.includes("HIGH")) {
+            sevSelect.value = "P2 High";
+        } else if (rawSev.includes("P4") || rawSev.includes("LOW")) {
+            sevSelect.value = "P4 Low";
+        } else if (rawSev.includes("INFO")) {
+            sevSelect.value = "Informational";
+        } else {
+            sevSelect.value = "P3 Medium";
+        }
+    } else if (isVapt) {
         // VAPT CVSS v3.1 Score Scale
         sevSelect.innerHTML = `
             ${severityIsNil ? '<option value="" disabled selected style="color:var(--text-muted);">— Select Severity —</option>' : ''}
