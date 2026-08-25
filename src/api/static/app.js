@@ -4425,9 +4425,9 @@ function renderFindingsList() {
                 "policy document", "uploaded document", "evidence document", "context", "evidence", "document"]);
             const _pick = (v) => v && v.trim() && !_fakeSrc.has(v.trim().toLowerCase()) ? v.trim() : null;
             const singleDocName =
-                _pick(f.evidence_location) ||
-                _pick(f.evidence_source_file) ||
                 _pick(srcDocs[0]) ||
+                _pick(f.evidence_source_file) ||
+                _pick(f.evidence_location) ||
                 "Uploaded Evidence File";
             expandedCards.push({
                 originalFinding: f,
@@ -4795,12 +4795,31 @@ function renderFindingsList() {
                 </div>
             `;
         } else {
+            // ── NIST / ISO Severity badge (P1–P4 scale) — only for non-compliant findings ──
+            let nistSevBadgeHtml = "";
+            if (!isComp && !isFp) {
+                const rawSev = String(f.severity || "").trim().toUpperCase();
+                if (rawSev.includes("P1") || rawSev.includes("CRITICAL")) {
+                    nistSevBadgeHtml = `<span class="badge" style="background:rgba(239,68,68,0.18); color:#ef4444; border:1px solid rgba(239,68,68,0.45); font-weight:800; padding:3px 9px; border-radius:4px; font-size:0.75rem;">🔴 P1 Critical</span>`;
+                } else if (rawSev.includes("P2") || rawSev.includes("HIGH")) {
+                    nistSevBadgeHtml = `<span class="badge" style="background:rgba(249,115,22,0.18); color:#f97316; border:1px solid rgba(249,115,22,0.45); font-weight:800; padding:3px 9px; border-radius:4px; font-size:0.75rem;">🟠 P2 High</span>`;
+                } else if (rawSev.includes("P3") || rawSev.includes("MEDIUM")) {
+                    nistSevBadgeHtml = `<span class="badge" style="background:rgba(245,158,11,0.18); color:#f59e0b; border:1px solid rgba(245,158,11,0.45); font-weight:800; padding:3px 9px; border-radius:4px; font-size:0.75rem;">🟡 P3 Medium</span>`;
+                } else if (rawSev.includes("P4") || rawSev.includes("LOW")) {
+                    nistSevBadgeHtml = `<span class="badge" style="background:rgba(59,130,246,0.18); color:#3b82f6; border:1px solid rgba(59,130,246,0.45); font-weight:800; padding:3px 9px; border-radius:4px; font-size:0.75rem;">🔵 P4 Low</span>`;
+                } else if (rawSev && rawSev !== "N/A" && rawSev !== "NIL") {
+                    // Unknown severity value — show as-is
+                    nistSevBadgeHtml = `<span class="badge" style="background:rgba(148,163,184,0.18); color:#94a3b8; border:1px solid rgba(148,163,184,0.35); font-weight:800; padding:3px 9px; border-radius:4px; font-size:0.75rem;">⚪ ${escapeHtml(f.severity)}</span>`;
+                }
+            }
+
             card.innerHTML = `
                 <div class="finding-header" style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(148,163,184,0.15); padding-bottom:10px; margin-bottom:12px;">
                     <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:var(--text-primary);">${escapeHtml(displayHeaderTitle)}</h3>
-                    <div class="badge-group" style="display:flex; gap:6px; align-items:center;">
+                    <div class="badge-group" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
                         ${policyBadgeHtml}
                         ${evidenceBadgeHtml}
+                        ${nistSevBadgeHtml}
                         ${mainBadgeHtml}
                     </div>
                 </div>
