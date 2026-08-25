@@ -221,6 +221,11 @@
                     style="font-size: 0.72rem; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">
                     ANALYSIS MODE</div>
                 <div class="segmented-control" style="display: flex; gap: 4px; padding: 4px; border-radius: 10px;">
+                    <button type="button" class="segmented-btn" id="btn-mode-fast-parser"
+                        onclick="setAnalysisMode('Technical findings only')"
+                        title="Instant deterministic rule-based parser: Nessus, Burp Suite, Nmap, Qualys, Trivy, PQC configs, PDF/DOCX/images. Zero LLM compute. 100% accurate, <1 second."
+                        style="flex: 1; padding: 6px; font-size: 0.76rem; border-radius: 8px; border: none; outline: none; cursor: pointer; color: #94a3b8; background: transparent; font-weight: 500;">&#9889; Fast
+                        Parser</button>
                     <button type="button" class="segmented-btn" id="btn-mode-quick" onclick="setAnalysisMode('Quick')"
                         style="flex: 1; padding: 6px; font-size: 0.76rem; border-radius: 8px; border: none; outline: none; cursor: pointer; color: #94a3b8; background: transparent; font-weight: 500;">Quick
                         Audit</button>
@@ -228,20 +233,17 @@
                         onclick="setAnalysisMode('Deep')"
                         style="flex: 1; padding: 6px; font-size: 0.76rem; border-radius: 8px; border: none; outline: none; cursor: pointer; color: #ffffff; background: #2563eb; font-weight: 700; box-shadow: 0 2px 6px rgba(37,99,235,0.4);">Deep
                         Audit</button>
-                    <button type="button" class="segmented-btn" id="btn-mode-vapt-scan"
-                        onclick="setAnalysisMode('Technical findings only')"
-                        title="Parses raw scanner output (Nessus/Burp/Nmap/Qualys/Trivy) directly into one finding per real vulnerability, instead of judging it against a generic control checklist via the LLM."
-                        style="flex: 1; padding: 6px; font-size: 0.76rem; border-radius: 8px; border: none; outline: none; cursor: pointer; color: #94a3b8; background: transparent; font-weight: 500;">VAPT
-                        Scan</button>
                 </div>
-                <small style="color:var(--text-muted); display:block; margin-top:6px; line-height:1.4;">
-                    Uploaded raw scanner output (Nessus/Burp/Nmap/Qualys/Trivy)? Use
-                    <b>VAPT Scan</b> to get one finding per real vulnerability, parsed directly
-                    from the file. Quick/Deep Audit judge evidence against a control checklist
-                    via the LLM instead -- the right mode for policy/process documents, not raw
-                    scan output.
+                <small id="mode-helper-text" style="color:var(--text-muted); display:block; margin-top:6px; line-height:1.4;">
+                    <b>&#9889; Fast Parser</b>: Instant scan of Nessus/Burp/Nmap/PQC config files &amp; images — zero AI compute, 100% exact findings.
+                    <b>Quick/Deep Audit</b>: AI-based evidence evaluation for policy documents &amp; governance frameworks.
                 </small>
+                <!-- Governance lock notice (shown only when ISO/SOC/DPDP/BCMS/XBOM is selected) -->
+                <div id="mode-governance-notice" style="display:none; margin-top:7px; padding:7px 10px; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.35); border-radius:8px; font-size:0.75rem; color:#b45309; line-height:1.4;">
+                    &#128274; <b>Fast Parser is not available</b> for governance frameworks (ISO 27001 / SOC 2 / DPDP / BCMS / X-BOM). AI reasoning is required to evaluate policy documents and evidence. Mode locked to <b>Deep Audit</b>.
+                </div>
             </div>
+
 
             <!-- Report Branding Card -->
             <div class="sidebar-section collapsible" id="sidebar-branding-setup" style="margin-bottom: 16px;">

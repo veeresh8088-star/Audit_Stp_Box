@@ -1588,12 +1588,15 @@ async function clearAllUploadedFiles() {
 
 function setAnalysisMode(mode) {
     selectedAnalysisMode = mode;
+    const btnFastParser = document.getElementById("btn-mode-fast-parser");
     const btnQuick = document.getElementById("btn-mode-quick");
     const btnDeep = document.getElementById("btn-mode-deep");
-    const btnVaptScan = document.getElementById("btn-mode-vapt-scan");
-    const allBtns = [btnQuick, btnDeep, btnVaptScan];
 
-    const activeBtn = mode === "Quick" ? btnQuick : mode === "Technical findings only" ? btnVaptScan : btnDeep;
+    const allBtns = [btnFastParser, btnQuick, btnDeep];
+
+    const activeBtn = mode === "Technical findings only" ? btnFastParser
+                    : mode === "Quick" ? btnQuick
+                    : btnDeep;
 
     allBtns.forEach(b => {
         if (!b) return;
@@ -1607,30 +1610,62 @@ function setAnalysisMode(mode) {
     });
 }
 
-// VAPT framework supports two different audits: a process/methodology review
-// (evaluated via LLM against Quick/Deep mode's control checklist) and raw
-// scanner-file parsing (VAPT Scan mode, one finding per real vulnerability) --
-// they're separate toggles because both are legitimate, but the common case
-// for picking VAPT framework is "I have scan files," not the process review.
-// Auto-suggest VAPT Scan as the default the moment VAPT is selected; the user
-// can still manually switch back to Quick/Deep for the process-review case.
-// PQC (Post-Quantum Cryptography Readiness) evidence is parsed the same
-// deterministic way VAPT scanner files are (pqc_parser.py, not the LLM/RAG
-// path) -- so picking PQC auto-suggests the same scanner-file-upload mode.
+// ─── Framework-to-Mode Auto-Routing ──────────────────────────────────────────
+// VAPT / PQC   → default Fast Parser (100% deterministic, 0 LLM compute).
+//               User can still manually switch to Quick/Deep for auditing
+//               written PenTest PDFs or PQC policy documents.
+// Governance   → ISO 27001 / SOC 2 / DPDP / BCMS / X-BOM always require LLM
+//               reasoning for policy vs evidence evaluation. Fast Parser is
+//               disabled and mode is locked to Deep Audit. A friendly notice
+//               is shown explaining why.
+// Other/none   → Restore previous user-chosen mode; hide governance notice.
+// ─────────────────────────────────────────────────────────────────────────────
 function onFrameworkChangeSuggestMode() {
     const frameworkSelect = document.getElementById("framework-select");
     const fwVal = frameworkSelect ? frameworkSelect.value.toUpperCase() : "";
-    const isVapt = fwVal.includes("VAPT") || fwVal.includes("PQC");
     if (typeof setAnalysisMode !== "function") return;
-    if (isVapt) {
-        setAnalysisMode("Technical findings only");
-    } else if (selectedAnalysisMode === "Technical findings only") {
-        // Switching away from VAPT/PQC back to ISO (or any other framework) --
-        // Scan mode is meaningless outside VAPT/PQC, and leaving it selected
-        // caused an ISO-framework audit to keep running VAPT-style scanner-file
-        // checks. Only reset if Scan mode is what's currently active; if the
-        // user is on Quick/Deep already, leave their choice alone.
+
+    const btnFastParser = document.getElementById("btn-mode-fast-parser");
+    const govNotice = document.getElementById("mode-governance-notice");
+
+    // Governance frameworks: ISO 27001, SOC 2, DPDP, BCMS, X-BOM
+    const isGovernance = (
+        fwVal.includes("ISO") || fwVal.includes("SOC") ||
+        fwVal.includes("DPDP") || fwVal.includes("BCMS") ||
+        fwVal.includes("XBOM") || fwVal.includes("X-BOM")
+    );
+    // Technical frameworks: VAPT, PQC
+    const isTechnical = fwVal.includes("VAPT") || fwVal.includes("PQC");
+
+    if (isGovernance) {
+        // Lock to Deep Audit — Fast Parser is meaningless for policy documents
         setAnalysisMode("Deep");
+        if (btnFastParser) {
+            btnFastParser.disabled = true;
+            btnFastParser.style.opacity = "0.35";
+            btnFastParser.style.cursor = "not-allowed";
+            btnFastParser.title = "Fast Parser is not available for governance frameworks. AI reasoning is required to evaluate policies and evidence.";
+        }
+        if (govNotice) govNotice.style.display = "block";
+    } else {
+        // Unlock Fast Parser (restore for VAPT/PQC or other frameworks)
+        if (btnFastParser) {
+            btnFastParser.disabled = false;
+            btnFastParser.style.opacity = "1";
+            btnFastParser.style.cursor = "pointer";
+            btnFastParser.title = "Instant deterministic rule-based parser: Nessus, Burp Suite, Nmap, Qualys, Trivy, PQC configs, PDF/DOCX/images. Zero LLM compute. 100% accurate, <1 second.";
+        }
+        if (govNotice) govNotice.style.display = "none";
+
+        if (isTechnical) {
+            // VAPT / PQC → default to Fast Parser
+            setAnalysisMode("Technical findings only");
+        } else if (selectedAnalysisMode === "Technical findings only") {
+            // Switching away from VAPT/PQC to a non-governance framework:
+            // Fast Parser is valid but odd choice — reset to Deep so the user
+            // doesn't accidentally stay in scanner-only mode for unrelated docs.
+            setAnalysisMode("Deep");
+        }
     }
 }
 

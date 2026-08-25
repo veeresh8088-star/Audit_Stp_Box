@@ -1087,16 +1087,32 @@ def api_start_audit(req: StartAuditRequest, request: Request):
         # dropdown's current value, only audit_mode, so this OR is required:
         # a session not created with framework=VAPT (e.g. "All Standards"
         # with individually-selected VAPT-numbered controls) can still
-        # legitimately run VAPT Scan mode. This depends on audit_mode always
-        # reflecting live intent -- previously it could go stale (stuck on
-        # "Technical findings only" after switching the framework dropdown
-        # back to ISO without resetting it), which incorrectly forced VAPT
-        # routing onto an unrelated ISO run; that's fixed at the source in
-        # app.js's onFrameworkChangeSuggestMode(), not by distrusting
-        # audit_mode here.
+        # legitimately run VAPT Scan mode.
+        #
+        # ── Governance Guardrail ────────────────────────────────────────────
+        # ISO 27001 / SOC 2 / DPDP / BCMS / X-BOM ALWAYS require LLM-based
+        # policy vs evidence evaluation (audit_chains.py / validator.py).
+        # If a governance framework somehow sends "Technical findings only"
+        # (e.g. stale client state, direct API call), coerce to "Deep" server-
+        # side so the correct pipeline is always used regardless of client input.
+        _fw_upper = report_framework.upper()
+        _is_governance_fw = (
+            ("ISO" in _fw_upper and "VAPT" not in _fw_upper and "PQC" not in _fw_upper)
+            or "SOC" in _fw_upper or "DPDP" in _fw_upper
+            or "BCMS" in _fw_upper or "XBOM" in _fw_upper or "X-BOM" in _fw_upper
+        )
+        if _is_governance_fw and req.audit_mode in ("Technical findings only", "VAPT validation", "Fast Parser"):
+            print(
+                f"[AUDIT GUARDRAIL] Governance framework '{report_framework}' received "
+                f"audit_mode='{req.audit_mode}' — coercing to 'Deep' (LLM/RAG pipeline required).",
+                flush=True,
+            )
+            req.audit_mode = "Deep"
+
         is_vapt_std = ("VAPT" in report_framework.upper()
                        or req.audit_mode in ("VAPT validation", "Technical findings only"))
         is_tech_only = req.audit_mode in ("VAPT validation", "Technical findings only")
+
 
         if is_vapt_std:
             with force_master():
