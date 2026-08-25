@@ -53,7 +53,10 @@ _PQC_KEYWORDS = (
 # per every other parser's can_parse() convention), just given a lower keyword
 # bar since the extension itself is already a meaningful signal.
 _PQC_CONFIG_EXTENSIONS = (".conf", ".cnf", ".pem", ".crt", ".cer", ".key", ".p12", ".pfx", ".jks",
-                          ".config", ".ini", ".cfg")
+                          ".config", ".ini", ".cfg",
+                          ".yaml", ".yml",        # Kubernetes, Docker Compose, Ansible
+                          ".properties",          # Spring Boot / Java
+                          ".toml")                # Rust / server configs (rustls, actix, etc.)
 
 
 def _count_pqc_signals(sample_lower: str) -> int:
@@ -218,6 +221,51 @@ ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, 
      "VULNERABLE",
      "Protocol Version",
      "MEDIUM"),
+
+    # ── SPRING BOOT / JAVA APPLICATION TLS ────────────────────────────────────
+    # Catches application.properties / application.yml enabling SSL/TLS without
+    # specifying a PQC-ready cipher suite or key algorithm.
+    ("springboot-ssl-enabled",
+     re.compile(r'^\s*server\.ssl\.enabled\s*[=:]\s*true', re.IGNORECASE | re.MULTILINE),
+     "Spring Boot TLS - SSL enabled (no PQC cipher suite specified)",
+     "VULNERABLE", "Application TLS Configuration", "HIGH"),
+    ("java-keystore-pkcs12",
+     re.compile(r'^\s*server\.ssl\.key[\-_]store[\-_]type\s*[=:]\s*PKCS12', re.IGNORECASE | re.MULTILINE),
+     "Spring Boot / Java PKCS12 Keystore (RSA/ECDSA certificate assumed, no PQC)",
+     "VULNERABLE", "Application TLS Configuration", "HIGH"),
+
+    # ── KUBERNETES / CONTAINER TLS ────────────────────────────────────────────
+    # Catches Kubernetes TLS Secrets and Ingress TLS configs that bundle classical
+    # certificates without any PQC-capable cipher or key algorithm.
+    ("k8s-tls-secret",
+     re.compile(r'kubernetes\.io/tls', re.IGNORECASE),
+     "Kubernetes TLS Secret (classical cipher suite - no PQC KEM)",
+     "VULNERABLE", "Container / Cloud TLS Configuration", "HIGH"),
+    ("k8s-ingress-tls",
+     re.compile(r'^\s*tls:\s*$', re.IGNORECASE | re.MULTILINE),
+     "Kubernetes Ingress TLS block (classical cipher suite - no PQC KEM)",
+     "VULNERABLE", "Container / Cloud TLS Configuration", "MEDIUM"),
+
+    # ── STRONGSWAN / IPSEC modpXXXX DH GROUPS ─────────────────────────────
+    # StrongSwan / libreswan use modpXXXX notation for DH groups in ike= and esp= lines.
+    # modp1024=DH14(CRITICAL), modp2048=DH14(HIGH), modp4096=DH16(HIGH) -- all quantum-vulnerable.
+    ("ipsec-modp",
+     re.compile(r'\bmodp(1024|1536|2048|3072|4096|6144|8192)\b', re.IGNORECASE),
+     lambda m: f"IKEv2/IPSec DH modp{m.group(1)} (classical Diffie-Hellman - quantum-vulnerable)",
+     "VULNERABLE", "Key Exchange (Diffie-Hellman)",
+     lambda m: "CRITICAL" if int(m.group(1)) <= 2048 else "HIGH"),
+
+    # ── GENERIC TLS VERSION IN ENV / YAML / TOML FORMATS ──────────────────────
+    # Catches TLS version declarations in Docker Compose, TOML, env files that
+    # use different separators or skip the 'v' prefix (e.g. TLS_VERSION=1.2).
+    ("tls12-env-var",
+     re.compile(r'TLS[_\-]?VERSION\s*[=:]\s*["\']?(?:TLSv?)?1\.2["\']?', re.IGNORECASE),
+     "TLS 1.2 (environment variable / YAML config - quantum-vulnerable key exchange)",
+     "VULNERABLE", "Protocol Version", "HIGH"),
+    ("tls-min-version",
+     re.compile(r'\bmin[_\-]?(?:tls[_\-]?)?version\s*[=:]\s*["\']?(?:TLSv?)?1\.2["\']?', re.IGNORECASE),
+     "TLS 1.2 minimum version (config - quantum-vulnerable key exchange)",
+     "VULNERABLE", "Protocol Version", "HIGH"),
 ]
 
 # Per-algorithm precise remediation (overrides generic _REMEDIATION_VULNERABLE where matched).
@@ -356,6 +404,48 @@ _REMEDIATION_BY_ALGO = [
         "  6. Apply network-layer controls (private VPC, mTLS, certificate pinning) as compensating\n"
         "     controls while awaiting PQC-capable DB engine releases.\n"
         "  NIST Reference: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), NIST SP 800-52 Rev 2."
+    ),
+    # -- Spring Boot / Java application TLS -----------------------------------
+    ("application tls",
+        "Spring Boot / Java application TLS uses classical cryptography only.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Add explicit cipher suite configuration in application.properties:\n"
+        "     server.ssl.ciphers=TLS_AES_256_GCM_SHA384,TLS_CHACHA20_POLY1305_SHA256\n"
+        "     server.ssl.enabled-protocols=TLSv1.3\n"
+        "  2. Audit the PKCS12 keystore for RSA/ECDSA certificate type:\n"
+        "     keytool -list -keystore keystore.p12 -storetype PKCS12\n"
+        "  3. Plan certificate migration to ML-DSA-65 (FIPS 204) when your CA supports it.\n"
+        "  4. Use Java 21+ / BouncyCastle PQC provider for ML-KEM/ML-DSA prototype testing.\n"
+        "  5. Track Spring Boot + OpenJDK PQC roadmaps for native ML-KEM TLS 1.3 support.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), NIST SP 800-52 Rev 2."
+    ),
+    # -- Kubernetes / Container TLS -------------------------------------------
+    ("container / cloud tls",
+        "Kubernetes TLS Secrets and Ingress configurations use classical TLS certificates.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Audit all TLS Secrets: kubectl get secrets --field-selector type=kubernetes.io/tls\n"
+        "  2. Check certificate algorithms: openssl x509 -in tls.crt -noout -text | grep 'Public Key'\n"
+        "  3. For NGINX Ingress: set ssl-ciphers to TLS 1.3 AEAD suites in ConfigMap:\n"
+        "     ssl-protocols: TLSv1.3\n"
+        "     ssl-ciphers: TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256\n"
+        "  4. Plan rotation to ML-DSA certificates when cert-manager + ACME support PQC.\n"
+        "  5. Apply mTLS (mutual TLS) within the cluster as a compensating control.\n"
+        "  6. Monitor CNCF TAG Security and cert-manager PQC roadmap for ML-KEM/ML-DSA support.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), NIST SP 800-52 Rev 2."
+    ),
+    # -- StrongSwan / IPSec modp DH groups ------------------------------------
+    ("ikev2/ipsec dh",
+        "IKEv2/IPSec configuration uses classical Diffie-Hellman (modpXXXX) key exchange "
+        "which is broken by Shor's algorithm.\n"
+        "IMMEDIATE ACTIONS:\n"
+        "  1. Add ML-KEM (FIPS 203) IKE groups to the proposal per RFC 9370:\n"
+        "     ike=aes256gcm16-prfsha384-kyber3-ecp384!\n"
+        "     (StrongSwan >= 6.0 with wolfSSL or OpenQuantumSafe provider)\n"
+        "  2. Interim: upgrade to modp4096 or ecp384 minimum while awaiting PQC.\n"
+        "     Remove modp1024/modp2048 immediately -- these are also classically weak.\n"
+        "  3. For libreswan: set ikev2_allow_narrowing=yes and enable PQC KEM groups.\n"
+        "  4. Check StrongSwan release notes for liboqs plugin supporting ML-KEM.\n"
+        "  NIST Reference: FIPS 203 (ML-KEM), RFC 9370, NIST SP 800-77 Rev 1."
     ),
 ]
 
