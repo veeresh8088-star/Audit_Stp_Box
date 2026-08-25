@@ -111,7 +111,12 @@ def _dh_group_namer(m: "re.Match") -> str:
 
 ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, str, Union[str, Callable]]] = [
     # ── QUANTUM-VULNERABLE: asymmetric / key-exchange (broken by Shor's algorithm) ──
-    ("rsa-sized", re.compile(r'\bRSA[\s\-_]?(?:512|1024|2048|3072|4096)\b', re.IGNORECASE),
+    # rsa-sized: matches 'RSA 2048', 'RSA-2048', 'RSA2048', and also
+    # OpenSSL key config style 'default_bits = 4096' without the RSA keyword.
+    ("rsa-sized", re.compile(
+        r'(?:\bRSA[\s\-_]?(?:512|1024|2048|3072|4096)\b'
+        r'|\bdefault[_\-]bits\s*=\s*(?:512|1024|2048|3072|4096)\b)',
+        re.IGNORECASE),
      _rsa_sized_namer, "VULNERABLE", "Asymmetric Encryption (RSA)", _rsa_sized_severity),
     ("rsa-generic", re.compile(r'\bRSA\b(?!\s*[\d])', re.IGNORECASE),
      "RSA (unspecified key size)", "VULNERABLE", "Asymmetric Encryption (RSA)", "CRITICAL"),
@@ -145,7 +150,8 @@ ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, 
     # ── CLASSICALLY WEAK / DEPRECATED (not PQC-specific, still flagged) ──
     ("md5", re.compile(r'\bMD5\b', re.IGNORECASE),
      "MD5", "WEAK", "Hash Function", "HIGH"),
-    ("sha1", re.compile(r'\bSHA[\s\-_]?1\b', re.IGNORECASE),
+    # sha1: matches 'SHA-1', 'SHA1', 'SHA 1' (including fused forms like SHA1withRSA)
+    ("sha1", re.compile(r'\bSHA[\s\-_]?1(?!\d)', re.IGNORECASE),
      "SHA-1", "WEAK", "Hash Function", "HIGH"),
     ("3des", re.compile(r'\b(?:3DES|Triple[\s\-]?DES|TripleDES)\b', re.IGNORECASE),
      "3DES / Triple DES", "WEAK", "Symmetric Cipher", "CRITICAL"),
@@ -157,7 +163,8 @@ ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, 
      "SSLv2", "WEAK", "Protocol Version", "CRITICAL"),
     ("sslv3", re.compile(r'\bSSL\s?v?3\b', re.IGNORECASE),
      "SSLv3", "WEAK", "Protocol Version", "CRITICAL"),
-    ("tls10", re.compile(r'\bTLS\s?v?1\.0\b', re.IGNORECASE),
+    # tls10: matches 'TLSv1.0' and bare 'TLSv1' (no .0 suffix -- common in NGINX ssl_protocols)
+    ("tls10", re.compile(r'\bTLS\s?v?1(?:\.0)?(?![\.\d])', re.IGNORECASE),
      "TLS 1.0", "WEAK", "Protocol Version", "CRITICAL"),
     ("tls11", re.compile(r'\bTLS\s?v?1\.1\b', re.IGNORECASE),
      "TLS 1.1", "WEAK", "Protocol Version", "CRITICAL"),
@@ -165,7 +172,10 @@ ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, 
      "CBC-mode cipher (non-AEAD)", "WEAK", "Cipher Mode", "MEDIUM"),
 
     # ── QUANTUM-SAFE / NIST PQC-SELECTED ──
-    ("aes256-gcm", re.compile(r'\bAES[\s\-_]?256[\s\-_]?GCM\b', re.IGNORECASE),
+    # aes256-gcm: matches 'AES-256-GCM', 'AES_256_GCM', and TLS 1.3 suite name 'TLS_AES_256_GCM_SHA384'
+    ("aes256-gcm", re.compile(
+        r'(?:\bAES[\s\-_]?256[\s\-_]?GCM\b|(?<![A-Z0-9])AES_256_GCM(?![A-Z0-9])|TLS_AES_256_GCM)',
+        re.IGNORECASE),
      "AES-256-GCM", "SAFE", "Symmetric Cipher (AEAD)", _SEV_INFO),
     ("aes256", re.compile(r'\bAES[\s\-_]?256\b', re.IGNORECASE),
      "AES-256", "SAFE", "Symmetric Cipher", _SEV_INFO),
@@ -183,11 +193,17 @@ ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, 
      "CRYSTALS-Kyber / ML-KEM", "SAFE", "PQC Key Encapsulation (NIST-selected)", _SEV_INFO),
     ("dilithium", re.compile(r'\b(?:CRYSTALS[\s\-]?Dilithium|ML[\s\-]?DSA)\b', re.IGNORECASE),
      "CRYSTALS-Dilithium / ML-DSA", "SAFE", "PQC Digital Signature (NIST-selected)", _SEV_INFO),
-    ("sphincs", re.compile(r'\b(?:SPHINCS\+|SLH[\s\-]?DSA)\b', re.IGNORECASE),
+    # sphincs: matches 'SPHINCS+', 'SPHINCS+-SHA2-128s', 'SLH-DSA'
+    # Note: \b doesn't work after '+' so use a lookahead instead.
+    ("sphincs", re.compile(r'\bSPHINCS[+]?(?:-SHA\d+)?\b|\bSLH[\s\-]?DSA\b', re.IGNORECASE),
      "SPHINCS+ / SLH-DSA", "SAFE", "PQC Digital Signature (NIST-selected)", _SEV_INFO),
     ("falcon", re.compile(r'\b(?:Falcon|FN[\s\-]?DSA)\b', re.IGNORECASE),
      "Falcon / FN-DSA", "SAFE", "PQC Digital Signature (NIST-selected)", _SEV_INFO),
-    ("chacha20", re.compile(r'\bChaCha20[\s\-]?Poly1305\b', re.IGNORECASE),
+    # chacha20: matches 'ChaCha20-Poly1305', 'ChaCha20_Poly1305', and TLS 1.3 cipher suite
+    # 'TLS_CHACHA20_POLY1305_SHA256' (underscore form used in NGINX/HAProxy ssl_ciphers).
+    ("chacha20", re.compile(
+        r'(?:\bChaCha20[\s\-_]?Poly1305\b|TLS[_\-]CHACHA20[_\-]POLY1305|\bCHACHA20[_\-]POLY1305\b)',
+        re.IGNORECASE),
      "ChaCha20-Poly1305", "SAFE", "Symmetric Cipher (AEAD)", _SEV_INFO),
 
     # ── DATABASE / SERVER TLS CONFIG PATTERNS ──────────────────────────────────
