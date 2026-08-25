@@ -1,0 +1,41 @@
+🛡️ AICyberAuditBox: DEMO PRESENTATION GUIDE
+
+1. THE OPENING (The Problem & Solution)
+"Good morning/afternoon. Today, I am demonstrating the AICyberAuditBox, a next-generation, private RAG-powered toolkit designed specifically for Cybersecurity Audits. 
+
+In traditional audits, analyzing thousands of pages of evidence for compliance (like ISO 27001 or NIST) is slow and prone to human error. Our solution automates this using a completely offline AI pipeline, ensuring that sensitive data never leaves the organization."
+
+2. WALKING THROUGH THE UI (The Dashboard)
+"As you can see on the dashboard, we have a premium, intuitive interface. On the left, we have our 5-Stage Audit Pipeline:
+1. Ingest & Parse: Handling PDFs and Word documents.
+2. Chunk & Embed: Preparing data for semantic search.
+3. Semantic Mapping: Aligning evidence with specific regulatory controls.
+4. Gap Detection: Our local AI engine identifies contradictions.
+5. Reporting: Generating actionable findings."
+
+3. THE LIVE DEMO (Step-by-Step)
+Step 1: Select a Use Case
+"For this demo, let's select a critical use case from our audit list: 'Check and summarize the validity of the license agreement'. The system now knows exactly what control to look for."
+
+Step 2: Upload Evidence
+"I am now uploading the audit evidence—for example, a software license agreement. The system supports both PDF and DOCX formats."
+
+Step 3: Execute the Pipeline
+"When I click 'Execute Audit Pipeline', the system starts the 5-stage process. You can see the status tracker updating in real-time. It’s parsing the text and handing it over to our local Ollama-powered Llama 3 engine."
+
+4. EXPLAINING THE RESULT (The Findings)
+"The AI has detected a gap. As shown in the report, it identified that a specific license is expiring soon. This isn't just a generic chat; it's a Structured Gap Report with Severity rankings and specific Recommendations."
+
+5. DATA PERSISTENCE (ShaktiDB)
+"Finally, we don't just show the result. By clicking 'Persist Findings', these results are securely saved into ShaktiDB, our isolated PostgreSQL instance. This creates a permanent audit trail."
+
+6. THE CLOSING (Unique Selling Points)
+"To summarize, the AICyberAuditBox is:
+- PRIVATE: Runs 100% locally with Ollama.
+- SCALABLE: Connects to robust databases like ShaktiDB.
+- ACCURATE: Uses Agentic RAG to minimize hallucinations.
+
+Thank you. I’m now open for any questions."
+
+---
+DEVELOPED FOR CERT-IN SAMVAAD 2026

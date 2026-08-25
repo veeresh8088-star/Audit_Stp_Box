@@ -1,0 +1,752 @@
+[
+  {
+    "id": "TC001",
+    "title": "Stop a running audit and resume from the saved checkpoint",
+    "description": "Verifies that a long-running audit can be stopped, becomes unblocked, and resumes from the exact saved checkpoint without repeating completed work.",
+    "category": "Granular Audit Checkpointing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Upload valid ISO policy and evidence documents"
+      },
+      {
+        "type": "action",
+        "description": "Start a long-running audit"
+      },
+      {
+        "type": "action",
+        "description": "Stop the running audit"
+      },
+      {
+        "type": "action",
+        "description": "Resume the audit from the saved checkpoint"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the audit resumes from the saved checkpoint"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify completed controls are not reprocessed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Stop an active audit and confirm it is unblocked",
+    "description": "This test verifies that a user can stop an active audit and then see the session transition to a stopped or unblocked state.",
+    "category": "Audit Stop & Unblock Lifecycle",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the audit session page for an active audit"
+      },
+      {
+        "type": "action",
+        "description": "Stop the active audit"
+      },
+      {
+        "type": "action",
+        "description": "Open the audit session status view"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the session is shown as stopped or unblocked"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the session remains available for later management"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Resume an audit from the latest saved checkpoint",
+    "description": "This test verifies that a stopped audit can resume from its latest saved checkpoint and continue from the saved progress point.",
+    "category": "Resume Audit from Exact Checkpoint",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to a stopped audit session page"
+      },
+      {
+        "type": "action",
+        "description": "Resume the audit from the saved checkpoint"
+      },
+      {
+        "type": "action",
+        "description": "Open the audit session status view"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the session shows resumed execution"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the saved checkpoint progress is preserved"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Prevent stopping a session owned by another tenant",
+    "description": "This test verifies that a tenant cannot stop an audit session belonging to another tenant and that protected session metadata remains inaccessible.",
+    "category": "Audit Stop & Unblock Lifecycle",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the audit session page for a session owned by another tenant"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to stop the protected session"
+      },
+      {
+        "type": "action",
+        "description": "Open the audit session status view"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify access to the protected session is denied"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the stop action is not accepted"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Generate ISO findings from uploaded policy evidence",
+    "description": "Verifies that a user can upload ISO policy and evidence documents and start an audit that returns generated ISO 27001 findings.",
+    "category": "ISO 27001 RAG Flow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Upload valid ISO policy and evidence documents"
+      },
+      {
+        "type": "action",
+        "description": "Start the ISO 27001 audit"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify ISO 27001 findings are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the audit run is shown as completed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Generate VAPT findings with severity and control mapping",
+    "description": "Verifies that uploaded VAPT scan logs produce technical findings with extracted proof, severity scoring, and control mappings.",
+    "category": "VAPT Technical RAG Flow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Upload valid VAPT scan logs and technical evidence"
+      },
+      {
+        "type": "action",
+        "description": "Start the VAPT analysis"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify VAPT findings are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify severity scoring and control mappings are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "Prevent feedback export without authorization",
+    "description": "This test verifies that feedback export is blocked when no authorization is present and no feedback data is returned.",
+    "category": "Knowledge Loop Feedback Export",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the feedback export view without being authenticated"
+      },
+      {
+        "type": "action",
+        "description": "Request a feedback export"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify access is denied"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no feedback data is returned"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Import valid feedback and export sanitized records",
+    "description": "This verifies that a valid feedback import succeeds and the exported feedback contains normalized records with sensitive data redacted.",
+    "category": "Knowledge Loop Feedback Import & PII Redaction",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /feedback-import"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a valid feedback JSON file with one well-formed record containing email, IP, and phone values"
+      },
+      {
+        "type": "action",
+        "description": "Submit the feedback import"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to export feedback"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the exported feedback shows sanitized records"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify sensitive values are redacted"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Show checkpoint progress for a running ISO audit",
+    "description": "Verifies that a multi-control ISO audit exposes checkpoint progress while it is still running.",
+    "category": "Granular Audit Checkpointing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Upload valid ISO policy and evidence documents"
+      },
+      {
+        "type": "action",
+        "description": "Start the ISO 27001 audit"
+      },
+      {
+        "type": "action",
+        "description": "Open the session status view"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify checkpoint progress is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify completed and total control counts are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC010",
+    "title": "Export auditor feedback as JSON",
+    "description": "This test verifies that a permitted user can export feedback and receive a valid JSON export containing feedback records or calibration data.",
+    "category": "Knowledge Loop Feedback Export",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the feedback export view"
+      },
+      {
+        "type": "action",
+        "description": "Request a feedback export"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a JSON export is returned"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify feedback records or calibration examples are included"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC011",
+    "title": "Redact personal data before feedback is retained",
+    "description": "This verifies that imported feedback containing emails, IP addresses, and phone numbers is stored only in redacted form for future use.",
+    "category": "Knowledge Loop Feedback Import & PII Redaction",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /feedback-import"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a valid feedback JSON file containing email, IP, and phone values"
+      },
+      {
+        "type": "action",
+        "description": "Submit the feedback import"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to export feedback"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the exported feedback contains redacted personal data"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify sanitized feedback records are available for reuse"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC012",
+    "title": "Export auditor feedback and import sanitized unique records",
+    "description": "Verifies that exported feedback can be re-imported with duplicates and PII removed while only unique sanitized records are retained.",
+    "category": "ISO 27001 RAG Flow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the feedback export view"
+      },
+      {
+        "type": "action",
+        "description": "Export auditor feedback"
+      },
+      {
+        "type": "action",
+        "description": "Import a feedback file containing duplicate records and PII"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify imported feedback is sanitized"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify only unique feedback records are retained"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC013",
+    "title": "Reject resuming an audit with no saved checkpoint",
+    "description": "This test verifies that resuming without checkpoint data is rejected and nothing is resumed for the session.",
+    "category": "Resume Audit from Exact Checkpoint",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to an audit session page with no checkpoint data"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to resume the session from checkpoint"
+      },
+      {
+        "type": "action",
+        "description": "Open the audit session status view"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the session is not resumed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an error state is shown for missing checkpoint data"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC014",
+    "title": "Prevent duplicate feedback records from being retained",
+    "description": "This verifies that importing duplicate feedback entries does not create duplicate retained records in the exported feedback.",
+    "category": "Knowledge Loop Feedback Import & PII Redaction",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /feedback-import"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a feedback JSON file containing duplicate entries for the same feedback"
+      },
+      {
+        "type": "action",
+        "description": "Submit the feedback import"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to export feedback"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify only unique feedback records are retained"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify duplicate feedback entries are not present"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC015",
+    "title": "Import feedback with duplicates while preserving a single sanitized record",
+    "description": "This verifies that duplicate feedback entries are deduplicated and the retained export remains normalized and redacted.",
+    "category": "Knowledge Loop Feedback Import & PII Redaction",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /feedback-import"
+      },
+      {
+        "type": "action",
+        "description": "Fill in a valid feedback JSON file containing multiple duplicate records and PII"
+      },
+      {
+        "type": "action",
+        "description": "Submit the feedback import"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to export feedback"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the exported feedback contains only one retained copy of each record"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the retained records are sanitized"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC016",
+    "title": "Block ISO audit start without usable evidence",
+    "description": "Verifies that malformed or unsupported ISO upload content does not allow an audit to start and that a validation error is shown.",
+    "category": "ISO 27001 RAG Flow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Upload malformed or unsupported ISO document data"
+      },
+      {
+        "type": "action",
+        "description": "Start the ISO 27001 audit"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an upload validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the audit does not start"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC017",
+    "title": "Block resuming a session without access or a valid session reference",
+    "description": "This test verifies that an invalid or unauthorized resume request is rejected and does not expose session progress.",
+    "category": "Resume Audit from Exact Checkpoint",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the resume checkpoint view"
+      },
+      {
+        "type": "action",
+        "description": "Attempt to resume using an invalid or unauthorized session reference"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the resume action is rejected"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify session progress is not revealed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC018",
+    "title": "Reject corrupted VAPT input before analysis starts",
+    "description": "Verifies that corrupted or unsupported VAPT input is rejected and does not proceed to technical analysis.",
+    "category": "VAPT Technical RAG Flow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Upload corrupted or malicious VAPT log content"
+      },
+      {
+        "type": "action",
+        "description": "Start the VAPT analysis"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an ingestion validation error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the technical analysis does not start"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC019",
+    "title": "Export an empty feedback set for a tenant with no records",
+    "description": "This test verifies that a tenant with no feedback records receives an empty export payload rather than an invalid result.",
+    "category": "Knowledge Loop Feedback Export",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to the feedback export view for a tenant with no records"
+      },
+      {
+        "type": "action",
+        "description": "Request a feedback export"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the export completes successfully"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the export payload is empty"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC020",
+    "title": "Handle an empty feedback export state",
+    "description": "Verifies that exporting feedback when none exists shows an empty state and does not create invalid feedback data.",
+    "category": "ISO 27001 RAG Flow",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the feedback export view"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty feedback state is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no exportable feedback records are shown"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC021",
+    "title": "Reject invalid feedback file formats",
+    "description": "This verifies that importing malformed JSON or an unsupported feedback file format is rejected with a validation error.",
+    "category": "Knowledge Loop Feedback Import & PII Redaction",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /feedback-import"
+      },
+      {
+        "type": "action",
+        "description": "Fill in an invalid JSON feedback file"
+      },
+      {
+        "type": "action",
+        "description": "Submit the feedback import"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a feedback validation error is visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC022",
+    "title": "Show unauthorized access for protected audit status",
+    "description": "Verifies that an unauthorized user cannot view protected audit status information.",
+    "category": "Granular Audit Checkpointing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the login field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open the audit status view for a protected session"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an access denied message is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify checkpoint metadata is not displayed"
+      }
+    ],
+    "priority": "Low"
+  }
+]

@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Ingestion & RAG Retrieval — Animated Workflows</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #080b11;
+            --card-bg: rgba(15, 23, 42, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-purple: #8b5cf6;
+            --accent-orange: #f59e0b;
+            --accent-red: #ef4444;
+            --glow-blue: rgba(59, 130, 246, 0.35);
+            --glow-green: rgba(16, 185, 129, 0.35);
+            --glow-purple: rgba(139, 92, 246, 0.35);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.08) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.08) 0px, transparent 50%),
+                radial-gradient(at 50% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 30px;
+            overflow-x: hidden;
+        }
+
+        /* ── HEADER ── */
+        header {
+            max-width: 1400px;
+            margin: 0 auto 30px auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 24px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-icon {
+            font-size: 2.5rem;
+            filter: drop-shadow(0 0 12px var(--glow-blue));
+        }
+
+        .logo-text h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #60a5fa, #8b5cf6, #34d399);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-text p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            margin-top: 2px;
+        }
+
+        /* ── TABS AND CONTROLS ── */
+        .controls-bar {
+            display: flex;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            padding: 6px;
+            border-radius: 12px;
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .tab-btn:hover {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .tab-btn.active {
+            color: var(--text-primary);
+            background: var(--accent-blue);
+            box-shadow: 0 4px 15px var(--glow-blue);
+        }
+
+        .tab-btn.active.excel-mode {
+            background: var(--accent-green);
+            box-shadow: 0 4px 15px var(--glow-green);
+        }
+
+        /* ── MAIN LAYOUT ── */
+        .workspace {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 30px;
+        }
+
+        /* ── SIDE PANEL ── */
+        .side-panel {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 24px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 45px rgba(0, 0, 0, 0.4);
+            height: fit-content;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+        }
+
+        .side-panel h3 {
+            font-size: 1.2rem;
+            font-weight: 700;
+            border-bottom: 1px dashed var(--border-color);
+            padding-bottom: 12px;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sim-status-box {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 18px;
+            min-height: 180px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .sim-step-num {
+            font-size: 0.75rem;
+            font-weight: 800;
+            color: var(--accent-blue);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+        }
+
+        .excel-mode-text .sim-step-num {
+            color: var(--accent-green);
+        }
+
+        .sim-step-title {
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .sim-step-desc {
+            font-size: 0.88rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+
+        .actions-box {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn-action {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 12px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-action:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .btn-action-primary {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            border: none;
+            box-shadow: 0 4px 15px var(--glow-blue);
+        }
+
+        .btn-action-primary:hover {
+            background: linear-gradient(135deg, #60a5fa, #2563eb);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
+        }
+
+        .excel-primary-style {
+            background: linear-gradient(135deg, #10b981, #047857) !important;
+            box-shadow: 0 4px 15px var(--glow-green) !important;
+        }
+        .excel-primary-style:hover {
+            background: linear-gradient(135deg, #34d399, #059669) !important;
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
+        }
+
+        /* ── VISUALIZER SCREEN ── */
+        .visual-area {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 30px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 45px rgba(0, 0, 0, 0.4);
+            min-height: 580px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        /* ── SCENE: EXCEL PIPELINE ── */
+        .scene {
+            display: none;
+            width: 100%;
+            height: 100%;
+            flex-grow: 1;
+            position: relative;
+        }
+
+        .scene.active {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .excel-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 30px;
+            flex-grow: 1;
+        }
+
+        /* Excel Sheet Container */
+        .sheet-container {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .sheet-title {
+            font-size: 0.8rem;
+            color: var(--accent-green);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sheet-rows {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            position: relative;
+        }
+
+        .sheet-row {
+            display: grid;
+            grid-template-columns: 45px 1fr 1fr 1fr;
+            gap: 8px;
+            padding: 6px 8px;
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            border-radius: 4px;
+            font-size: 0.78rem;
+            transition: all 0.3s ease;
+        }
+
+        .sheet-row.header {
+            background: rgba(16, 185, 129, 0.08) !important;
+            border-color: rgba(16, 185, 129, 0.2) !important;
+            font-weight: 700;
+            color: #a7f3d0;
+        }
+
+        .row-num {
+            color: var(--text-secondary);
+            font-weight: 600;
+            text-align: center;
+        }
+
+        /* Sliding window overlay */
+        .sliding-window {
+            position: absolute;
+            left: -2px;
+            width: calc(100% + 4px);
+            border: 2px solid var(--accent-green);
+            background: rgba(16, 185, 129, 0.06);
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.2), inset 0 0 10px rgba(16, 185, 129, 0.1);
+            border-radius: 6px;
+            pointer-events: none;
+            z-index: 5;
+            transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            opacity: 0;
+        }
+
+        /* Database Target Storage */
+        .db-target-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .db-vault {
+            border: 2px dashed var(--border-color);
+            background: rgba(255, 255, 255, 0.01);
+            border-radius: 12px;
+            padding: 16px;
+            flex-grow: 1;
+            min-height: 250px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            position: relative;
+        }
+
+        .db-vault.active-glow {
+            border-color: var(--accent-green);
+            background: rgba(16, 185, 129, 0.02);
+            box-shadow: 0 0 20px rgba(16, 185, 129, 0.05);
+        }
+
+        .db-vault-title {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 700;
+            text-transform: uppercase;
+            text-align: center;
+            margin-bottom: 5px;
+        }
+
+        .db-chunk-card {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--border-color);
+            border-left: 3px solid var(--accent-green);
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 0.72rem;
+            line-height: 1.4;
+            opacity: 0;
+            transform: translateX(30px);
+            animation: slideInChunk 0.4s ease forwards;
+        }
+
+        @keyframes slideInChunk {
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .db-chunk-card .meta {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+            font-weight: 600;
+        }
+
+        .db-chunk-card .header-ref {
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+
+        /* Step size badge indicator */
+        .size-indicator-badge {
+            background: rgba(15, 23, 42, 0.9);
+            border: 1px solid var(--accent-green);
+            color: var(--text-primary);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .size-indicator-badge.warn {
+            border-color: var(--accent-orange);
+            color: var(--accent-orange);
+        }
+
+        /* ── SCENE: RAG PIPELINE ── */
+        .rag-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            flex-grow: 1;
+        }
+
+        .rag-stage-column {
+            background: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            position: relative;
+        }
+
+        .rag-stage-title {
+            font-size: 0.8rem;
+            color: var(--accent-purple);
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+        }
+
+        .query-box-display {
+            background: rgba(139, 92, 246, 0.06);
+            border: 1px solid rgba(139, 92, 246, 0.2);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.85rem;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .keyword-pill-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .keyword-pill {
+            padding: 4px 8px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            transition: all 0.3s ease;
+            opacity: 0;
+            transform: scale(0.8);
+        }
+
+        .keyword-pill.active {
+            opacity: 1;
+            transform: scale(1);
+            background: rgba(139, 92, 246, 0.15);
+            border-color: var(--accent-purple);
+            color: var(--text-primary);
+        }
+
+        .keyword-pill.synonym {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+        }
+
+        /* Candidates list */
+        .candidate-chunks-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            overflow-y: auto;
+            max-height: 350px;
+        }
+
+        .candidate-chunk-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 0.72rem;
+            position: relative;
+            transition: all 0.4s ease;
+        }
+
+        .candidate-chunk-item.scoring {
+            border-color: var(--accent-orange);
+            background: rgba(245, 158, 11, 0.03);
+        }
+
+        .candidate-chunk-item.duplicate {
+            opacity: 0.2;
+            border-color: var(--accent-red);
+            text-decoration: line-through;
+            transform: scale(0.96);
+        }
+
+        .candidate-chunk-item.selected {
+            border-color: var(--accent-purple);
+            background: rgba(139, 92, 246, 0.05);
+        }
+
+        .candidate-chunk-item .score-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid var(--accent-orange);
+            color: #fcd34d;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-weight: 700;
+            font-size: 0.65rem;
+        }
+
+        .candidate-chunk-item.selected .score-badge {
+            background: rgba(139, 92, 246, 0.15);
+            border-color: var(--accent-purple);
+            color: #d8b4fe;
+        }
+
+        .token-budget-bar-container {
+            margin-top: auto;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px;
+        }
+
+        .token-budget-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+            color: var(--text-secondary);
+        }
+
+        .token-bar-outer {
+            height: 10px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 5px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .token-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+            border-radius: 5px;
+            transition: width 0.5s ease;
+        }
+
+        .token-limit-marker {
+            position: absolute;
+            right: 20%;
+            top: 0;
+            width: 2px;
+            height: 100%;
+            background: var(--accent-orange);
+        }
+
+        /* ── CONNECTION ARROWS ── */
+        .arrow-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            z-index: 10;
+        }
+
+        .arrow-indicator.animated {
+            animation: arrowPulse 1.5s infinite;
+        }
+
+        @keyframes arrowPulse {
+            0% { transform: translate(-50%, -50%) scale(1); box-shadow: 0 0 0 0 rgba(255,255,255,0.1); }
+            70% { transform: translate(-50%, -50%) scale(1.1); box-shadow: 0 0 0 8px rgba(255,255,255,0); }
+            100% { transform: translate(-50%, -50%) scale(1); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ── HEADER ── -->
+    <header>
+        <div class="logo-area">
+            <div class="logo-icon">📂</div>
+            <div class="logo-text">
+                <h1>RAG & Ingestion Visualizer</h1>
+                <p>Interactive simulations of technical processing logic</p>
+            </div>
+        </div>
+        <div class="controls-bar">
+            <button class="tab-btn active excel-mode" id="tab-excel" onclick="switchTab('excel')">
+                🟩 Excel Adaptive Chunking
+            </button>
+            <button class="tab-btn" id="tab-rag" onclick="switchTab('rag')">
+                🟪 RAG Retrieval Pipeline
+            </button>
+        </div>
+    </header>
+
+    <!-- ── WORKSPACE ── -->
+    <div class="workspace">
+        
+        <!-- SIDE PANEL CONTROL -->
+        <div class="side-panel" id="side-panel-container">
+            <h3 id="panel-title">
+                🟩 Excel Ingest
+            </h3>
+            <div class="sim-status-box" id="sim-status-box">
+                <div>
+                    <div class="sim-step-num" id="step-number">Step 0</div>
+                    <div class="sim-step-title" id="step-title">Standby</div>
+                    <div class="sim-step-desc" id="step-description">
+                        Select a step below or run the automatic simulation to play the ingestion pipeline.
+                    </div>
+                </div>
+            </div>
+            
+            <div class="actions-box">
+                <button class="btn-action btn-action-primary excel-primary-style" id="btn-play" onclick="playAutoSimulation()">
+                    ▶ Play Simulation
+                </button>
+                <button class="btn-action" id="btn-next" onclick="nextStep()">
+                    Step-by-Step ⏭
+                </button>
+                <button class="btn-action" id="btn-reset" onclick="resetPipeline()">
+                    Reset 🔄
+                </button>
+            </div>
+        </div>
+
+        <!-- VISUALIZER AREA -->
+        <div class="visual-area">
+            
+            <!-- SCENE 1: EXCEL PIPELINE -->
+            <div class="scene active" id="scene-excel">
+                <div class="excel-grid">
+                    <!-- Left: Sheet rows visual -->
+                    <div class="sheet-container">
+                        <div class="sheet-title">
+                            <span>📄 Asset_Assessment_V3.xlsx (Rows)</span>
+                            <span style="color: var(--text-secondary); font-size: 0.7rem;">Adaptive Windows</span>
+                        </div>
+                        <div class="sheet-rows" id="excel-rows-list">
+                            <!-- Rows generated programmatically by JS -->
+                        </div>
+                        <!-- Sliding Window Overlay -->
+                        <div class="sliding-window" id="excel-window-overlay"></div>
+                    </div>
+                    
+                    <!-- Right: Stored Db Chunks -->
+                    <div class="db-target-container">
+                        <div class="db-vault" id="db-vault-element">
+                            <div class="db-vault-title">💾 SQLite Database (DocumentChunk Table)</div>
+                            <div id="db-chunks-list" style="display: flex; flex-direction: column; gap: 8px;">
+                                <!-- Chunks fly in here -->
+                            </div>
+                            <!-- Character constraint alert -->
+                            <div class="size-indicator-badge" id="size-indicator">
+                                📏 Character Count Check: <span id="size-value">0</span> / 3000 chars
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SCENE 2: RAG PIPELINE -->
+            <div class="scene" id="scene-rag">
+                <div class="rag-grid">
+                    <!-- Left Column: Input Query & Expanded Keywords -->
+                    <div class="rag-stage-column">
+                        <div class="rag-stage-title">🔍 Step 1: Input Control & Keyword Expansion</div>
+                        <div class="query-box-display">
+                            <span style="font-weight: 700; font-size: 0.72rem; color: var(--accent-purple); text-transform: uppercase;">Target Control:</span>
+                            <span id="rag-query-text" style="font-weight: 500; line-height: 1.4;">"ISO A.9.1: Enforce strong multi-factor authentication (MFA) credentials and access checks on administrative systems."</span>
+                        </div>
+                        
+                        <div style="margin-top: 10px;">
+                            <span style="font-size: 0.75rem; font-weight: 700; color: var(--text-secondary); display: block; margin-bottom: 6px;">Extracted Base Keywords (Weight = 3):</span>
+                            <div class="keyword-pill-container" id="base-keywords-container">
+                                <!-- Base pills -->
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 5px;">
+                            <span style="font-size: 0.75rem; font-weight: 700; color: var(--accent-blue); display: block; margin-bottom: 6px;">Synonym Expanded Keywords (Weight = 1.5):</span>
+                            <div class="keyword-pill-container" id="synonym-keywords-container">
+                                <!-- Synonym pills -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Database Candidates & Final Context Assembly -->
+                    <div class="rag-stage-column">
+                        <div class="rag-stage-title" id="stage-right-title">📁 Step 2: Database Scoring & Filtering</div>
+                        
+                        <div class="candidate-chunks-list" id="candidates-list">
+                            <!-- DB items marked with scores, duplicates, etc. -->
+                        </div>
+
+                        <!-- Token Budget Bar -->
+                        <div class="token-budget-bar-container">
+                            <div class="token-budget-header">
+                                <span>Context Budget (tokens)</span>
+                                <span id="token-budget-value">0 / 1500 tokens</span>
+                            </div>
+                            <div class="token-bar-outer">
+                                <div class="token-bar-fill" id="token-bar-fill-element"></div>
+                                <div class="token-limit-marker" title="Target Context Budget (1500 tokens)"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- SCRIPT FOR SIMULATION LOGIC -->
+    <script>
+        let currentTab = 'excel';
+        let currentStepIndex = 0;
+        let simInterval = null;
+        let isSimPlaying = false;
+
+        // Mock data structures
+        const excelRows = [
+            { num: 'H', desc: 'Asset ID', info: 'Asset Owner', val: 'Classification', isHeader: true },
+            { num: 1, desc: 'SRV-01', info: 'IT Dept', val: 'Confidential (DB Host)' },
+            { num: 2, desc: 'SRV-02', info: 'HR Dept', val: 'Internal (Leave Mgmt)' },
+            { num: 3, desc: 'SRV-03', info: 'Sec Ops', val: 'Restricted (SIEM Core)' },
+            { num: 4, desc: 'SRV-04', info: 'Dev Ops', val: 'Internal (Git Lab)' },
+            { num: 5, desc: 'SRV-05', info: 'Finc Dept', val: 'Confidential (Billing)' },
+            { num: 6, desc: 'SRV-06', info: 'Sec Ops', val: 'Restricted (MFA Host)' },
+            { num: 7, desc: 'SRV-07', info: 'Support', val: 'Internal (CRM Tool)' },
+            { num: 8, desc: 'SRV-08', info: 'Sales Dept', val: 'Public (Marketing)' },
+            { num: 9, desc: 'SRV-09', info: 'IT Dept', val: 'Confidential (Directory)' },
+            { num: 10, desc: 'SRV-10', info: 'Finc Dept', val: 'Restricted (Auditing)' },
+            { num: 11, desc: 'SRV-11', info: 'R&D Lab', val: 'Confidential (Patent Docs) **VERY LONG VALUE** - This row contains custom technical specification details, asset registration codes, server vulnerabilities patches status, owner notes, and key physical lock logs.' },
+            { num: 12, desc: 'SRV-12', info: 'IT Dept', val: 'Internal (Log Mirror)' },
+            { num: 13, desc: 'SRV-13', info: 'Sec Ops', val: 'Restricted (Keys HSM)' },
+            { num: 14, desc: 'SRV-14', info: 'R&D Lab', val: 'Internal (Build Server)' },
+            { num: 15, desc: 'SRV-15', info: 'Sales Dept', val: 'Public (Events Site)' }
+        ];
+
+        const baseKeywords = ["mfa", "credentials", "access", "administrative", "systems"];
+        const synonymKeywords = ["password", "login", "2fa", "keycard", "badge", "token", "admin", "superuser", "root", "elevated", "escort"];
+
+        const databaseChunks = [
+            { id: 'chunk_8a12bc', doc: 'Access_Control_Policy.pdf', content: 'Section 4.1: Access controls for root accounts. Administrators must use MFA/2FA keycards to connect to SRV-01, SRV-03, and SRV-05.', type: 'pdf', baseScore: 9 },
+            { id: 'chunk_3f290d', doc: 'Access_Control_Policy.pdf', content: 'Section 4.1: Access controls for root accounts. Administrators must use MFA/2FA keycards to connect to SRV-01, SRV-03, and SRV-05.', type: 'pdf', baseScore: 9, isDuplicate: true }, // Exact duplicate
+            { id: 'chunk_7c38ae', doc: 'Risk_Register_Asset_V3.xlsx', content: 'Sheet: Risk Register | Rows 9-15. Headers: Asset ID, Owner, Classification. Contains directory server SRV-09 (Confidential) and R&D patent server SRV-11.', type: 'xlsx', baseScore: 4.5 },
+            { id: 'chunk_12d49e', doc: 'MFA_Implementation_Guide.txt', content: 'All server credential modifications must trigger event logs in SIEM and enforce OTP verification via mobile application token.', type: 'txt', baseScore: 6 },
+            { id: 'chunk_bc9842', doc: 'Facility_Access_Policy.pdf', content: 'Physical lobby sign-in logbooks require guest badges and escort by sponsor. tailgating in server rooms is strictly prohibited.', type: 'pdf', baseScore: 1.5 }
+        ];
+
+        // Pipeline step definitions
+        const excelSteps = [
+            {
+                title: "Initialize Spreadsheet Parser",
+                desc: "Load the spreadsheet using <b>Pandas</b>. Identify sheet structures and read raw data. Set default chunk parameters to 15 rows with 3 rows overlap.",
+                action: () => {
+                    document.getElementById('excel-window-overlay').style.opacity = 0;
+                    document.getElementById('db-chunks-list').innerHTML = "";
+                    document.getElementById('size-indicator').style.opacity = 0;
+                }
+            },
+            {
+                title: "Prepend Header Context",
+                desc: "Read the table header: <code>Asset ID | Asset Owner | Classification</code>. This row text is preserved and prepended to all subsequent text chunks to prevent the LLM from losing column names.",
+                action: () => {
+                    const row1 = document.querySelector('.sheet-row.header');
+                    row1.style.background = 'rgba(16, 185, 129, 0.3)';
+                    setTimeout(() => {
+                        row1.style.background = '';
+                    }, 800);
+                }
+            },
+            {
+                title: "First Chunk Window (Rows 1-10)",
+                desc: "Process sliding window: Rows 1 to 10. The text size check is under 3000 chars. The window fits securely.",
+                action: () => {
+                    positionSlidingWindow(1, 10);
+                    showSizeIndicator(1850, false);
+                    addDbChunk("chunk_df11a0", "Asset_Assessment_V3.xlsx", "Sheet: Rows 1-10. Headers: Asset ID... Contains SRV-01 through SRV-10 classifications.", "xlsx", 1, 10);
+                }
+            },
+            {
+                title: "Window Size Constraint Hit (Adaptive)",
+                desc: "Window shifts with 3 rows overlap (Rows 8-15). However, Row 11 contains **extremely long text**. The engine detects character length is <b>3,540 chars (exceeding the 3000 chars limit)</b>.",
+                action: () => {
+                    positionSlidingWindow(8, 15);
+                    showSizeIndicator(3540, true);
+                    const row11 = document.getElementById('row-idx-11');
+                    row11.style.borderColor = 'var(--accent-orange)';
+                    row11.style.background = 'rgba(245, 158, 11, 0.1)';
+                }
+            },
+            {
+                title: "Adaptive Chunk Split Triggered",
+                desc: "To prevent token overflow, the window size is dynamically halved down to 4 rows. The size check is re-run and drops below the 3,000 character limit.",
+                action: () => {
+                    positionSlidingWindow(8, 11);
+                    showSizeIndicator(2640, false);
+                    const row11 = document.getElementById('row-idx-11');
+                    row11.style.borderColor = '';
+                    row11.style.background = '';
+                    addDbChunk("chunk_49a9bc", "Asset_Assessment_V3.xlsx", "Sheet: Rows 8-11. Headers: Asset ID... Contains Sales event sites, IT logs, and long details for R&D lab.", "xlsx", 8, 11);
+                }
+            },
+            {
+                title: "Next Overlapping Chunk (Rows 9-15)",
+                desc: "The window resumes processing remaining rows (Rows 9 to 15) with safety margin check. All row content is now successfully stored in database tables.",
+                action: () => {
+                    positionSlidingWindow(9, 15);
+                    showSizeIndicator(1420, false);
+                    addDbChunk("chunk_bc581e", "Asset_Assessment_V3.xlsx", "Sheet: Rows 9-15. Headers: Asset ID... Directory mapping, keys HSM, and events site configs.", "xlsx", 9, 15);
+                }
+            }
+        ];
+
+        const ragSteps = [
+            {
+                title: "Analyze Query & Extract Keywords",
+                desc: "Parse target compliance control requirement. Tokenize base keywords (weight = 3) and search text criteria.",
+                action: () => {
+                    document.getElementById('base-keywords-container').innerHTML = "";
+                    document.getElementById('synonym-keywords-container').innerHTML = "";
+                    document.getElementById('candidates-list').innerHTML = "";
+                    updateTokenBar(0);
+                    
+                    baseKeywords.forEach((kw, i) => {
+                        setTimeout(() => {
+                            addKeywordPill('base-keywords-container', kw, false);
+                        }, i * 200);
+                    });
+                }
+            },
+            {
+                title: "Expand Search with Synonym Rules",
+                desc: "Check the local <b>Synonym Registry</b> for matching terms (e.g., 'mfa' expands to '2fa', 'password', 'login'; 'administrative' maps to 'admin', 'superuser'). These synonym terms are assigned a weight of 1.5.",
+                action: () => {
+                    synonymKeywords.slice(0, 6).forEach((kw, i) => {
+                        setTimeout(() => {
+                            addKeywordPill('synonym-keywords-container', kw, true);
+                        }, i * 150);
+                    });
+                }
+            },
+            {
+                title: "Calculate Retrieval Scores",
+                desc: "Score all document chunks in database tables by multiplying match counts of search queries and synonyms. High-matching chunks float to the top.",
+                action: () => {
+                    document.getElementById('candidates-list').innerHTML = "";
+                    databaseChunks.forEach((item) => {
+                        addCandidateItem(item, 'scoring');
+                    });
+                }
+            },
+            {
+                title: "Filter Exact & Near-Duplicates",
+                desc: "Verify candidates. The exact copy is removed instantly. The system also runs Jaccard Similarity checks to discard redundant overlapping paragraphs (similarity threshold $\ge$ 97%).",
+                action: () => {
+                    const items = document.querySelectorAll('.candidate-chunk-item');
+                    items.forEach((div, idx) => {
+                        const originalItem = databaseChunks[idx];
+                        if (originalItem.isDuplicate) {
+                            div.className = "candidate-chunk-item duplicate";
+                        } else {
+                            div.className = "candidate-chunk-item selected";
+                        }
+                    });
+                }
+            },
+            {
+                title: "Enforce Evidence Diversity & Accumulate Budget",
+                desc: "To guarantee diverse multi-doc evidence, the engine checks representations. It filters out non-duplicate high scores and populates the token context under the 1500-token threshold.",
+                action: () => {
+                    const items = document.querySelectorAll('.candidate-chunk-item');
+                    let tokens = 0;
+                    items.forEach((div, idx) => {
+                        const originalItem = databaseChunks[idx];
+                        if (!originalItem.isDuplicate && originalItem.baseScore > 2) {
+                            div.className = "candidate-chunk-item selected";
+                            tokens += 380;
+                        } else if (!originalItem.isDuplicate) {
+                            div.className = "candidate-chunk-item";
+                        }
+                    });
+                    updateTokenBar(tokens);
+                }
+            }
+        ];
+
+        // Initialize view
+        window.onload = () => {
+            renderExcelRows();
+            resetPipeline();
+        };
+
+        function switchTab(tab) {
+            currentTab = tab;
+            resetPipeline();
+            
+            const tabExcel = document.getElementById('tab-excel');
+            const tabRag = document.getElementById('tab-rag');
+            const sceneExcel = document.getElementById('scene-excel');
+            const sceneRag = document.getElementById('scene-rag');
+            
+            const panelTitle = document.getElementById('panel-title');
+            const btnPlay = document.getElementById('btn-play');
+
+            if (tab === 'excel') {
+                tabExcel.className = 'tab-btn active excel-mode';
+                tabRag.className = 'tab-btn';
+                sceneExcel.className = 'scene active';
+                sceneRag.className = 'scene';
+                panelTitle.innerHTML = '🟩 Excel Ingest';
+                btnPlay.className = 'btn-action btn-action-primary excel-primary-style';
+            } else {
+                tabExcel.className = 'tab-btn';
+                tabRag.className = 'tab-btn active';
+                sceneExcel.className = 'scene';
+                sceneRag.className = 'scene active';
+                panelTitle.innerHTML = '🟪 RAG Retrieval';
+                btnPlay.className = 'btn-action btn-action-primary';
+            }
+        }
+
+        function renderExcelRows() {
+            const list = document.getElementById('excel-rows-list');
+            list.innerHTML = '';
+            excelRows.forEach((row, i) => {
+                const div = document.createElement('div');
+                div.className = row.isHeader ? 'sheet-row header' : 'sheet-row';
+                div.id = `row-idx-${i}`;
+                div.innerHTML = `
+                    <div class="row-num">${row.num}</div>
+                    <div>${row.desc}</div>
+                    <div>${row.info}</div>
+                    <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${row.val}</div>
+                `;
+                list.appendChild(div);
+            });
+        }
+
+        function positionSlidingWindow(startIdx, endIdx) {
+            const startEl = document.getElementById(`row-idx-${startIdx}`);
+            const endEl = document.getElementById(`row-idx-${endIdx}`);
+            const overlay = document.getElementById('excel-window-overlay');
+            
+            if (startEl && endEl) {
+                const parentRect = startEl.parentNode.getBoundingClientRect();
+                const startRect = startEl.getBoundingClientRect();
+                const endRect = endEl.getBoundingClientRect();
+                
+                const top = startRect.top - parentRect.top;
+                const bottom = endRect.bottom - parentRect.top;
+                const height = bottom - top;
+                
+                overlay.style.top = `${top}px`;
+                overlay.style.height = `${height}px`;
+                overlay.style.opacity = 1;
+            }
+        }
+
+        function showSizeIndicator(chars, isWarn) {
+            const badge = document.getElementById('size-indicator');
+            const valSpan = document.getElementById('size-value');
+            valSpan.innerText = chars;
+            badge.style.opacity = 1;
+            if (isWarn) {
+                badge.className = "size-indicator-badge warn";
+            } else {
+                badge.className = "size-indicator-badge";
+            }
+        }
+
+        function addDbChunk(id, filename, content, type, startRow, endRow) {
+            const list = document.getElementById('db-chunks-list');
+            const card = document.createElement('div');
+            card.className = 'db-chunk-card';
+            card.innerHTML = `
+                <div class="meta">
+                    <span>ID: ${id}</span>
+                    <span>Rows ${startRow}-${endRow}</span>
+                </div>
+                <div>${content}</div>
+                <div class="meta" style="margin-top: 5px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 4px;">
+                    <span class="header-ref">Headers Prepend: OK</span>
+                    <span style="color: var(--accent-green); font-weight: bold;">STORED</span>
+                </div>
+            `;
+            list.appendChild(card);
+            
+            // Auto scroll container
+            const vault = document.getElementById('db-vault-element');
+            vault.scrollTop = vault.scrollHeight;
+        }
+
+        function addKeywordPill(containerId, text, isSynonym) {
+            const container = document.getElementById(containerId);
+            const pill = document.createElement('div');
+            pill.className = isSynonym ? 'keyword-pill active synonym' : 'keyword-pill active';
+            pill.innerText = text;
+            container.appendChild(pill);
+        }
+
+        function addCandidateItem(item, stateClass) {
+            const list = document.getElementById('candidates-list');
+            const div = document.createElement('div');
+            div.className = `candidate-chunk-item ${stateClass}`;
+            div.innerHTML = `
+                <div class="score-badge">Relevance: ${item.baseScore}</div>
+                <div style="font-weight: 700; color: var(--text-secondary); font-size: 0.65rem; margin-bottom: 4px;">Source: ${item.doc}</div>
+                <div>${item.content}</div>
+            `;
+            list.appendChild(div);
+        }
+
+        function updateTokenBar(tokens) {
+            const val = document.getElementById('token-budget-value');
+            const fill = document.getElementById('token-bar-fill-element');
+            val.innerText = `${tokens} / 1500 tokens`;
+            const pct = Math.min(100, (tokens / 1500) * 80); // max 80% to fit limit display
+            fill.style.width = `${pct}%`;
+        }
+
+        function playAutoSimulation() {
+            if (isSimPlaying) {
+                clearInterval(simInterval);
+                isSimPlaying = false;
+                document.getElementById('btn-play').innerText = "▶ Play Simulation";
+                return;
+            }
+
+            isSimPlaying = true;
+            document.getElementById('btn-play').innerText = "⏸ Pause Simulation";
+            
+            simInterval = setInterval(() => {
+                nextStep();
+                const stepsLength = currentTab === 'excel' ? excelSteps.length : ragSteps.length;
+                if (currentStepIndex >= stepsLength - 1) {
+                    clearInterval(simInterval);
+                    isSimPlaying = false;
+                    document.getElementById('btn-play').innerText = "▶ Play Simulation";
+                }
+            }, 2000);
+        }
+
+        function nextStep() {
+            const steps = currentTab === 'excel' ? excelSteps : ragSteps;
+            if (currentStepIndex < steps.length) {
+                const step = steps[currentStepIndex];
+                
+                document.getElementById('step-number').innerText = `Step ${currentStepIndex + 1}`;
+                document.getElementById('step-title').innerText = step.title;
+                document.getElementById('step-description').innerHTML = step.desc;
+                
+                // Execute visualization updates
+                step.action();
+                
+                currentStepIndex++;
+            } else {
+                resetPipeline();
+            }
+        }
+
+        function resetPipeline() {
+            if (simInterval) clearInterval(simInterval);
+            isSimPlaying = false;
+            currentStepIndex = 0;
+            
+            document.getElementById('btn-play').innerText = "▶ Play Simulation";
+            document.getElementById('step-number').innerText = "Step 0";
+            document.getElementById('step-title').innerText = "Standby";
+            document.getElementById('step-description').innerText = "Select next step or play the auto-simulation to preview the technical data sequence.";
+            
+            if (currentTab === 'excel') {
+                document.getElementById('excel-window-overlay').style.opacity = 0;
+                document.getElementById('db-chunks-list').innerHTML = "";
+                document.getElementById('size-indicator').style.opacity = 0;
+            } else {
+                document.getElementById('base-keywords-container').innerHTML = "";
+                document.getElementById('synonym-keywords-container').innerHTML = "";
+                document.getElementById('candidates-list').innerHTML = "";
+                updateTokenBar(0);
+            }
+        }
+    </script>
+</body>
+</html>

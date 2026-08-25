@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AICyberAuditBox — RAG Flow Simulator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #05070c;
+            --card-bg: rgba(13, 18, 30, 0.45);
+            --border-color: rgba(255, 255, 255, 0.05);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            
+            /* Curated Theme Accents */
+            --accent-blue: #3b82f6;
+            --accent-teal: #14b8a6;
+            --accent-purple: #8b5cf6;
+            --accent-orange: #f59e0b;
+            --accent-emerald: #10b981;
+            --accent-red: #f43f5e;
+            
+            --glow-blue: rgba(59, 130, 246, 0.25);
+            --glow-teal: rgba(20, 184, 166, 0.25);
+            --glow-purple: rgba(139, 92, 246, 0.25);
+            --glow-orange: rgba(245, 158, 11, 0.25);
+            --glow-emerald: rgba(16, 185, 129, 0.25);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.08) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.08) 0px, transparent 50%),
+                radial-gradient(at 50% 100%, rgba(20, 184, 166, 0.05) 0px, transparent 50%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 24px;
+            overflow-x: hidden;
+        }
+
+        /* ── HEADER ── */
+        header {
+            max-width: 1500px;
+            margin: 0 auto 24px auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 28px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-icon {
+            font-size: 2.3rem;
+            filter: drop-shadow(0 0 12px var(--glow-blue));
+            animation: pulse-icon 2s infinite ease-in-out;
+        }
+
+        @keyframes pulse-icon {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .logo-text h1 {
+            font-size: 1.65rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #60a5fa, #a78bfa, #2dd4bf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-text p {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            margin-top: 1px;
+        }
+
+        /* ── SYSTEM CONTROLS ── */
+        .controls-panel {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 12px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 18px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.88rem;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .btn-active {
+            background: var(--accent-blue) !important;
+            border-color: var(--accent-blue) !important;
+            box-shadow: 0 4px 15px var(--glow-blue);
+        }
+
+        .btn-play {
+            background: linear-gradient(135deg, #10b981, #059669);
+            border: none;
+            box-shadow: 0 4px 15px var(--glow-emerald);
+        }
+
+        .btn-play:hover {
+            background: linear-gradient(135deg, #34d399, #10b981);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+        }
+
+        /* ── WORKSPACE LAYOUT ── */
+        .workspace {
+            max-width: 1500px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 400px 1fr 420px;
+            gap: 24px;
+            height: calc(100vh - 140px);
+            min-height: 700px;
+        }
+
+        /* ── LEFT & RIGHT COLUMN BOXES ── */
+        .side-container {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 24px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow: hidden;
+        }
+
+        .container-title {
+            font-size: 1.15rem;
+            font-weight: 700;
+            border-bottom: 1px dashed var(--border-color);
+            padding-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-primary);
+        }
+
+        /* Dynamic Configuration Details */
+        .config-box {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            font-size: 0.85rem;
+        }
+        .config-row:last-child { margin-bottom: 0; }
+
+        .config-label { color: var(--text-secondary); font-weight: 500; }
+        .config-value { color: var(--text-primary); font-weight: 700; }
+
+        /* Stage Detail Explanation Card */
+        .explanation-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            transition: all 0.3s ease;
+        }
+
+        .explanation-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        .explanation-body {
+            font-size: 0.88rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+
+        /* ── FLOWCHART PIPELINE (MIDDLE) ── */
+        .pipeline-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            overflow-y: auto;
+            padding: 20px 0;
+            scroll-behavior: smooth;
+        }
+
+        .flow-node-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+
+        .flow-node {
+            width: 280px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 14px 18px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .flow-node:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.03);
+        }
+
+        .flow-node.active {
+            border-color: var(--node-color) !important;
+            box-shadow: 0 0 20px var(--node-glow) !important;
+            transform: scale(1.04);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .flow-node-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .flow-node.active .flow-node-title {
+            color: var(--node-color);
+        }
+
+        .flow-node-subtitle {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 3px;
+        }
+
+        /* Arrow connection SVGs */
+        .flow-arrow {
+            width: 280px;
+            height: 32px;
+            display: block;
+        }
+
+        .arrow-line {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.06);
+            stroke-width: 2;
+        }
+
+        .arrow-glow {
+            fill: none;
+            stroke-width: 2.5;
+            stroke-dasharray: 8 24;
+            animation: dash 1.5s linear infinite;
+            opacity: 0;
+        }
+
+        .active-arrow .arrow-glow {
+            opacity: 1;
+        }
+
+        @keyframes dash {
+            to {
+                stroke-dashoffset: -32;
+            }
+        }
+
+        /* Node Specific Styles */
+        .node-blue { --node-color: var(--accent-blue); --node-glow: var(--glow-blue); }
+        .node-teal { --node-color: var(--accent-teal); --node-glow: var(--glow-teal); }
+        .node-purple { --node-color: var(--accent-purple); --node-glow: var(--glow-purple); }
+        .node-orange { --node-color: var(--accent-orange); --node-glow: var(--glow-orange); }
+        .node-emerald { --node-color: var(--accent-emerald); --node-glow: var(--glow-emerald); }
+
+        /* ── SANDBOX SIMULATOR (RIGHT) ── */
+        .sandbox-screen {
+            background: #090c15;
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            flex-grow: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .sandbox-header {
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--border-color);
+            padding: 10px 16px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sandbox-body {
+            padding: 16px;
+            flex-grow: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* Ingestion Sandbox (PDF vs XLSX visuals) */
+        .chunk-box {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px dashed rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.78rem;
+            line-height: 1.4;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            transition: all 0.3s ease;
+        }
+
+        .chunk-box.highlight {
+            border-color: var(--accent-teal);
+            background: rgba(20, 184, 166, 0.05);
+        }
+
+        .chunk-box-header {
+            font-weight: 700;
+            color: var(--accent-teal);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Deduplication Sandbox */
+        .dedup-item {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 0.72rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            transition: all 0.3s ease;
+        }
+        .dedup-item.removed {
+            border-color: var(--accent-red);
+            background: rgba(244, 63, 94, 0.04);
+            opacity: 0.4;
+            text-decoration: line-through;
+        }
+        .dedup-item.kept {
+            border-color: var(--accent-emerald);
+            background: rgba(16, 185, 129, 0.04);
+        }
+        .dedup-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .dedup-badge.red { background: rgba(244, 63, 94, 0.15); color: var(--accent-red); border: 1px solid var(--accent-red); }
+        .dedup-badge.green { background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); border: 1px solid var(--accent-emerald); }
+
+        /* Terminal Console Sandbox */
+        .terminal-log {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            color: #cbd5e1;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        /* Token Budget Bar */
+        .token-container {
+            margin-top: auto;
+            background: rgba(255, 255, 255, 0.01);
+            border-top: 1px solid var(--border-color);
+            padding: 16px;
+        }
+
+        .token-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .token-bar-outer {
+            height: 8px;
+            background: rgba(0,0,0,0.4);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .token-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+            border-radius: 4px;
+            transition: width 0.4s ease;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+    </style>
+</head>
+<body>
+
+    <!-- ── HEADER ── -->
+    <header>
+        <div class="logo-area">
+            <div class="logo-icon">🛡️</div>
+            <div class="logo-text">
+                <h1>RAG Audit Workflow Visualizer</h1>
+                <p>Interactive A-to-Z flowchart & analysis simulator</p>
+            </div>
+        </div>
+        
+        <div class="controls-panel">
+            <button class="btn btn-active" id="doc-pdf-btn" onclick="toggleDocType('pdf')">📄 PDF Mode</button>
+            <button class="btn" id="doc-xlsx-btn" onclick="toggleDocType('xlsx')">📊 XLSX Mode</button>
+            <span style="width: 1px; height: 20px; background: var(--border-color); margin: 0 4px;"></span>
+            <button class="btn btn-play" id="play-btn" onclick="toggleSimulation()">▶ Play Simulation</button>
+            <button class="btn" onclick="resetSimulation()">🔄 Reset</button>
+        </div>
+    </header>
+
+    <!-- ── WORKSPACE ── -->
+    <div class="workspace">
+        
+        <!-- LEFT COLUMN: SETTINGS & DETAILS -->
+        <div class="side-container">
+            <div class="container-title">
+                <span>⚙️ Pipeline Config</span>
+            </div>
+            
+            <div class="config-box">
+                <div class="config-row">
+                    <span class="config-label">Active Document:</span>
+                    <span class="config-value" id="cfg-doc-name">Security_Policy.pdf</span>
+                </div>
+                <div class="config-row">
+                    <span class="config-label">Target Chunk Size:</span>
+                    <span class="config-value" id="cfg-chunk-size">1000 characters</span>
+                </div>
+                <div class="config-row">
+                    <span class="config-label">Overlap Size:</span>
+                    <span class="config-value" id="cfg-overlap">200 characters</span>
+                </div>
+                <div class="config-row">
+                    <span class="config-label">Top_K Limit:</span>
+                    <span class="config-value" id="cfg-top-k">12 chunks</span>
+                </div>
+            </div>
+
+            <div class="explanation-card" id="explanation-panel">
+                <div class="explanation-header" style="color: var(--accent-blue)">
+                    <span>📋 System Standby</span>
+                </div>
+                <div class="explanation-body">
+                    Click <b>Play Simulation</b> in the header to trigger the pipeline animation, or select any node in the flowchart to inspect details.
+                </div>
+            </div>
+        </div>
+
+        <!-- MIDDLE COLUMN: FLOWCHART -->
+        <div class="pipeline-container" id="pipeline-container">
+            
+            <!-- Nodes list generated dynamically -->
+            <div class="flow-node-wrapper" id="flowchart-nodes-hook"></div>
+            
+        </div>
+
+        <!-- RIGHT COLUMN: LIVE SANDBOX -->
+        <div class="side-container">
+            <div class="container-title">
+                <span>🖥️ Real-time Sandbox</span>
+            </div>
+
+            <div class="sandbox-screen">
+                <div class="sandbox-header">
+                    <span id="sandbox-header-title">Live Log Console</span>
+                    <span id="sandbox-header-status" style="color: var(--accent-blue)">Idle</span>
+                </div>
+                <div class="sandbox-body" id="sandbox-content">
+                    <div class="terminal-log" id="terminal-screen">> Ready. Initialize simulation to scan documents...</div>
+                </div>
+
+                <div class="token-container">
+                    <div class="token-header">
+                        <span>Context Token Budget</span>
+                        <span id="token-budget-lbl">0 / 2000 tokens</span>
+                    </div>
+                    <div class="token-bar-outer">
+                        <div class="token-bar-fill" id="token-bar-fill-element"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ── JAVASCRIPT LOGIC ── -->
+    <script>
+        let docType = 'pdf';
+        let activeNodeIndex = -1;
+        let isSimulating = false;
+        let simTimer = null;
+
+        const pipelineNodes = [
+            { id: 'upload', title: 'Document Upload', sub: 'Evidence files buffer', colorClass: 'node-blue', desc: 'Accepts PDF, XLSX, DOCX, PPTX, or Image files. Front-end triggers hash calculations for duplicate scanning.', code: 'streamlit.file_uploader()' },
+            { id: 'detection', title: 'File Type Detection', sub: 'Route extraction engines', colorClass: 'node-blue', desc: 'Resolves MIME-types and routes documents to their appropriate parsers based on extensions.', code: 'os.path.splitext(uploaded_file.name)' },
+            { id: 'extraction', title: 'Document Extraction', sub: 'Extract native content', colorClass: 'node-teal', desc: 'Runs specific document content readers:\n• PDF: pdfplumber / easyocr fallback\n• DOCX: python-docx\n• XLSX: pandas table reader\n• PPTX: python-pptx\n• Images: easyocr scanning', code: 'pdfplumber.open(pdf_path)' },
+            { id: 'chunking', title: 'Chunking Layer', sub: 'Segment document structures', colorClass: 'node-teal', desc: 'Splits extracted texts into logical sizes. Text uses 1000 characters with 200 characters overlap. Excel sheets use 15-row sliding windows with 3-row overlap.', code: 'chunk_text(text, size=1000, overlap=200)' },
+            { id: 'metadata', title: 'Metadata Enrichment', sub: 'Inject source markers', colorClass: 'node-teal', desc: 'Appends crucial document context tags (e.g. page numbers, Excel row IDs, slide IDs, and section headings) to verify grounding later.', code: 'metadata_json = {"page_number": p_idx, "filename": fname}' },
+            { id: 'db', title: 'Vector Database (SQL)', sub: 'Save chunks to ShaktiDB', colorClass: 'node-purple', desc: 'Stores generated chunks into database tables for local semantic indexing. Syncs master updates to slave databases synchronously.', code: 'db.add(DocumentChunk(content, metadata_json))' },
+            { id: 'query', title: 'ISO Control Query', sub: 'Extract check targets', colorClass: 'node-purple', desc: 'Fetches the compliance control details, expected checklist parameters, and parses them into keyword lists.', code: 'controls_batch = get_selected_controls(framework)' },
+            { id: 'retrieval', title: 'Retrieval Stage', sub: 'Keyword & Synonym density', colorClass: 'node-purple', desc: 'Performs weighted density scoring. Base keywords score higher (weight=3) while synonym terms score lower (weight=1.5). Retrieves top candidate chunks.', code: 'scored_chunks = compute_density_score(chunks, batch_keywords)' },
+            { id: 'dedup', title: 'Deduplication', sub: 'Exact & Jaccard check', colorClass: 'node-purple', desc: 'Filters duplicates:\n1. Direct text matches are dropped.\n2. Chunks are evaluated using Jaccard Similarity index. Scores >= 0.97 are filtered out.', code: 'jaccard_score(t1, t2) >= 0.97 -> Drop Duplicate' },
+            { id: 'topk', title: 'TOP_K Selection', sub: 'Limit chunks size', colorClass: 'node-purple', desc: 'Caps context size based on file types to avoid LLM context overflow (PDF limits to 12 chunks, Excel limits to 8 chunks).', code: 'configured_top_k = top_k_config.get(file_type, 8)' },
+            { id: 'builder', title: 'Context Builder', sub: 'Assemble prompt package', colorClass: 'node-orange', desc: 'Orders retrieved chunks chronologically by source page/row indices and builds the prompt package with RAG context.', code: 'assembled_context = "\\n\\n".join(sorted_chunks)' },
+            { id: 'ollama', title: 'Ollama + Qwen', sub: 'Local LLM inference', colorClass: 'node-orange', desc: 'Sends the prompt to a local Ollama service using Qwen2.5 (3B / 7B parameter models) with zero temperature to ensure reproducibility.', code: 'requests.post("http://127.0.0.1:11434/api/generate", json=model_payload)' },
+            { id: 'audit', title: 'Audit Engine', sub: 'State compliance check', colorClass: 'node-emerald', desc: 'Evaluates findings and returns a strict state: Compliant, Partially Compliant, or Non-Compliant. Triggers reflection critique checks.', code: 'final_status = evaluate_compliance_findings()' },
+            { id: 'report', title: 'Report Generator', sub: 'Extract recommendations', colorClass: 'node-emerald', desc: 'Compiles final reports with verified quotes, highlighted gaps, structural recommendations, and exports to PDF.', code: 'generate_pdf_report(findings, scores)' }
+        ];
+
+        // Renders flowchart elements
+        function renderFlowchart() {
+            const hook = document.getElementById('flowchart-nodes-hook');
+            hook.innerHTML = '';
+            
+            pipelineNodes.forEach((node, idx) => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'flow-node-wrapper';
+                
+                // Add Connecting Arrow if not first node
+                if (idx > 0) {
+                    const arrowSvg = `
+                        <svg class="flow-arrow" id="arrow-${idx}" viewBox="0 0 280 32">
+                            <path class="arrow-line" d="M 140,0 L 140,32" />
+                            <path class="arrow-glow" d="M 140,0 L 140,32" stroke="var(--arrow-color, #3b82f6)" />
+                        </svg>
+                    `;
+                    wrapper.innerHTML = arrowSvg;
+                }
+                
+                // Add Node
+                const nodeDiv = document.createElement('div');
+                nodeDiv.id = `node-${idx}`;
+                nodeDiv.className = `flow-node ${node.colorClass}`;
+                nodeDiv.onclick = () => selectNode(idx);
+                nodeDiv.innerHTML = `
+                    <div class="flow-node-title">${node.title}</div>
+                    <div class="flow-node-subtitle">${node.sub}</div>
+                `;
+                
+                wrapper.appendChild(nodeDiv);
+                hook.appendChild(wrapper);
+            });
+        }
+
+        function toggleDocType(type) {
+            if (isSimulating) return;
+            docType = type;
+            document.getElementById('doc-pdf-btn').className = `btn ${type === 'pdf' ? 'btn-active' : ''}`;
+            document.getElementById('doc-xlsx-btn').className = `btn ${type === 'xlsx' ? 'btn-active' : ''}`;
+            
+            if (type === 'pdf') {
+                document.getElementById('cfg-doc-name').innerText = 'Security_Policy.pdf';
+                document.getElementById('cfg-chunk-size').innerText = '1000 characters';
+                document.getElementById('cfg-overlap').innerText = '200 characters';
+                document.getElementById('cfg-top-k').innerText = '12 chunks';
+                
+                pipelineNodes[3].sub = 'Segment document structures';
+                pipelineNodes[3].desc = 'Splits extracted texts into logical sizes. PDF uses 1000 characters with 200 characters overlap.';
+                pipelineNodes[9].desc = 'Caps context size based on file types. PDF limits context retrieval to 12 chunks.';
+            } else {
+                document.getElementById('cfg-doc-name').innerText = 'Asset_Inventory.xlsx';
+                document.getElementById('cfg-chunk-size').innerText = '15 rows sliding window';
+                document.getElementById('cfg-overlap').innerText = '3 rows overlap';
+                document.getElementById('cfg-top-k').innerText = '8 chunks';
+                
+                pipelineNodes[3].sub = 'Excel Row sliding windows';
+                pipelineNodes[3].desc = 'Splits Excel rows into sliding windows (15 rows) containing sheet headers and cell values.';
+                pipelineNodes[9].desc = 'Caps context size based on file types. Excel sheets limit context to 8 chunks.';
+            }
+            renderFlowchart();
+            resetSimulation();
+        }
+
+        function selectNode(index) {
+            if (activeNodeIndex !== -1) {
+                document.getElementById(`node-${activeNodeIndex}`).classList.remove('active');
+                if (activeNodeIndex > 0) {
+                    document.getElementById(`arrow-${activeNodeIndex}`).classList.remove('active-arrow');
+                }
+            }
+            
+            activeNodeIndex = index;
+            const node = pipelineNodes[index];
+            const element = document.getElementById(`node-${index}`);
+            element.classList.add('active');
+            
+            // Set Color for glowing arrow based on target node type
+            let arrowColor = '#3b82f6';
+            if (node.colorClass === 'node-teal') arrowColor = '#14b8a6';
+            if (node.colorClass === 'node-purple') arrowColor = '#8b5cf6';
+            if (node.colorClass === 'node-orange') arrowColor = '#f59e0b';
+            if (node.colorClass === 'node-emerald') arrowColor = '#10b981';
+
+            if (index > 0) {
+                const arrow = document.getElementById(`arrow-${index}`);
+                arrow.style.setProperty('--arrow-color', arrowColor);
+                arrow.classList.add('active-arrow');
+            }
+
+            // Scroll container to keep active node in view
+            const container = document.getElementById('pipeline-container');
+            container.scrollTop = element.offsetTop - container.offsetTop - 100;
+
+            // Update Left Explanation Details
+            const expPanel = document.getElementById('explanation-panel');
+            expPanel.innerHTML = `
+                <div class="explanation-header" style="color: var(--node-color)">
+                    <span>Stage ${index + 1}: ${node.title}</span>
+                </div>
+                <div class="explanation-body" style="white-space: pre-line;">
+                    ${node.desc}
+                </div>
+                <div style="margin-top: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.72rem; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); color: #cbd5e1;">
+                    <span style="color: var(--node-color)"># Code Context</span><br>
+                    ${node.code}
+                </div>
+            `;
+            
+            // Update Real-time Sandbox Visuals
+            updateSandbox(index);
+        }
+
+        // Live simulations shown in Sandbox
+        function updateSandbox(index) {
+            const sandboxContent = document.getElementById('sandbox-content');
+            const sandboxTitle = document.getElementById('sandbox-header-title');
+            const sandboxStatus = document.getElementById('sandbox-header-status');
+            const tokenBar = document.getElementById('token-bar-fill-element');
+            const tokenBudgetLbl = document.getElementById('token-budget-lbl');
+            
+            // Sync Sandbox status colors
+            const node = pipelineNodes[index];
+            sandboxStatus.innerText = node.title;
+            if (node.colorClass === 'node-blue') sandboxStatus.style.color = 'var(--accent-blue)';
+            if (node.colorClass === 'node-teal') sandboxStatus.style.color = 'var(--accent-teal)';
+            if (node.colorClass === 'node-purple') sandboxStatus.style.color = 'var(--accent-purple)';
+            if (node.colorClass === 'node-orange') sandboxStatus.style.color = 'var(--accent-orange)';
+            if (node.colorClass === 'node-emerald') sandboxStatus.style.color = 'var(--accent-emerald)';
+
+            sandboxTitle.innerText = "Execution View";
+
+            if (index === 0) { // Document Upload
+                tokenBar.style.width = '0%';
+                tokenBudgetLbl.innerText = '0 / 2000 tokens';
+                sandboxContent.innerHTML = `
+                    <div class="chunk-box highlight">
+                        <div class="chunk-box-header"><span>Buffer Stream</span><span>Active</span></div>
+                        Reading document stream. Uploading file: <b>${docType === 'pdf' ? 'Security_Policy.pdf' : 'Asset_Inventory.xlsx'}</b>
+                        Calculating file hash MD5 for caching layer...
+                    </div>
+                `;
+            } 
+            else if (index === 1) { // File Type Detection
+                sandboxContent.innerHTML = `
+                    <div class="terminal-log">> Detecting file type...
+> Match found: .${docType}
+> Routing parser to: ${docType.toUpperCase()}_Parser_Module</div>
+                `;
+            }
+            else if (index === 2) { // Document Extraction Layer
+                sandboxContent.innerHTML = `
+                    <div class="terminal-log">> Loading libraries...
+${docType === 'pdf' ? '> Calling pdfplumber.open()\n> Extracting character geometries...' : '> Calling pandas.read_excel()\n> Parsed sheets: [Asset_Inventory, Exclusions]'}
+> Reading text stream...
+> Extraction completed. Successfully parsed document content.</div>
+                `;
+            }
+            else if (index === 3) { // Chunking Layer
+                if (docType === 'pdf') {
+                    sandboxContent.innerHTML = `
+                        <div class="chunk-box highlight">
+                            <div class="chunk-box-header"><span>Chunk #1</span><span>1000 Chars</span></div>
+                            "All facility entry doors are protected by electronic access control systems requiring card badges. Employees must not slide doors open for unregistered visitors..."
+                        </div>
+                        <div class="chunk-box" style="margin-top: 8px;">
+                            <div class="chunk-box-header"><span>Chunk #2</span><span>1000 Chars</span></div>
+                            "Visitor logs must be checked weekly by the SecOps lead. Discrepancies between card read logs and visitors database require immediate audits..."
+                        </div>
+                    `;
+                } else {
+                    sandboxContent.innerHTML = `
+                        <div class="chunk-box highlight">
+                            <div class="chunk-box-header"><span>Window Window #1</span><span>Row 1 to 15</span></div>
+                            Sheet: Asset_Inventory | Header: [Asset_ID, Name, Owner, Criticality]<br>
+                            Row 1: SRV-01 | DB Host | IT Team | High<br>
+                            Row 2: SRV-02 | HR portal | HR Team | Medium...
+                        </div>
+                    `;
+                }
+            }
+            else if (index === 4) { // Metadata Enrichment
+                sandboxContent.innerHTML = `
+                    <div class="chunk-box highlight" style="border-color: var(--accent-teal)">
+                        <div class="chunk-box-header" style="color: var(--accent-teal)"><span>Enriched Chunk Metadata</span></div>
+                        <span style="color: var(--text-secondary)">Content:</span> "All facility entry doors are protected..."<br>
+                        <span style="color: var(--accent-teal)">Enrichment JSON:</span>
+                        <pre style="font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #cbd5e1; margin-top: 4px;">
+{
+  "filename": "Security_Policy.pdf",
+  "page_number": 4,
+  "chunk_index": 12,
+  "section_heading": "Physical Access Rules"
+}</pre>
+                    </div>
+                `;
+            }
+            else if (index === 5) { // Vector Database
+                sandboxContent.innerHTML = `
+                    <div class="terminal-log">> Connecting to ShaktiDB master (Port 15234)...
+> Inserting document chunks...
+> 42 records written to sqlite_master.db.
+> Synchronous replication: Syncing master -> Slave 1... Done.
+> Synchronous replication: Syncing master -> Slave 2... Done.
+> Transaction committed.</div>
+                `;
+            }
+            else if (index === 6) { // ISO Control Query
+                sandboxContent.innerHTML = `
+                    <div class="chunk-box highlight" style="border-color: var(--accent-purple)">
+                        <div class="chunk-box-header" style="color: var(--accent-purple)"><span>Target Compliance Control</span></div>
+                        <b>Control ID:</b> A.5.15 Access Control Policy<br>
+                        <b>Requirements:</b> Access rights to information and systems must be restricted in accordance with the access control policy.
+                    </div>
+                `;
+            }
+            else if (index === 7) { // Retrieval Stage
+                sandboxContent.innerHTML = `
+                    <div class="terminal-log">> Extracted search keywords: ['access', 'control', 'policy', 'rights', 'restrict']
+> Expanded synonyms: ['mfa', 'rbac', 'credentials', 'authenticate']
+> Scanning Document Chunks table...
+> Scored top 20 candidate chunks by keyword density count.
+> Highest scoring: Chunk #12 (Score: 18.5)</div>
+                `;
+            }
+            else if (index === 8) { // Deduplication
+                sandboxContent.innerHTML = `
+                    <div class="dedup-item kept">
+                        <span>Chunk #12: "All facility entry doors..."</span>
+                        <span class="dedup-badge green">Unique: Jaccard 0.12</span>
+                    </div>
+                    <div class="dedup-item removed" style="margin-top: 6px;">
+                        <span>Chunk #18: "Every facility entrance is guarded..."</span>
+                        <span class="dedup-badge red">Dup: Jaccard 0.98</span>
+                    </div>
+                    <div class="dedup-item kept" style="margin-top: 6px;">
+                        <span>Chunk #22: "Weekly visitor log audit checklist..."</span>
+                        <span class="dedup-badge green">Unique: Jaccard 0.24</span>
+                    </div>
+                `;
+            }
+            else if (index === 9) { // TOP_K Selection
+                const targetK = docType === 'pdf' ? 12 : 8;
+                sandboxContent.innerHTML = `
+                    <div class="terminal-log">> File type context rules loaded: .${docType}
+> Top_K budget constraint limit: ${targetK}
+> Selecting top ${targetK} highest density chunks.
+> Dropped remaining candidates to optimize token usage.</div>
+                `;
+            }
+            else if (index === 10) { // Context Builder
+                const pct = docType === 'pdf' ? '70%' : '55%';
+                const val = docType === 'pdf' ? '1400 / 2000' : '1100 / 2000';
+                tokenBar.style.width = pct;
+                tokenBudgetLbl.innerText = `${val} tokens`;
+                sandboxContent.innerHTML = `
+                    <div class="chunk-box highlight" style="border-color: var(--accent-orange)">
+                        <div class="chunk-box-header" style="color: var(--accent-orange)"><span>Assembled Context Stream</span></div>
+                        "<b>[Source: Page 4]</b> All facility entry doors are protected by electronic access control systems requiring card badges... 
+                        <b>[Source: Page 6]</b> Weekly visitor log checks must be compiled by SecOps lead..."
+                    </div>
+                `;
+            }
+            else if (index === 11) { // Ollama + Qwen
+                sandboxContent.innerHTML = `
+                    <div class="terminal-log">> Streaming output from local Ollama...
+> Model: Qwen 2.5 (7B parameter)
+> Response content:
+<span style="color: #60a5fa">"Based on the provided security policy context, the organization enforces badge-access on all perimeters (Page 4). However, there is a minor gap: no MFA requirement is specified for digital admins. 
+Status: PARTIAL"</span></div>
+                `;
+            }
+            else if (index === 12) { // Audit Engine
+                sandboxContent.innerHTML = `
+                    <div class="chunk-box highlight" style="border-color: var(--accent-emerald)">
+                        <div class="chunk-box-header" style="color: var(--accent-emerald)"><span>Audit Evaluation Output</span></div>
+                        <b>Control:</b> A.5.15 Access Control Policy<br>
+                        <b>Status:</b> <span style="color: var(--accent-orange); font-weight: 800;">PARTIAL COMPLIANT</span><br>
+                        <b>Ground check:</b> verified quote matches page 4 verbatim.<br>
+                        <b>Hallucination audit:</b> GROUNDED
+                    </div>
+                `;
+            }
+            else if (index === 13) { // Report Generator
+                sandboxContent.innerHTML = `
+                    <div class="terminal-log">> Creating report document nodes...
+> Calculating overall compliance score: 87%
+> Rendering gap tables and recommendations.
+> Writing PDF report to workspace folder...
+> Report saved as: [All_Standards_Audit_Run_Report.pdf]
+> Pipeline completed successfully.</div>
+                `;
+            }
+        }
+
+        // Toggle Simulator Loop
+        function toggleSimulation() {
+            const playBtn = document.getElementById('play-btn');
+            
+            if (isSimulating) {
+                // Pause
+                clearInterval(simTimer);
+                isSimulating = false;
+                playBtn.innerText = '▶ Play Simulation';
+                playBtn.classList.remove('btn-active');
+            } else {
+                // Play
+                isSimulating = true;
+                playBtn.innerText = '⏸ Pause Simulation';
+                playBtn.classList.add('btn-active');
+                
+                simTimer = setInterval(() => {
+                    let nextIndex = activeNodeIndex + 1;
+                    if (nextIndex >= pipelineNodes.length) {
+                        clearInterval(simTimer);
+                        isSimulating = false;
+                        playBtn.innerText = '▶ Play Simulation';
+                        playBtn.classList.remove('btn-active');
+                        return;
+                    }
+                    selectNode(nextIndex);
+                }, 2000);
+            }
+        }
+
+        function resetSimulation() {
+            if (isSimulating) {
+                toggleSimulation();
+            }
+            activeNodeIndex = -1;
+            
+            // Clean active classes
+            pipelineNodes.forEach((_, idx) => {
+                document.getElementById(`node-${idx}`).classList.remove('active');
+                if (idx > 0) {
+                    document.getElementById(`arrow-${idx}`).classList.remove('active-arrow');
+                }
+            });
+
+            document.getElementById('explanation-panel').innerHTML = `
+                <div class="explanation-header" style="color: var(--accent-blue)">
+                    <span>📋 System Standby</span>
+                </div>
+                <div class="explanation-body">
+                    Click <b>Play Simulation</b> in the header to trigger the pipeline animation, or select any node in the flowchart to inspect details.
+                </div>
+            `;
+            
+            document.getElementById('sandbox-content').innerHTML = `
+                <div class="terminal-log">> Ready. Initialize simulation to scan documents...</div>
+            `;
+            document.getElementById('sandbox-header-title').innerText = "Live Log Console";
+            document.getElementById('sandbox-header-status').innerText = "Idle";
+            document.getElementById('sandbox-header-status').style.color = "var(--accent-blue)";
+            document.getElementById('token-bar-fill-element').style.width = '0%';
+            document.getElementById('token-budget-lbl').innerText = '0 / 2000 tokens';
+            
+            const container = document.getElementById('pipeline-container');
+            container.scrollTop = 0;
+        }
+
+        // Initialization
+        renderFlowchart();
+        resetSimulation();
+    </script>
+</body>
+</html>

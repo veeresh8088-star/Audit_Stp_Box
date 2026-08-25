@@ -1,0 +1,13 @@
+# Nmap 7.92 scan report for 172.201.152.88
+Host is up (0.037s latency).
+Not shown: 998 closed tcp ports (reset)
+PORT    STATE SERVICE  VERSION
+80/tcp  open  http     Apache httpd 2.4.41
+443/tcp open  ssl/http Apache httpd 2.4.41
+|_ssl-date: TLS-1.2
+| ssl-enum-ciphers: 
+|   TLSv1.2: 
+|     ciphers: 
+|       TLS_RSA_WITH_AES_128_CBC_SHA (dh 2048) - Vulnerable to LUCKY13 (CVE-2013-0169)
+|       TLS_RSA_WITH_AES_256_CBC_SHA (dh 2048) - Vulnerable to LUCKY13 (CVE-2013-0169)
+|_    compressors: NULL

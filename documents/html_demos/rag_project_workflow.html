@@ -1,0 +1,1050 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AICyberAuditBox — RAG from Scratch Workflow</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Fira+Code:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #030712;
+            --card-bg: rgba(17, 24, 39, 0.7);
+            --border-color: rgba(255, 255, 255, 0.06);
+            
+            /* Curated Theme Accents */
+            --accent-blue: #3b82f6;
+            --accent-teal: #0d9488;
+            --accent-purple: #6366f1;
+            --accent-pink: #d946ef;
+            --accent-emerald: #10b981;
+            --accent-amber: #f59e0b;
+            
+            --glow-blue: rgba(59, 130, 246, 0.3);
+            --glow-teal: rgba(13, 148, 136, 0.3);
+            --glow-purple: rgba(99, 102, 241, 0.3);
+            --glow-pink: rgba(217, 70, 239, 0.3);
+            --glow-emerald: rgba(16, 185, 129, 0.3);
+            
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --text-muted: #6b7280;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(99, 102, 241, 0.12) 0px, transparent 50%),
+                radial-gradient(at 50% 100%, rgba(13, 148, 136, 0.08) 0px, transparent 50%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 24px;
+            overflow-x: hidden;
+        }
+
+        /* ── HEADER ── */
+        header {
+            max-width: 1600px;
+            margin: 0 auto 24px auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 28px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo-icon {
+            font-size: 2.3rem;
+            filter: drop-shadow(0 0 12px var(--glow-blue));
+            animation: pulse-icon 2.5s infinite ease-in-out;
+        }
+
+        @keyframes pulse-icon {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.06); }
+        }
+
+        .logo-text h1 {
+            font-size: 1.7rem;
+            font-weight: 900;
+            letter-spacing: -0.5px;
+            background: linear-gradient(90deg, #60a5fa, #818cf8, #2dd4bf);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .logo-text p {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+            margin-top: 1px;
+        }
+
+        /* ── CONTROLS ── */
+        .controls-panel {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 10px 18px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.88rem;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-1px);
+        }
+
+        .btn-active {
+            background: var(--accent-purple) !important;
+            border-color: var(--accent-purple) !important;
+            box-shadow: 0 4px 15px var(--glow-purple);
+        }
+
+        .btn-play {
+            background: linear-gradient(135deg, #0d9488, #0f766e);
+            border: none;
+            box-shadow: 0 4px 15px var(--glow-teal);
+        }
+
+        .btn-play:hover {
+            background: linear-gradient(135deg, #14b8a6, #0d9488);
+            box-shadow: 0 6px 20px rgba(13, 148, 136, 0.4);
+        }
+
+        /* ── WORKSPACE LAYOUT ── */
+        .workspace {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 320px 1fr 400px;
+            gap: 24px;
+            height: calc(100vh - 140px);
+            min-height: 750px;
+        }
+
+        /* ── SIDE PANELS ── */
+        .side-container {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 24px;
+            padding: 24px;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow: hidden;
+        }
+
+        .container-title {
+            font-size: 1.15rem;
+            font-weight: 800;
+            border-bottom: 1px dashed var(--border-color);
+            padding-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--text-primary);
+        }
+
+        /* Config Table */
+        .config-box {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+            padding-bottom: 8px;
+        }
+        .config-row:last-child {
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+
+        .config-label { color: var(--text-secondary); font-weight: 500; }
+        .config-value { color: var(--text-primary); font-weight: 700; text-align: right; }
+
+        /* Dynamic Description Panel */
+        .explanation-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 20px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            transition: all 0.3s ease;
+        }
+
+        .explanation-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 800;
+            font-size: 1.05rem;
+        }
+
+        .explanation-body {
+            font-size: 0.88rem;
+            line-height: 1.5;
+            color: var(--text-secondary);
+        }
+
+        .code-snippet {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.75rem;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+            color: #e5e7eb;
+            overflow-x: auto;
+            margin-top: auto;
+        }
+
+        /* ── DYNAMIC FLOW PIPELINE (MIDDLE) ── */
+        .pipeline-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            overflow-y: auto;
+            padding: 10px 15px;
+            scroll-behavior: smooth;
+        }
+
+        /* RAG Stage Panels */
+        .rag-stage {
+            background: rgba(17, 24, 39, 0.45);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .rag-stage.active-stage {
+            background: rgba(17, 24, 39, 0.75);
+            border-color: var(--stage-color);
+            box-shadow: 0 0 20px var(--stage-glow);
+        }
+
+        .stage-banner {
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: var(--stage-color);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .stage-banner span:last-child {
+            font-size: 0.72rem;
+            background: rgba(255, 255, 255, 0.03);
+            padding: 2px 8px;
+            border-radius: 20px;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .stage-nodes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px;
+        }
+
+        .flow-node {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 14px;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+
+        .flow-node:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255, 255, 255, 0.12);
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .flow-node.active-node {
+            border-color: var(--node-color) !important;
+            box-shadow: 0 0 15px var(--node-glow) !important;
+            background: rgba(255, 255, 255, 0.06) !important;
+            transform: scale(1.02);
+        }
+
+        .node-num {
+            font-size: 0.65rem;
+            font-weight: 800;
+            color: var(--node-color);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 2px;
+        }
+
+        .node-title {
+            font-size: 0.88rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .node-sub {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        /* Custom Stage Colors */
+        .stage-indexing { --stage-color: var(--accent-blue); --stage-glow: var(--glow-blue); }
+        .stage-retrieval { --stage-color: var(--accent-purple); --stage-glow: var(--glow-purple); }
+        .stage-augmented { --stage-color: var(--accent-teal); --stage-glow: var(--glow-teal); }
+        .stage-generation { --stage-color: var(--accent-pink); --stage-glow: var(--glow-pink); }
+
+        /* Dynamic Connector Arrows between Stages */
+        .stage-arrow-connector {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 24px;
+        }
+
+        .stage-arrow-connector svg {
+            width: 200px;
+            height: 24px;
+        }
+
+        .arrow-path {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.05);
+            stroke-width: 2;
+        }
+
+        .arrow-pulse-path {
+            fill: none;
+            stroke-width: 2.5;
+            stroke-dasharray: 6 18;
+            animation: dash-flow 1.5s linear infinite;
+            opacity: 0;
+        }
+
+        .active-arrow .arrow-pulse-path {
+            opacity: 1;
+        }
+
+        @keyframes dash-flow {
+            to {
+                stroke-dashoffset: -24;
+            }
+        }
+
+        /* ── REAL-TIME SANDBOX (RIGHT) ── */
+        .sandbox-panel {
+            background: #060913;
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .sandbox-header {
+            background: rgba(255, 255, 255, 0.02);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 16px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .sandbox-body {
+            padding: 16px;
+            flex-grow: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        /* Sandbox Inner visuals */
+        .terminal-text {
+            font-family: 'Fira Code', monospace;
+            font-size: 0.75rem;
+            color: #a7f3d0;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .sandbox-card {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px;
+            font-size: 0.78rem;
+            line-height: 1.45;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .sandbox-card.highlighted {
+            border-color: var(--accent-teal);
+            background: rgba(13, 148, 136, 0.05);
+        }
+
+        .sandbox-card-header {
+            font-weight: 800;
+            color: var(--accent-teal);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* Jaccard Visuals */
+        .jaccard-item {
+            background: rgba(255, 255, 255, 0.01);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 0.72rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .jaccard-item.filtered {
+            border-color: #ef4444;
+            background: rgba(239, 68, 68, 0.04);
+            opacity: 0.4;
+            text-decoration: line-through;
+        }
+        .jaccard-item.kept {
+            border-color: #10b981;
+            background: rgba(16, 185, 129, 0.04);
+        }
+        .jaccard-badge {
+            font-size: 0.65rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid currentColor;
+        }
+
+        /* Token Progress Indicator */
+        .token-hud {
+            margin-top: auto;
+            background: rgba(255, 255, 255, 0.01);
+            border-top: 1px solid var(--border-color);
+            padding: 16px;
+        }
+
+        .token-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .token-bar-bg {
+            height: 8px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .token-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple), var(--accent-pink));
+            border-radius: 4px;
+            transition: width 0.4s ease;
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.12); }
+    </style>
+</head>
+<body>
+
+    <!-- ── HEADER ── -->
+    <header>
+        <div class="logo-area">
+            <div class="logo-icon">🛡️</div>
+            <div class="logo-text">
+                <h1>RAG from Scratch: AICyberAuditBox</h1>
+                <p>Auditor Evidence-Aware Semantic Processing Architecture</p>
+            </div>
+        </div>
+        
+        <div class="controls-panel">
+            <button class="btn btn-active" id="doc-btn-zip" onclick="setDocType('zip')">📦 ZIP (8 Docs)</button>
+            <button class="btn" id="doc-btn-single" onclick="setDocType('single')">📄 Scanned PDF</button>
+            <span style="width: 1px; height: 20px; background: var(--border-color); margin: 0 4px;"></span>
+            <button class="btn btn-play" id="play-btn" onclick="togglePlayback()">▶ Play Simulation</button>
+            <button class="btn" onclick="resetWorkflow()">🔄 Reset</button>
+        </div>
+    </header>
+
+    <!-- ── MAIN WORKSPACE ── -->
+    <div class="workspace">
+        
+        <!-- LEFT PANEL: DETAILS -->
+        <div class="side-container">
+            <div class="container-title">
+                <span>🔧 RAG Engine Constants</span>
+            </div>
+            
+            <div class="config-box">
+                <div class="config-row">
+                    <span class="config-label">Upload Target:</span>
+                    <span class="config-value" id="val-target">aa_audit_samples.zip</span>
+                </div>
+                <div class="config-row">
+                    <span class="config-label">Image OCR Reader:</span>
+                    <span class="config-value" style="color: var(--accent-teal)">EasyOCR (CPU Mode)</span>
+                </div>
+                <div class="config-row">
+                    <span class="config-label">Text Chunking:</span>
+                    <span class="config-value" id="val-chunk">1000 Chars / 200 Overlap</span>
+                </div>
+                <div class="config-row">
+                    <span class="config-label">Embedding Model:</span>
+                    <span class="config-value" style="color: var(--accent-purple)">nomic-embed-text</span>
+                </div>
+                <div class="config-row">
+                    <span class="config-label">Hybrid Weighing:</span>
+                    <span class="config-value">40% Term / 60% Vector</span>
+                </div>
+                <div class="config-row">
+                    <span class="config-label">Top_K Budget:</span>
+                    <span class="config-value" id="val-topk">8 Chunks Limit</span>
+                </div>
+            </div>
+
+            <div class="explanation-card" id="explanation-card">
+                <div class="explanation-header" style="color: var(--accent-blue)">
+                    <span>📢 Flow Visualizer Standby</span>
+                </div>
+                <div class="explanation-body">
+                    Click <b>Play Simulation</b> to trigger the detailed data flow pipeline, or click any individual RAG node to inspect code and execution details.
+                </div>
+                <div class="code-snippet" id="code-snippet-box">
+                    # Waiting for selection...
+                </div>
+            </div>
+        </div>
+
+        <!-- MIDDLE PANEL: THE FLOWCHART -->
+        <div class="pipeline-container" id="pipeline-container">
+            
+            <!-- STAGE 1: INDEXING -->
+            <div class="rag-stage stage-indexing" id="stage-indexing-card">
+                <div class="stage-banner">
+                    <span>1. Indexing (Document Preparation)</span>
+                    <span>Offline Database Storage</span>
+                </div>
+                <div class="stage-nodes-grid">
+                    <div class="flow-node" id="node-upload" onclick="clickNode(0)">
+                        <div class="node-num">Node 1.1</div>
+                        <div class="node-title">File Ingestion</div>
+                        <div class="node-sub">Supports ZIP/PDF/Word/XLSX</div>
+                    </div>
+                    <div class="flow-node" id="node-ocr" onclick="clickNode(1)">
+                        <div class="node-num">Node 1.2</div>
+                        <div class="node-title">EasyOCR / pdfplumber</div>
+                        <div class="node-sub">Fallback OCR on CPU</div>
+                    </div>
+                    <div class="flow-node" id="node-chunk" onclick="clickNode(2)">
+                        <div class="node-num">Node 1.3</div>
+                        <div class="node-title">Hybrid Chunking</div>
+                        <div class="node-sub">1000ch text / 15-row Excel</div>
+                    </div>
+                    <div class="flow-node" id="node-db" onclick="clickNode(3)">
+                        <div class="node-num">Node 1.4</div>
+                        <div class="node-title">ShaktiDB Store</div>
+                        <div class="node-sub">Master-Slave replication</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stage-arrow-connector" id="arrow-stage-1">
+                <svg viewBox="0 0 200 24">
+                    <path class="arrow-path" d="M 100,0 L 100,24" />
+                    <path class="arrow-pulse-path" d="M 100,0 L 100,24" stroke="var(--accent-purple)" />
+                </svg>
+            </div>
+
+            <!-- STAGE 2: RETRIEVAL -->
+            <div class="rag-stage stage-retrieval" id="stage-retrieval-card">
+                <div class="stage-banner">
+                    <span>2. Retrieval (R)</span>
+                    <span>Weighted Hybrid Match</span>
+                </div>
+                <div class="stage-nodes-grid">
+                    <div class="flow-node" id="node-syns" onclick="clickNode(4)">
+                        <div class="node-num">Node 2.1</div>
+                        <div class="node-title">Synonym Weights</div>
+                        <div class="node-sub">Density matrix scoring</div>
+                    </div>
+                    <div class="flow-node" id="node-embed" onclick="clickNode(5)">
+                        <div class="node-num">Node 2.2</div>
+                        <div class="node-title">Query Embedding</div>
+                        <div class="node-sub">nomic-embed-text vector</div>
+                    </div>
+                    <div class="flow-node" id="node-density" onclick="clickNode(6)">
+                        <div class="node-num">Node 2.3</div>
+                        <div class="node-title">Term Density (40%)</div>
+                        <div class="node-sub">Synonym match logic</div>
+                    </div>
+                    <div class="flow-node" id="node-cosine" onclick="clickNode(7)">
+                        <div class="node-num">Node 2.4</div>
+                        <div class="node-title">Cosine Similarity (60%)</div>
+                        <div class="node-sub">Vector similarity score</div>
+                    </div>
+                    <div class="flow-node" id="node-dedup" onclick="clickNode(8)">
+                        <div class="node-num">Node 2.5</div>
+                        <div class="node-title">Jaccard Dedup</div>
+                        <div class="node-sub">Filters similarity >= 0.97</div>
+                    </div>
+                    <div class="flow-node" id="node-topk" onclick="clickNode(9)">
+                        <div class="node-num">Node 2.6</div>
+                        <div class="node-title">Top_K selection</div>
+                        <div class="node-sub">Limits total chunk counts</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stage-arrow-connector" id="arrow-stage-2">
+                <svg viewBox="0 0 200 24">
+                    <path class="arrow-path" d="M 100,0 L 100,24" />
+                    <path class="arrow-pulse-path" d="M 100,0 L 100,24" stroke="var(--accent-teal)" />
+                </svg>
+            </div>
+
+            <!-- STAGE 3: AUGMENTED -->
+            <div class="rag-stage stage-augmented" id="stage-augmented-card">
+                <div class="stage-banner">
+                    <span>3. Augmented (A)</span>
+                    <span>Context Packing</span>
+                </div>
+                <div class="stage-nodes-grid">
+                    <div class="flow-node" id="node-metadata" onclick="clickNode(10)">
+                        <div class="node-num">Node 3.1</div>
+                        <div class="node-title">Source Provenance</div>
+                        <div class="node-sub">Chronological sorting</div>
+                    </div>
+                    <div class="flow-node" id="node-builder" onclick="clickNode(11)">
+                        <div class="node-num">Node 3.2</div>
+                        <div class="node-title">Context Budgeting</div>
+                        <div class="node-sub">1.5k target / 2.0k hard-max</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="stage-arrow-connector" id="arrow-stage-3">
+                <svg viewBox="0 0 200 24">
+                    <path class="arrow-path" d="M 100,0 L 100,24" />
+                    <path class="arrow-pulse-path" d="M 100,0 L 100,24" stroke="var(--accent-pink)" />
+                </svg>
+            </div>
+
+            <!-- STAGE 4: GENERATE -->
+            <div class="rag-stage stage-generation" id="stage-generation-card">
+                <div class="stage-banner">
+                    <span>4. Generation (G)</span>
+                    <span>Structured Verification</span>
+                </div>
+                <div class="stage-nodes-grid">
+                    <div class="flow-node" id="node-ollama" onclick="clickNode(12)">
+                        <div class="node-num">Node 4.1</div>
+                        <div class="node-title">Ollama local LLM</div>
+                        <div class="node-sub">Qwen/Llama zero-temp</div>
+                    </div>
+                    <div class="flow-node" id="node-validator" onclick="clickNode(13)">
+                        <div class="node-num">Node 4.2</div>
+                        <div class="node-title">Lead Auditor Validator</div>
+                        <div class="node-sub">Deduplicates quote citations</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- RIGHT PANEL: SANDBOX CONSOLE -->
+        <div class="side-container">
+            <div class="container-title">
+                <span>🖥️ Real-time Sandbox Console</span>
+            </div>
+
+            <div class="sandbox-panel">
+                <div class="sandbox-header">
+                    <span id="sandbox-title">Execution Console</span>
+                    <span id="sandbox-status" style="color: var(--accent-blue)">Idle</span>
+                </div>
+                <div class="sandbox-body" id="sandbox-body-content">
+                    <div class="terminal-text" id="console-logs">> System initialized. Waiting for playback simulation...</div>
+                </div>
+
+                <div class="token-hud">
+                    <div class="token-header">
+                        <span>Dynamic Context Token Budget</span>
+                        <span id="token-count-lbl">0 / 2000 tokens</span>
+                    </div>
+                    <div class="token-bar-bg">
+                        <div class="token-bar-fill" id="token-bar-element"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ── JAVASCRIPT SIMULATION LOGIC ── -->
+    <script>
+        let selectedDocType = 'zip';
+        let activeNodeIdx = -1;
+        let isPlaying = false;
+        let playbackTimer = null;
+
+        const nodesMetadata = [
+            {
+                id: 'node-upload',
+                title: 'File Ingestion Stream',
+                color: 'var(--accent-blue)',
+                glow: 'var(--glow-blue)',
+                desc: 'Upload interface triggers immediately. Unzips `.zip` folders recursively. Checks file signatures and maps out extensions to run corresponding text parsers synchronously on the main thread.',
+                code: 'zf = zipfile.ZipFile(file_bytes)\nfor entry in zf.namelist():\n  if any(entry.endswith(ext) for ext in SUPPORTED_EXTS):\n    extract_text(entry)',
+                sandbox: () => `> Ingesting file: ${selectedDocType === 'zip' ? 'aa_audit_samples.zip (2.2MB)' : 'scanned_badge_policy.pdf (1.5MB)'}\n> Parsing file structure...`
+            },
+            {
+                id: 'node-ocr',
+                title: 'EasyOCR & PDF Text Extraction',
+                color: 'var(--accent-blue)',
+                glow: 'var(--glow-blue)',
+                desc: 'Evaluates native text extraction. If a PDF has no copyable text, or if file is an image (.png/.jpg), it triggers EasyOCR. Because OCR runs on the CPU by default, it uses neural weights to read letters page-by-page.',
+                code: 'if len(text.strip()) < 50:\n  reader = easyocr.Reader(["en"], gpu=False)\n  res = reader.readtext(img_np, detail=0)\n  text += " " + " ".join(res)',
+                sandbox: () => {
+                    if (selectedDocType === 'zip') {
+                        return `> Extracting text from files in ZIP:\n  - 10-MFA_operator.docx (Native Text -> Done)\n  - 117_Log_Archived_AUA_Prod.jpg (Running EasyOCR on CPU...)\n    [EasyOCR] Extracted 42 words in 3.8s.\n  - 121_NTP_Sync_AUA_DB.jpg (Running EasyOCR on CPU...)\n    [EasyOCR] Extracted 88 words in 4.1s.`;
+                    } else {
+                        return `> Extracting text from scanned PDF:\n  - Page 1: Native characters = 0. Falling back to OCR...\n    [EasyOCR] Extracted 240 words in 4.6s.\n  - Page 2: OCR Running... Extracted 198 words in 4.2s.`;
+                    }
+                }
+            },
+            {
+                id: 'node-chunk',
+                title: 'Dynamic Hybrid Chunking',
+                color: 'var(--accent-blue)',
+                glow: 'var(--glow-blue)',
+                desc: 'Segments the text stream:\n• Plain text: Dynamically splits into overlapping segments of 1000 characters with 200 characters overlap.\n• Excel/CSV: Creates sliding chunks of 15 rows with 3 rows overlap, prepending the sheet column headers to each chunk.',
+                code: 'def chunk_text_by_chars(text, target=1000, overlap=200):\n  # Sliding window of characters\n\ndef chunk_xlsx(df):\n  # Sliding window of 15 rows + column header prepended',
+                sandbox: () => `> Formatting text chunks...\n> Created ${selectedDocType === 'zip' ? '28 chunks from text policy documents\n> Created 4 table chunks from Excel rows' : '12 chunks from scanned PDF pages'}`
+            },
+            {
+                id: 'node-db',
+                title: 'ShaktiDB Storage & Replication',
+                color: 'var(--accent-blue)',
+                glow: 'var(--glow-blue)',
+                desc: 'Saves chunk contents and metadata JSON to the database. Uses RoutingSession to direct writes to ShaktiDB Master. Replicates records synchronously to Slave 1 and Slave 2 replicas to ensure high availability.',
+                code: 'db_chunk = DocumentChunk(filename, chunk_index, content, metadata_json)\nwith force_master():\n  session.add(db_chunk)\n  session.commit()',
+                sandbox: () => `> Connecting to ShaktiDB master on port 15234...\n> Storing chunks... \n> [REPLICATION] Replicating to Slave 1... Success.\n> [REPLICATION] Replicating to Slave 2... Success.\n> Chunks saved in Database.`
+            },
+            {
+                id: 'node-syns',
+                title: 'Synonyms Density Matrix Scoping',
+                color: 'var(--accent-purple)',
+                glow: 'var(--glow-purple)',
+                desc: 'Reads chosen ISO control targets and maps out keywords. Incorporates synonym arrays (e.g. access control -> badge, keycard, rfid, biometric) to evaluate and rank matching chunks.',
+                code: 'KEYWORD_SYNONYMS = {\n  "access control": ["badge", "keycard", "visitor", "sign-in", "reception"],\n  "privileged": ["admin", "root", "superuser"]\n}',
+                sandbox: () => `> Target Control: A.5.15 & A.7.2 (Access Control & Physical Entry)\n> Extracted query terms: "access control", "physical entry"\n> Synonym weights injected: ["badge" (1.5), "keycard" (1.5), "visitor" (1.5), "logbook" (1.5)]`
+            },
+            {
+                id: 'node-embed',
+                title: 'Ollama Query Vector Generation',
+                color: 'var(--accent-purple)',
+                glow: 'var(--glow-purple)',
+                desc: 'Converts target controls and expected evidence parameters into a text query, then calls the local Ollama embedding API with the `nomic-embed-text` model.',
+                code: 'requests.post("http://127.0.0.1:11434/api/embeddings", json={\n  "model": "nomic-embed-text",\n  "prompt": query_text\n})',
+                sandbox: () => `> Requesting local query embedding vector via Ollama...\n> Model: nomic-embed-text\n> Generated 768-dimension query vector successfully.`
+            },
+            {
+                id: 'node-density',
+                title: 'Term Frequency Matching (40%)',
+                color: 'var(--accent-purple)',
+                glow: 'var(--glow-purple)',
+                desc: 'Performs lexical regex search on database chunks. Keywords found in control title are weighted at 3.0, instructions at 2.0, and synonym terms at 1.5.',
+                code: 'for kw, weight in batch_keywords.items():\n  count = len(re.findall(r"\\b" + re.escape(kw) + r"\\b", chunk_content))\n  score += count * weight',
+                sandbox: () => `> Lexical scan completed across database chunks:\n  - Chunk #12 (Physical Access Rules): Score = 18.5\n  - Chunk #3 (HR Offboarding): Score = 4.5\n  - Chunk #18 (AWS CloudWatch): Score = 1.0`
+            },
+            {
+                id: 'node-cosine',
+                title: 'Semantic Cosine Similarity (60%)',
+                color: 'var(--accent-purple)',
+                glow: 'var(--glow-purple)',
+                desc: 'Calculates cosine similarity between the query embedding and database chunk embeddings. Multi-threaded worker pool calculates embeddings for any new/uncached chunks.',
+                code: 'similarity = dot_product(v1, v2) / (norm(v1) * norm(v2))\nhybrid_score = 0.4 * normalized_keyword + 0.6 * similarity',
+                sandbox: () => `> ThreadPoolExecutor mapping uncached chunks to embeddings API...\n> Similarity matching scores:\n  - Chunk #12 (Access Card Rules): Similarity = 0.81 (Hybrid: 0.86)\n  - Chunk #5 (MFA Setup): Similarity = 0.74 (Hybrid: 0.62)`
+            },
+            {
+                id: 'node-dedup',
+                title: 'Jaccard Deduplication Filter',
+                color: 'var(--accent-purple)',
+                glow: 'var(--glow-purple)',
+                desc: 'Ensures RAG context quality. Performs exact-string duplicate checks, followed by Jaccard Similarity index evaluations. Any chunks sharing >= 97% word-level similarity are discarded.',
+                code: 'def jaccard_similarity(t1, t2):\n  intersection = set(t1).intersection(set(t2))\n  union = set(t1).union(set(t2))\n  return len(intersection) / len(union)\n# if score >= 0.97 -> drop duplicate',
+                sandbox: () => `> Jaccard Deduplication check:\n  [KEPT] Chunk #12 (Jaccard=0.12 with pool)\n  [KEPT] Chunk #5 (Jaccard=0.08 with pool)\n  [FILTERED] Chunk #13 (Jaccard=0.98 -> exact copy of #12)`
+            },
+            {
+                id: 'node-topk',
+                title: 'Dynamic Top_K Filtering',
+                color: 'var(--accent-purple)',
+                glow: 'var(--glow-purple)',
+                desc: 'Restricts the number of retrieved chunks to avoid model token limits. The limits are dynamically adjusted according to document type configurations (e.g. max 12 chunks for PDFs, 8 for Excel).',
+                code: 'top_k_config = load_top_k_config() # {"pdf": 12, "xlsx": 8}\nretrieved = sorted_chunks[:configured_top_k]',
+                sandbox: () => `> Sorting chunks by hybrid rank score...\n> Configured Top_K for ZIP/PDF: 12\n> Retained top 12 chunks.`
+            },
+            {
+                id: 'node-metadata',
+                title: 'Metadata Ordering & Provenance',
+                color: 'var(--accent-teal)',
+                glow: 'var(--glow-teal)',
+                desc: 'Sorts chunks chronologically using their page, slide, or row indices. Ensures the context flows in document order, making it easier for the LLM to follow.',
+                code: 'sorted_chunks = sorted(retrieved_chunks, key=lambda x: (x.source_file, x.page_number))',
+                sandbox: () => `> Ordering retrieved context chronologically:\n  - Chunk #2 (Page 2) -> Chunk #12 (Page 4) -> Chunk #22 (Page 9)`
+            },
+            {
+                id: 'node-builder',
+                title: 'Token Budget Assembled Context',
+                color: 'var(--accent-teal)',
+                glow: 'var(--glow-teal)',
+                desc: 'Combines the sorted text segments together. Checks token boundaries using a target budget of 1500 tokens (approx 6,000 characters) and a hard-max limit of 2000 tokens.',
+                code: 'assembled = "\\n\\n".join(c.content for c in sorted_chunks)\nif len(assembled) > HARD_LIMIT:\n  assembled = assembled[:HARD_LIMIT]',
+                sandbox: () => {
+                    const tokCount = selectedDocType === 'zip' ? 1420 : 980;
+                    updateTokenBar(tokCount);
+                    return `> Assembling prompt context...\n> Assembled context size: ${tokCount * 4} characters (~${tokCount} tokens)\n> Budget status: SAFE`;
+                }
+            },
+            {
+                id: 'node-ollama',
+                title: 'Ollama LLM Structured Generation',
+                color: 'var(--accent-pink)',
+                glow: 'var(--glow-pink)',
+                desc: 'Issues a POST request to the local Ollama API. Uses zero temperature for deterministic outputs, loading models (Qwen2.5 3B/7B or Llama3.1 8B) in active RAM.',
+                code: 'r = requests.post("http://127.0.0.1:11434/api/generate", json={\n  "model": "qwen2.5:7b",\n  "prompt": final_prompt,\n  "options": { "temperature": 0.0 }\n})',
+                sandbox: () => `> Contacting local Ollama endpoint http://127.0.0.1:11434...\n> Loaded model: qwen2.5:7b (in-memory)\n> Executing inference at temperature=0.0...\n> Stream response received (JSON mode).`
+            },
+            {
+                id: 'node-validator',
+                title: 'Lead Auditor Verification Layer',
+                color: 'var(--accent-pink)',
+                glow: 'var(--glow-pink)',
+                desc: 'Reviews structured model responses. Verifies that evidence quotes exist verbatim in the source text to prevent hallucinations. Ensures compliance status mappings conform to rules.',
+                code: 'for r in results:\n  if r["status"] == "Compliant" and r["evidence_quote"] not in raw_context:\n    r["status"] = "Non-Compliant"\n    r["evidence_found"] = "NO_EVIDENCE"',
+                sandbox: () => `> Running cross-control duplicate quote check...\n> Hallucination scan: verifying evidence quote matches source text...\n  [VERIFIED] "All entry doors are protected by card badges." -> Match found.\n> Output formatted successfully:\n{\n  "control_id": "5.15",\n  "status": "Compliant",\n  "evidence_found": "SUFFICIENT",\n  "severity": "N/A"\n}`
+            }
+        ];
+
+        // Renders active node index details
+        function clickNode(idx) {
+            if (activeNodeIdx !== -1) {
+                document.getElementById(nodesMetadata[activeNodeIdx].id).classList.remove('active-node');
+            }
+            activeNodeIdx = idx;
+            const data = nodesMetadata[idx];
+            document.getElementById(data.id).classList.add('active-node');
+            
+            // Adjust parent cards active styles
+            const isIndexing = idx < 4;
+            const isRetrieval = idx >= 4 && idx < 10;
+            const isAugment = idx >= 10 && idx < 12;
+            const isGen = idx >= 12;
+            
+            document.getElementById('stage-indexing-card').classList.toggle('active-stage', isIndexing);
+            document.getElementById('stage-retrieval-card').classList.toggle('active-stage', isRetrieval);
+            document.getElementById('stage-augmented-card').classList.toggle('active-stage', isAugment);
+            document.getElementById('stage-generation-card').classList.toggle('active-stage', isGen);
+
+            document.getElementById('arrow-stage-1').classList.toggle('active-arrow', idx === 3);
+            document.getElementById('arrow-stage-2').classList.toggle('active-arrow', idx === 9);
+            document.getElementById('arrow-stage-3').classList.toggle('active-arrow', idx === 11);
+
+            // Update details
+            document.getElementById('explanation-card').innerHTML = `
+                <div class="explanation-header" style="color: ${data.color}">
+                    <span>Node ${idx + 1}: ${data.title}</span>
+                </div>
+                <div class="explanation-body">
+                    ${data.desc}
+                </div>
+                <div class="code-snippet" id="code-snippet-box">
+                    ${data.code.replace(/\n/g, '<br>')}
+                </div>
+            `;
+            
+            // Update Sandbox
+            document.getElementById('sandbox-status').innerText = data.title;
+            document.getElementById('sandbox-status').style.color = data.color;
+            document.getElementById('console-logs').innerHTML = data.sandbox().replace(/\n/g, '<br>');
+            
+            // Scroll flowchart node into view
+            const nodeEl = document.getElementById(data.id);
+            const container = document.getElementById('pipeline-container');
+            container.scrollTop = nodeEl.offsetTop - container.offsetTop - 40;
+        }
+
+        function updateTokenBar(tokens) {
+            const bar = document.getElementById('token-bar-element');
+            const lbl = document.getElementById('token-count-lbl');
+            const pct = Math.min(100, (tokens / 2000) * 100);
+            bar.style.width = `${pct}%`;
+            lbl.innerText = `${tokens} / 2000 tokens`;
+        }
+
+        // Toggle playback simulation
+        function togglePlayback() {
+            const btn = document.getElementById('play-btn');
+            if (isPlaying) {
+                clearInterval(playbackTimer);
+                btn.innerText = '▶ Play Simulation';
+                btn.classList.add('btn-play');
+                isPlaying = false;
+            } else {
+                btn.innerText = '⏸ Pause Simulation';
+                btn.classList.remove('btn-play');
+                isPlaying = true;
+                
+                if (activeNodeIdx >= 13 || activeNodeIdx === -1) {
+                    activeNodeIdx = -1;
+                    updateTokenBar(0);
+                }
+                
+                playbackTimer = setInterval(() => {
+                    activeNodeIdx++;
+                    if (activeNodeIdx < 14) {
+                        clickNode(activeNodeIdx);
+                    } else {
+                        clearInterval(playbackTimer);
+                        btn.innerText = '▶ Play Simulation';
+                        btn.classList.add('btn-play');
+                        isPlaying = false;
+                    }
+                }, 2800);
+            }
+        }
+
+        function resetWorkflow() {
+            if (isPlaying) togglePlayback();
+            activeNodeIdx = -1;
+            updateTokenBar(0);
+            document.getElementById('stage-indexing-card').classList.remove('active-stage');
+            document.getElementById('stage-retrieval-card').classList.remove('active-stage');
+            document.getElementById('stage-augmented-card').classList.remove('active-stage');
+            document.getElementById('stage-generation-card').classList.remove('active-stage');
+            document.getElementById('arrow-stage-1').classList.remove('active-arrow');
+            document.getElementById('arrow-stage-2').classList.remove('active-arrow');
+            document.getElementById('arrow-stage-3').classList.remove('active-arrow');
+            
+            nodesMetadata.forEach(n => {
+                document.getElementById(n.id).classList.remove('active-node');
+            });
+            
+            document.getElementById('explanation-card').innerHTML = `
+                <div class="explanation-header" style="color: var(--accent-blue)">
+                    <span>📢 Flow Visualizer Standby</span>
+                </div>
+                <div class="explanation-body">
+                    Click <b>Play Simulation</b> to trigger the detailed data flow pipeline, or click any individual RAG node to inspect code and execution details.
+                </div>
+                <div class="code-snippet" id="code-snippet-box">
+                    # Waiting for selection...
+                </div>
+            `;
+            document.getElementById('console-logs').innerHTML = `> System initialized. Waiting for playback simulation...`;
+            document.getElementById('sandbox-status').innerText = 'Idle';
+            document.getElementById('sandbox-status').style.color = 'var(--accent-blue)';
+        }
+
+        function setDocType(type) {
+            if (isPlaying) togglePlayback();
+            selectedDocType = type;
+            document.getElementById('doc-btn-zip').classList.toggle('btn-active', type === 'zip');
+            document.getElementById('doc-btn-single').classList.toggle('btn-active', type === 'single');
+            
+            if (type === 'zip') {
+                document.getElementById('val-target').innerText = 'aa_audit_samples.zip';
+                document.getElementById('val-chunk').innerText = '1000 Chars / 200 Overlap';
+                document.getElementById('val-topk').innerText = '8 Chunks Limit';
+            } else {
+                document.getElementById('val-target').innerText = 'scanned_badge_policy.pdf';
+                document.getElementById('val-chunk').innerText = '1000 Chars / 200 Overlap';
+                document.getElementById('val-topk').innerText = '12 Chunks Limit';
+            }
+            resetWorkflow();
+        }
+    </script>
+</body>
+</html>

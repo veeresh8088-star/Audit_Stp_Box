@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -c src/api/static/app.js)",
+      "Bash(python -m py_compile src/ai/audit_chains.py)"
+    ]
+  }
+}
