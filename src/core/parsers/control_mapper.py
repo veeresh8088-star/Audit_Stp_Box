@@ -440,20 +440,90 @@ def get_actionable_remediation(finding: Finding) -> str:
     """
     combined = f"{(finding.title or '').lower()} {(finding.description or '').lower()}"
 
+    # ── PQC findings bypass the VAPT keyword templates entirely ───────────────
+    # Without this guard, short keys like 'ssl' and 'tls' match PQC database/
+    # TLS findings first, returning generic VAPT guidance ("Upgrade to TLS 1.2+")
+    # instead of the correct PQC-specific actionable steps.
+    _title_low = (finding.title or "").lower()
+    _is_pqc = (
+        (finding.category or "").upper() in (
+            "PQC", "POST-QUANTUM CRYPTOGRAPHY",
+            "ELLIPTIC CURVE CRYPTOGRAPHY (ECC)", "ASYMMETRIC ENCRYPTION (RSA)",
+            "DATABASE TLS CONFIGURATION", "PROTOCOL VERSION"
+        )
+        or (finding.control_id or "").upper().startswith("PQC")
+        or getattr(finding, "quantum_status", None) is not None
+    )
+
     # Check each template key against combined text. Word-boundary matched, not plain
     # substring containment -- a bare `key in combined` check let short keys like "rce"
     # match inside unrelated words (enfoRCEd, souRCE, resouRCE, divoRCE...), handing out
     # wrong/irrelevant remediation guidance for findings that had nothing to do with
     # remote code execution.
-    for key, guidance in _REMEDIATION_TEMPLATES.items():
-        if re.search(rf'\b{re.escape(key)}\b', combined):
-            return guidance
+    if not _is_pqc:
+        for key, guidance in _REMEDIATION_TEMPLATES.items():
+            if re.search(rf'\b{re.escape(key)}\b', combined):
+                return guidance
 
-    # No keyword template matched -- build a structured, genuinely actionable fallback
-    # instead of returning the scanner's raw remediation text unchanged.
+    # No keyword template matched.
     cve_ref = finding.cve_list[0] if finding.cve_list else None
     base_remed = (finding.remediation or "").strip()
 
+    # ── PQC findings: return a SHORT, genuinely distinct developer action list ──
+    # The full multi-step remediation is already in finding.recommendation.
+    # Repeating it here (with "Apply the fix: " prefix) makes both sections
+    # look identical -- no value. Instead emit a concise per-algorithm action.
+    # (_title_low and _is_pqc are set at the top of this function.)
+    if _is_pqc:
+        # Pick the shortest meaningful dev action by algorithm class
+        if "rsa" in _title_low:
+            return (
+                "1. Audit all RSA key usages in this asset (TLS cert, SSH, JWT, S/MIME). "
+                "2. Disable static-RSA cipher suites — keep only ECDHE-* (PFS) as interim. "
+                "3. Re-issue the TLS certificate as ECDSA P-256 (short-term) or ML-DSA-65/FIPS-204 (post-quantum). "
+                "4. Re-run the PQC scanner after each change to confirm the finding is resolved."
+            )
+        if "ecdsa" in _title_low:
+            return (
+                "1. Replace ECDSA TLS/SSH certificates with ML-DSA (FIPS 204) once your CA supports it. "
+                "2. Interim: add X25519MLKEM768 to ssl_ecdh_curve to harden the key-exchange layer now. "
+                "3. Migrate JWT / code-signing keys to ML-DSA-44 or ML-DSA-65. "
+                "4. Re-run the PQC scanner after migration to confirm."
+            )
+        if "x25519" in _title_low or "curve25519" in _title_low:
+            return (
+                "1. Set ssl_ecdh_curve X25519MLKEM768:X25519; in NGINX — one config change enables hybrid PQC. "
+                "2. For SSH: add sntrup761x25519-sha512@openssh.com to KexAlgorithms in sshd_config (OpenSSH 9.0+). "
+                "3. Re-run the PQC scanner to confirm X25519MLKEM768 is detected as the active KEM."
+            )
+        if "secp384" in _title_low or "ecc" in _title_low or "elliptic" in _title_low:
+            return (
+                "1. Replace secp384r1 with X25519MLKEM768 hybrid in ssl_ecdh_curve — works with current OpenSSL 3.x. "
+                "2. Plan certificate re-issuance to ML-DSA-65 (FIPS 204) once your CA supports PQC hybrids. "
+                "3. Re-run the PQC scanner after each change to confirm no classical-only curves remain."
+            )
+        if "database" in _title_low or "mysql" in _title_low or "ssl cert" in _title_low or "ssl key" in _title_low or "sql" in _title_low:
+            return (
+                "1. Set tls_ciphersuites = TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256 in my.cnf. "
+                "2. Set tls_version = TLSv1.3 and remove TLSv1.2 if still listed. "
+                "3. Apply network compensating controls (private VPC, mTLS) while awaiting PQC-capable DB engine. "
+                "4. Re-run the PQC scanner after config change to confirm TLS hardening is in effect."
+            )
+        if "tls" in _title_low or "protocol" in _title_low:
+            return (
+                "1. Add X25519MLKEM768 as the first entry in ssl_ecdh_curve for hybrid PQC key exchange. "
+                "2. Ensure tls_version = TLSv1.3 only — disable TLSv1.2 if the client population allows. "
+                "3. Re-run the PQC scanner to confirm ML-KEM hybrid is active in the TLS handshake."
+            )
+        # Generic PQC fallback
+        return (
+            "1. Identify the specific algorithm in use and its role (key exchange, signature, or encryption). "
+            "2. Replace with the NIST-selected post-quantum equivalent: ML-KEM (FIPS 203) for key exchange, "
+            "ML-DSA (FIPS 204) for signatures, SLH-DSA (FIPS 205) as alternative signature scheme. "
+            "3. Re-run the PQC scanner after migration to confirm the finding is resolved."
+        )
+
+    # ── VAPT / CVE-based findings: structured actionable fallback ─────────────
     if cve_ref:
         fix_step = f"Apply the vendor-supplied patch addressing {cve_ref} for the affected component."
     elif base_remed:
