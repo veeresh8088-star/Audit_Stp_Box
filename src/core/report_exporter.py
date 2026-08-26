@@ -1615,12 +1615,14 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
             for f in cbom_rows:
                 qs  = str(f.get("quantum_status") or "").upper()
                 cat = str(f.get("asset_category") or "Unknown")
+                proto_val = str(f.get("protocol_version") or "").strip()
+                proto_clean = re.sub(r'\s*\([^)]*\)', '', proto_val).strip()
                 r = tbl.row()
                 r.cell(clean_text(cat[:20]), style=lbl_style)
                 r.cell(clean_text(str(f.get("asset_name") or "")[:22]), style=body_style)
                 r.cell(clean_text(str(f.get("ca_algorithm") or "")[:18]), style=body_style)
                 r.cell(clean_text(str(f.get("key_algorithm") or "")[:18]), style=body_style)
-                r.cell(clean_text(str(f.get("protocol_version") or "")[:20]), style=body_style)
+                r.cell(clean_text((proto_clean or proto_val)[:20]), style=body_style)
                 r.cell(clean_text(qs[:18]), style=qs_style_for(qs))
                 r.cell(clean_text(str(f.get("exposure_context") or "")[:15]), style=body_style)
                 r.cell(clean_text(str(f.get("port") or "")[:8]), style=body_style)
@@ -1679,6 +1681,7 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
         rs  = f.get("risk_score")
         ctrl_id = clean_text(str(f.get("control_id") or f.get("control") or f"PQC-{idx}"))
         title   = clean_text(str(f.get("control_name") or f.get("title") or ctrl_id)[:80])
+        full_ctrl = f"{ctrl_id} - {title}" if (len(ctrl_id) <= 12 and title and not title.lower().startswith(ctrl_id.lower())) else ctrl_id
         desc    = clean_text(str(f.get("description") or f.get("gap_description") or "")[:600])
         recom   = clean_text(str(f.get("recommendation") or f.get("remediation_actionable") or "")[:400])
         poc     = clean_text(str(f.get("evidence_snippet") or f.get("evidence_quote") or "")[:400])
@@ -1692,7 +1695,7 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
         pdf.set_fill_color(*PQC_BLUE)
         pdf.set_text_color(255, 255, 255)
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 7, clean_text(f"  4.{idx}  {ctrl_id}  -  {title}"), fill=True,
+        pdf.cell(0, 7, clean_text(f"  4.{idx}  {full_ctrl}"), fill=True,
                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(2)
 
@@ -1700,7 +1703,7 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
         meta_rows = [
             ("Asset Category",     clean_text(str(f.get("asset_category") or "Unknown"))),
             ("Target Host / Asset", asset),
-            ("Control ID",          ctrl_id),
+            ("Control ID",          full_ctrl),
             ("Quantum Status",      qs or "-"),
             ("Severity",            sev),
             ("Risk Score",          str(rs) if rs is not None else "-"),
@@ -2198,7 +2201,8 @@ def _export_pqc_docx(session_title, findings, resolved_list, status, comments=""
     _heading("6. Detailed PQC Findings", level=1)
     for idx, f in enumerate(active, 1):
         ctrl_id   = f.get("control_id") or f.get("control") or f"PQC-{idx}"
-        title     = f.get("title") or "Unknown Finding"
+        title     = f.get("title") or f.get("control_name") or "Unknown Finding"
+        full_ctrl = f"{ctrl_id} - {title}" if (len(str(ctrl_id)) <= 12 and title and not title.lower().startswith(str(ctrl_id).lower())) else ctrl_id
         severity  = f.get("severity") or "-"
         qs        = f.get("quantum_status") or "-"
         cia       = f.get("cia_impact") or "-"
@@ -2213,7 +2217,7 @@ def _export_pqc_docx(session_title, findings, resolved_list, status, comments=""
         dep_chain = f.get("dependency_chain") or ""
 
         sev_color = VULN_RED if "CRIT" in severity.upper() or "HIGH" in severity.upper() else (WEAK_ORG if "MED" in severity.upper() else DARK)
-        _heading(f"{ctrl_id}  {title}", level=2)
+        _heading(f"{full_ctrl}", level=2)
 
         fd_tbl = doc.add_table(rows=0, cols=2)
         fd_tbl.style = "Table Grid"
@@ -2231,7 +2235,7 @@ def _export_pqc_docx(session_title, findings, resolved_list, status, comments=""
             ("Attack Vector",     av_label),
             ("OEM Product",       oem_prod),
             ("OEM Readiness",     oem_rdy),
-            ("Control ID",        ctrl_id),
+            ("Control ID",        full_ctrl),
             ("OWASP Category",    f.get("owasp_category") or "-"),
         ]:
             row = fd_tbl.add_row()

@@ -470,152 +470,129 @@ ALGORITHM_RULES: List[Tuple[str, "re.Pattern", Union[None, str, Callable], str, 
     # ── DATABASE / SERVER TLS CONFIG PATTERNS ──────────────────────────────────
     # Catches MySQL/MariaDB/PostgreSQL config files that enable SSL/TLS transport
     # but do not specify a PQC-ready cipher suite.
-    # Rule: any line setting ssl-cert or ssl-key without an explicit cipher list
-    # in the same file (the absence check is done at parse-time via a post-filter).
     ("db-ssl-cert",
      re.compile(r'^\s*ssl[\-_]cert\s*=\s*.+', re.IGNORECASE | re.MULTILINE),
-     "Database TLS - SSL Certificate (no cipher suite specified)",
+     "Database TLS Certificate",
      "VULNERABLE",
      "Database TLS Configuration",
      "HIGH"),
     ("db-ssl-key",
      re.compile(r'^\s*ssl[\-_]key\s*=\s*.+', re.IGNORECASE | re.MULTILINE),
-     "Database TLS - SSL Private Key (no cipher suite specified)",
+     "Database TLS Key",
      "VULNERABLE",
      "Database TLS Configuration",
      "HIGH"),
-    # Catches TLS 1.2-only or TLS 1.2+1.3 without PQC cipher suite in DB configs.
     ("db-tls12",
      re.compile(r'\btls[_\-]?version\s*=\s*["\']?TLSv1\.2["\']?', re.IGNORECASE),
-     "TLS 1.2 (Database config - quantum-vulnerable key exchange)",
+     "TLSv1.2",
      "VULNERABLE",
      "Protocol Version",
      "HIGH"),
-    # TLS 1.3 in a DB config still uses classical key exchange (no PQC KEMs).
     ("db-tls13-no-pqc",
      re.compile(r'\btls[_\-]?version\s*=\s*["\']?TLSv1\.3["\']?', re.IGNORECASE),
-     "TLS 1.3 (Database config - classical key exchange only, no PQC KEM)",
+     "TLSv1.3",
      "VULNERABLE",
      "Protocol Version",
      "MEDIUM"),
 
     # ── SPRING BOOT / JAVA APPLICATION TLS ────────────────────────────────────
-    # Catches application.properties / application.yml enabling SSL/TLS without
-    # specifying a PQC-ready cipher suite or key algorithm.
     ("springboot-ssl-enabled",
      re.compile(r'^\s*server\.ssl\.enabled\s*[=:]\s*true', re.IGNORECASE | re.MULTILINE),
-     "Spring Boot TLS - SSL enabled (no PQC cipher suite specified)",
+     "Spring Boot TLS",
      "VULNERABLE", "Application TLS Configuration", "HIGH"),
     ("java-keystore-pkcs12",
      re.compile(r'^\s*server\.ssl\.key[\-_]store[\-_]type\s*[=:]\s*PKCS12', re.IGNORECASE | re.MULTILINE),
-     "Spring Boot / Java PKCS12 Keystore (RSA/ECDSA certificate assumed, no PQC)",
+     "Java PKCS12 Keystore",
      "VULNERABLE", "Application TLS Configuration", "HIGH"),
 
     # ── KUBERNETES / CONTAINER TLS ────────────────────────────────────────────
-    # Catches Kubernetes TLS Secrets and Ingress TLS configs that bundle classical
-    # certificates without any PQC-capable cipher or key algorithm.
     ("k8s-tls-secret",
      re.compile(r'kubernetes\.io/tls', re.IGNORECASE),
-     "Kubernetes TLS Secret (classical cipher suite - no PQC KEM)",
+     "Kubernetes TLS Secret",
      "VULNERABLE", "Container / Cloud TLS Configuration", "HIGH"),
     ("k8s-ingress-tls",
      re.compile(r'^\s*tls:\s*$', re.IGNORECASE | re.MULTILINE),
-     "Kubernetes Ingress TLS block (classical cipher suite - no PQC KEM)",
+     "Kubernetes Ingress TLS",
      "VULNERABLE", "Container / Cloud TLS Configuration", "MEDIUM"),
 
     # ── STRONGSWAN / IPSEC modpXXXX DH GROUPS ─────────────────────────────
-    # StrongSwan / libreswan use modpXXXX notation for DH groups in ike= and esp= lines.
-    # modp1024=DH14(CRITICAL), modp2048=DH14(HIGH), modp4096=DH16(HIGH) -- all quantum-vulnerable.
     ("ipsec-modp",
      re.compile(r'\bmodp(1024|1536|2048|3072|4096|6144|8192)\b', re.IGNORECASE),
-     lambda m: f"IKEv2/IPSec DH modp{m.group(1)} (classical Diffie-Hellman - quantum-vulnerable)",
+     lambda m: f"DH modp{m.group(1)}",
      "VULNERABLE", "Key Exchange (Diffie-Hellman)",
      lambda m: "CRITICAL" if int(m.group(1)) <= 2048 else "HIGH"),
 
     # ── GENERIC TLS VERSION IN ENV / YAML / TOML FORMATS ──────────────────────
-    # Catches TLS version declarations in Docker Compose, TOML, env files that
-    # use different separators or skip the 'v' prefix (e.g. TLS_VERSION=1.2).
     ("tls12-env-var",
      re.compile(r'TLS[_\-]?VERSION\s*[=:]\s*["\']?(?:TLSv?)?1\.2["\']?', re.IGNORECASE),
-     "TLS 1.2 (environment variable / YAML config - quantum-vulnerable key exchange)",
+     "TLSv1.2",
      "VULNERABLE", "Protocol Version", "HIGH"),
     ("tls-min-version",
      re.compile(r'\bmin[_\-]?(?:tls[_\-]?)?version\s*[=:]\s*["\']?(?:TLSv?)?1\.2["\']?', re.IGNORECASE),
-     "TLS 1.2 minimum version (config - quantum-vulnerable key exchange)",
+     "TLSv1.2",
      "VULNERABLE", "Protocol Version", "HIGH"),
 
     # ── APACHE KAFKA TLS CONFIGURATION ────────────────────────────────────
-    # Kafka broker.properties uses 'ssl.' prefix (not 'server.ssl.' like Spring Boot).
-    # Catches keystore config, keystore type, enabled protocols without PQC cipher.
     ("kafka-ssl-keystore",
      re.compile(r'^\s*ssl\.keystore\.location\s*=\s*.+', re.IGNORECASE | re.MULTILINE),
-     "Kafka Broker TLS - Keystore configured (no PQC cipher suite specified)",
+     "Kafka Broker TLS",
      "VULNERABLE", "Application TLS Configuration", "HIGH"),
     ("kafka-ssl-keystore-type",
      re.compile(r'^\s*ssl\.keystore\.type\s*=\s*(?:JKS|PKCS12)', re.IGNORECASE | re.MULTILINE),
-     "Kafka Broker TLS - JKS/PKCS12 Keystore (RSA/ECDSA certificate assumed, no PQC)",
+     "Kafka PKCS12 Keystore",
      "VULNERABLE", "Application TLS Configuration", "HIGH"),
     ("kafka-ssl-protocol",
      re.compile(r'^\s*ssl\.protocol\s*=\s*TLS', re.IGNORECASE | re.MULTILINE),
-     "Kafka Broker TLS - TLS protocol enabled (no PQC cipher suite specified)",
+     "Kafka TLS",
      "VULNERABLE", "Application TLS Configuration", "MEDIUM"),
     ("kafka-ssl-enabled-protocols",
      re.compile(r'^\s*ssl\.enabled\.protocols\s*=\s*.*TLSv?1\.2', re.IGNORECASE | re.MULTILINE),
-     "Kafka Broker TLS - TLS 1.2 in enabled protocols (quantum-vulnerable key exchange)",
+     "TLSv1.2",
      "VULNERABLE", "Protocol Version", "HIGH"),
 
     # ── GnuTLS PRIORITY STRINGS ───────────────────────────────────────────
-    # GnuTLS uses '+VERS-TLS1.2', 'NORMAL:%NO_TICKETS' etc. style priority strings.
-    # The presence of VERS-TLS1.2 without a PQC KEM group = quantum-vulnerable.
     ("gnutls-tls12",
      re.compile(r'VERS-TLS1\.2', re.IGNORECASE),
-     "GnuTLS Priority String - TLS 1.2 (quantum-vulnerable key exchange)",
+     "TLSv1.2",
      "VULNERABLE", "Protocol Version", "HIGH"),
     ("gnutls-tls10",
      re.compile(r'VERS-TLS1\.0', re.IGNORECASE),
-     "GnuTLS Priority String - TLS 1.0 (deprecated, quantum-vulnerable)",
+     "TLSv1.0",
      "WEAK", "Protocol Version", "CRITICAL"),
     ("gnutls-no-pqc",
      re.compile(r'GnuTLS[:\s].*(?:NORMAL|SECURE)', re.IGNORECASE),
-     "GnuTLS NORMAL/SECURE profile (classical key exchange only - no PQC KEM)",
+     "GnuTLS Profile",
      "VULNERABLE", "Protocol Version", "MEDIUM"),
 
     # ── HAPROXY DH PARAM SIZE ───────────────────────────────────────────
-    # HAProxy sets a custom static DH parameter size instead of using ECDHE.
-    # Any static DH param (even 4096-bit) is quantum-vulnerable via Shor's algorithm.
     ("haproxy-dh-param",
      re.compile(r'tune\.ssl\.default-dh-param\s+(\d+)', re.IGNORECASE),
-     lambda m: f"HAProxy static DH parameter: {m.group(1)}-bit (classical Diffie-Hellman - quantum-vulnerable)",
+     lambda m: f"DH {m.group(1)}-bit",
      "VULNERABLE", "Key Exchange (Diffie-Hellman)",
      lambda m: "CRITICAL" if int(m.group(1)) <= 2048 else "HIGH"),
 
-    # ── JVM / JDK SYSTEM PROPERTIES (shell/batch startup scripts) ─────────────
-    # JVM startup flags that explicitly configure TLS protocol versions or disable
-    # algorithms -- found in start.sh, catalina.bat, startup.ps1, Dockerfile CMD lines.
+    # ── JVM / JDK SYSTEM PROPERTIES ───────────────────────────────────────────
     ("jvm-https-protocols",
      re.compile(r'-Dhttps?\.protocols\s*=\s*[\w,.]*TLSv?1\.2', re.IGNORECASE),
-     "JVM -Dhttps.protocols = TLSv1.2 (quantum-vulnerable key exchange)",
+     "TLSv1.2",
      "VULNERABLE", "Protocol Version", "HIGH"),
     ("jvm-disabled-algorithms",
      re.compile(r'-Djdk\.tls\.disabledAlgorithms\s*=\s*\S+', re.IGNORECASE),
-     "JVM -Djdk.tls.disabledAlgorithms flag detected (review disabled algorithm list for PQC gaps)",
+     "JVM disabledAlgorithms",
      "VULNERABLE", "Application TLS Configuration", "MEDIUM"),
     ("jvm-tls-version",
      re.compile(r'-Djavax\.net\.ssl\.(?:trustStore|keyStore)\w*\s*=\s*.+', re.IGNORECASE),
-     "JVM JSSE keystore/truststore system property (RSA/ECDSA assumed, no PQC)",
+     "JVM JSSE Keystore",
      "VULNERABLE", "Application TLS Configuration", "HIGH"),
 
     # ── WINDOWS CRYPTOAPI / CNG REGISTRY EXPORTS (.reg) ──────────────────
-    # Windows registry exports from regedit showing Schannel / CNG crypto provider config.
-    # Windows registry .reg files use single backslash in paths.
-    # Simplified SCHANNEL anchor is more reliable than full-path regex.
     ("winreg-schannel-tls10",
      re.compile(r'SCHANNEL[\\]+Protocols[\\]+TLS 1\.0', re.IGNORECASE),
-     "Windows Schannel TLS 1.0 registry key (deprecated, quantum-vulnerable)",
+     "TLSv1.0",
      "WEAK", "Protocol Version", "CRITICAL"),
     ("winreg-schannel-tls12",
      re.compile(r'SCHANNEL[\\]+Protocols[\\]+TLS 1\.2', re.IGNORECASE),
-     "Windows Schannel TLS 1.2 registry key (quantum-vulnerable key exchange)",
+     "TLSv1.2",
      "VULNERABLE", "Protocol Version", "HIGH"),
     # CNG RSA: matches HKEY path containing CNG and RSA (used in CNG algorithm provider entries)
     ("winreg-cng-rsa",
