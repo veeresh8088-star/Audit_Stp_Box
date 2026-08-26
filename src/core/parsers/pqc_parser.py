@@ -965,6 +965,103 @@ _PROTOCOL_LABELS = (
 )
 
 
+def _extract_protocol_version(content: str) -> str:
+    """Extract protocol version string (e.g. 'TLSv1.2 / TLSv1.3') from configuration text."""
+    if not content: return ""
+    c_lower = content.lower()
+    found = []
+    if "tlsv1.3" in c_lower or "tls 1.3" in c_lower or "tls1.3" in c_lower:
+        found.append("TLSv1.3")
+    if "tlsv1.2" in c_lower or "tls 1.2" in c_lower or "tls1.2" in c_lower:
+        found.append("TLSv1.2")
+    if "tlsv1.1" in c_lower or "tls 1.1" in c_lower or "tls1.1" in c_lower:
+        found.append("TLSv1.1")
+    if "tlsv1.0" in c_lower or "tls 1.0" in c_lower or "tls1.0" in c_lower:
+        found.append("TLSv1.0")
+    if "sslv3" in c_lower or "ssl 3.0" in c_lower:
+        found.append("SSLv3")
+    return " / ".join(found) if found else ""
+
+
+def _assign_crypto_layers(finding: Finding, algo_name: str, crypto_category: str, meta: Optional[dict] = None, content: str = ""):
+    """
+    Accurately populates ca_algorithm, key_algorithm, and protocol_version
+    on a finding according to the algorithm's actual cryptographic role.
+    """
+    name_up = (algo_name or "").strip().upper()
+    cat_up  = (crypto_category or "").strip().upper()
+
+    # 1. Direct metadata from IANA / OID DB
+    if meta:
+        kex = meta.get("kex", "")
+        auth = meta.get("auth", "")
+        tls_ver = meta.get("tls_version", "")
+        if kex and kex not in ("N/A", "UNKNOWN", ""):
+            finding.key_algorithm = kex
+        if auth and auth not in ("N/A", "UNKNOWN", ""):
+            finding.ca_algorithm = auth
+        if tls_ver and tls_ver not in ("N/A", "UNKNOWN", ""):
+            finding.protocol_version = tls_ver
+
+    # 2. Protocol versions
+    if any(p in name_up or p in cat_up for p in (
+        "TLSV1", "TLS 1", "SSLV", "SSL 3", "IKEV", "IPSEC", "SSH"
+    )) and not any(k in name_up for k in ("AES", "ECDSA", "RSA", "SHA", "ECDHE", "DHE", "CHACHA", "X25519", "P-384")):
+        if not finding.protocol_version:
+            finding.protocol_version = algo_name
+        return
+
+    # 3. Signature / CA / Certificate Algorithms
+    sig_patterns = (
+        "ECDSA", "RSASSA", "RSA", "DSA", "ED25519", "ED448",
+        "ML-DSA", "DILITHIUM", "SLH-DSA", "SPHINCS", "FALCON", "FN-DSA",
+        "SHA256WITHRSA", "SHA384WITHRSA", "SHA512WITHRSA", "SHA1WITHRSA"
+    )
+    if any(sig in name_up or sig in cat_up for sig in sig_patterns):
+        if "ECDSA" in name_up: sig_name = "ECDSA"
+        elif "RSA" in name_up: sig_name = "RSA"
+        elif "DSA" in name_up and "ECDSA" not in name_up: sig_name = "DSA"
+        elif "ED25519" in name_up: sig_name = "Ed25519"
+        elif "DILITHIUM" in name_up or "ML-DSA" in name_up: sig_name = "ML-DSA (Dilithium)"
+        elif "SPHINCS" in name_up or "SLH-DSA" in name_up: sig_name = "SLH-DSA (SPHINCS+)"
+        elif "FALCON" in name_up or "FN-DSA" in name_up: sig_name = "FN-DSA (Falcon)"
+        else: sig_name = algo_name
+
+        if not finding.ca_algorithm:
+            finding.ca_algorithm = sig_name
+
+    # 4. Key Exchange / Key Encapsulation / Curve Algorithms
+    kex_patterns = (
+        "ECDHE", "DHE", "DIFFIE-HELLMAN", "X25519", "X448", "P-256", "P-384", "P-521",
+        "SECP256", "SECP384", "SECP521", "CURVE25519", "MODP", "ML-KEM", "KYBER",
+        "FRODOKEM", "HQC", "BIKE", "MCELIECE", "KEM", "ELLIPTIC CURVE", "RSA"
+    )
+    if any(kex in name_up or kex in cat_up for kex in kex_patterns):
+        if "X25519" in name_up or "CURVE25519" in name_up: kex_name = "Curve25519 / X25519"
+        elif "P-384" in name_up or "SECP384" in name_up: kex_name = "ECC P-384 / secp384r1"
+        elif "P-256" in name_up or "SECP256" in name_up: kex_name = "ECC P-256 / secp256r1"
+        elif "ECDHE" in name_up: kex_name = "ECDHE"
+        elif "DHE" in name_up or "DIFFIE" in name_up: kex_name = "DHE"
+        elif "ML-KEM" in name_up or "KYBER" in name_up: kex_name = "ML-KEM (Kyber)"
+        elif "FRODOKEM" in name_up: kex_name = "FrodoKEM"
+        elif "HQC" in name_up: kex_name = "HQC"
+        elif "BIKE" in name_up: kex_name = "BIKE"
+        elif "MCELIECE" in name_up: kex_name = "Classic McEliece"
+        elif "RSA" in name_up: kex_name = "RSA"
+        else: kex_name = algo_name
+
+        if not finding.key_algorithm:
+            finding.key_algorithm = kex_name
+
+    # 5. Clean up protocol_version if it was filled with non-protocol algorithm name
+    if finding.protocol_version and not any(p in finding.protocol_version.upper() for p in ("TLS", "SSL", "SSH", "IKE", "IPSEC")):
+        finding.protocol_version = ""
+
+    # 6. Fallback: extract protocol version from content context
+    if not finding.protocol_version and content:
+        finding.protocol_version = _extract_protocol_version(content)
+
+
 def _classify_crypto_layer(content: str, match_start: int, match_end: int) -> str:
     """Best-effort classification of which crypto-config "layer" (CA/KEY/
     PROTOCOL) a match belongs to, based on the nearest preceding field label on
@@ -1565,13 +1662,14 @@ class PQCParser(BaseParser):
                     if block_heading:
                         finding.asset_name = block_heading
 
-                # Enhancement 1: CA / Key / Protocol layer classification (best-effort).
+                # Enhancement 1: CA / Key / Protocol layer classification.
+                _assign_crypto_layers(finding, algo_name, crypto_category, content=content)
                 crypto_layer = _classify_crypto_layer(content, start, end)
-                if crypto_layer == "CA":
+                if crypto_layer == "CA" and not finding.ca_algorithm:
                     finding.ca_algorithm = algo_name
-                elif crypto_layer == "KEY":
+                elif crypto_layer == "KEY" and not finding.key_algorithm:
                     finding.key_algorithm = algo_name
-                elif crypto_layer == "PROTOCOL":
+                elif crypto_layer == "PROTOCOL" and not finding.protocol_version:
                     finding.protocol_version = algo_name
 
                 # Enhancement 2: exposure context (severity already escalated above).
@@ -1653,6 +1751,7 @@ class PQCParser(BaseParser):
             db_finding.quantum_status = qs
             db_finding.asset_name = filename
             db_finding.asset_category = _classify_asset_category("", filename, content[:500])
+            _assign_crypto_layers(db_finding, name, category, meta=meta, content=content)
             oem_product, _, oem_status = _match_oem_readiness(content, filename)
             db_finding.oem_product = oem_product
             db_finding.oem_readiness_status = oem_status
