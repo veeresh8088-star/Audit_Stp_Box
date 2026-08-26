@@ -75,8 +75,8 @@ class TestRetrievalPy(unittest.TestCase):
 
     def test_reranker_window_is_40(self):
         """Reranker candidate window must be 40 for zero evidence leaks"""
-        self.assertIn("deduplicated[:40]", self.src,
-            "Reranker candidate window must be 40, not 20")
+        self.assertIn("rerank_window = max(40", self.src,
+            "Reranker candidate window must be at least 40, not 20")
 
     def test_reranker_window_not_20(self):
         """Old reranker window of 20 must not remain"""

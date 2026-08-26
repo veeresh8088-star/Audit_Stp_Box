@@ -28,8 +28,8 @@ class TestAuditorCoverageEngine(unittest.TestCase):
             "status": "COMPLIANT", # LLM self-claimed COMPLIANT
             "policy_status": "FOUND",
             "policy_assessment": "COMPLIANT",
-            "evidence_status": "FOUND",
-            "evidence_assessment": "COMPLIANT",
+            "evidence_status": "NOT_FOUND",
+            "evidence_assessment": "NON_COMPLIANT",
             "evidence_quote": "Security will audit registration logs daily.",
             "source_files": "ID_Badge_and_Facility_Access_Policy_V17.0.pdf", # Policy file only
             "policy_finding": "Security will audit registration logs daily."

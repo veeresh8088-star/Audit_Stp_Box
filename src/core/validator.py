@@ -154,22 +154,15 @@ def classify_content_and_modality(content: str, filename: str = "", metadata: di
         content_type = "REVIEW"
     elif _kw("scan", text_lower) or _kw("vulnerability", text_lower) or _kw("cve", text_lower) or _kw("nessus", text_lower):
         content_type = "TEST_RESULT" if has_op_action else "ASSESSMENT"
-    elif _kw("cpu", text_lower) or _kw("memory", text_lower) or _kw("utilization", text_lower) or _kw("metric", text_lower) or _kw("cloudwatch", text_lower):
-        content_type = "MONITORING"
-    elif _kw("config", text_lower) or _kw("parameter", text_lower) or _kw("port:", text_lower) or _kw("ip:", text_lower) or _kw("setting", text_lower) or _kw("ctl", text_lower):
+    elif _kw("config", text_lower) or _kw("parameter", text_lower) or ("ip:" in text_lower) or ("port:" in text_lower) or _kw("setting", text_lower) or _kw("ctl", text_lower):
         content_type = "CONFIGURATION" if has_op_action else "STANDARD"
     elif (
         re.search(r'\blog(s|in|ged|out|ging)?\b', text_lower)
         or "session opened" in text_lower
         or "signed in" in text_lower
         or _kw("event", text_lower)
+        or fn.endswith(".log")
     ):
-        # "log" used to be a bare substring check, which matched "login" (and
-        # would equally mis-fire on "catalog", "dialogue", "blogger", etc.) --
-        # word-boundary matched now, and login/logged/logout variants are
-        # explicitly included since a real login event is exactly the kind of
-        # LOG_RECORD/evidence content this branch is meant to catch, not
-        # something that should fall through to PROCEDURE.
         content_type = "LOG_RECORD" if has_op_action else "PROCEDURE"
     elif _kw("access", text_lower) or _kw("visitor", text_lower) or _kw("badge", text_lower) or _kw("entry", text_lower):
         content_type = "VISITOR_RECORD" if (_kw("visitor", text_lower) or _kw("entry", text_lower)) else "ACCESS_RECORD"

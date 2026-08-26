@@ -276,6 +276,7 @@ class TestPostProcessSeverityNeverHardcoded(unittest.TestCase):
             "evidence_status": "FOUND",          # Must be FOUND for COMPLIANT to hold
             "evidence_assessment": "COMPLIANT",   # Must be COMPLIANT
             "evidence_quote": "Access review completed on 2024-07-01. All 14 accounts verified by Alice.",
+            "policy_snippet": "All access to systems must be formally authorized and reviewed.",
             "policy_validity": "CURRENT",
             "evidence_freshness": "CURRENT",
         }
