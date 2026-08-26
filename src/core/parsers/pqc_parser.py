@@ -1376,6 +1376,8 @@ def _find_block_heading_context(content: str, match_start: int) -> str:
         stripped = line.strip()
         if not stripped:
             continue
+        if stripped.startswith(("#", "//", ";", "--", "/*", "*/", "http", "server", "{", "}")):
+            break
         if _DASH_LINE_RE.match(stripped):
             break
         if ":" in stripped or "=" in stripped:

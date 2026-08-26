@@ -1606,8 +1606,8 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
 
     cbom_rows = pqc_findings if pqc_findings else active
     if cbom_rows:
-        pdf.set_font("Helvetica", "", 7.5)
-        with pdf.table(col_widths=(20, 20, 16, 16, 18, 18, 13, 12, 18, 13), text_align="L") as tbl:
+        pdf.set_font("Helvetica", "", 6.5)
+        with pdf.table(col_widths=(18, 20, 18, 18, 18, 24, 18, 10, 16, 18), text_align="L") as tbl:
             h = tbl.row()
             for hdr in ["Asset Category", "Asset", "CA Algorithm", "Key Algorithm",
                         "Protocol", "Quantum Status", "Exposure", "Port", "Environment", "Severity"]:
@@ -1617,15 +1617,15 @@ def _export_pqc_pdf(session_title, findings, resolved_list, status, comments="",
                 cat = str(f.get("asset_category") or "Unknown")
                 r = tbl.row()
                 r.cell(clean_text(cat[:20]), style=lbl_style)
-                r.cell(clean_text(str(f.get("asset_name") or "")[:20]), style=body_style)
-                r.cell(clean_text(str(f.get("ca_algorithm") or "")[:16]), style=body_style)
-                r.cell(clean_text(str(f.get("key_algorithm") or "")[:16]), style=body_style)
-                r.cell(clean_text(str(f.get("protocol_version") or "")[:18]), style=body_style)
+                r.cell(clean_text(str(f.get("asset_name") or "")[:22]), style=body_style)
+                r.cell(clean_text(str(f.get("ca_algorithm") or "")[:18]), style=body_style)
+                r.cell(clean_text(str(f.get("key_algorithm") or "")[:18]), style=body_style)
+                r.cell(clean_text(str(f.get("protocol_version") or "")[:20]), style=body_style)
                 r.cell(clean_text(qs[:18]), style=qs_style_for(qs))
-                r.cell(clean_text(str(f.get("exposure_context") or "")[:13]), style=body_style)
+                r.cell(clean_text(str(f.get("exposure_context") or "")[:15]), style=body_style)
                 r.cell(clean_text(str(f.get("port") or "")[:8]), style=body_style)
-                r.cell(clean_text(str(f.get("environment") or "")[:18]), style=body_style)
-                r.cell(clean_text(str(f.get("severity") or "")[:10]), style=body_style)
+                r.cell(clean_text(str(f.get("environment") or "")[:16]), style=body_style)
+                r.cell(clean_text(str(f.get("severity") or "")[:12]), style=body_style)
     else:
         pdf.set_font("Helvetica", "", 8.5)
         pdf.set_text_color(*BODY_TEXT)
