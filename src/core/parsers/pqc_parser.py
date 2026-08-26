@@ -37,6 +37,11 @@ from typing import List, Tuple, Any, Callable, Optional, Union
 from .base_parser import BaseParser, is_image_file
 from .finding_schema import Finding
 from .control_mapper import map_pqc_findings_list
+from .pqc_crypto_db import (
+    scan_oids_in_text,
+    scan_iana_hex_in_text,
+    scan_liboqs_in_text,
+)
 
 # ══════════════════════════════════════════════════════════════════════════════
 # DETECTION GATE (can_parse)
@@ -1409,6 +1414,124 @@ class PQCParser(BaseParser):
                     actionable_findings.append(finding)
                 else:
                     info_findings.append(finding)
+
+        # ── EXTENDED SCAN: OID / IANA Cipher Suite / liboqs algorithms ────────
+        # Runs the offline pqc_crypto_db lookup on the same text to catch
+        # algorithm references expressed as:
+        #   - X.509 dotted-decimal OID strings (e.g. 1.2.840.10045.4.3.2 = ECDSA)
+        #   - IANA TLS cipher suite hex codes (e.g. 0xC02B = ECDHE-ECDSA-AES128-GCM-SHA256)
+        #   - liboqs/OQS algorithm keywords (FrodoKEM, HQC, BIKE, Kyber768, etc.)
+        # Each hit that doesn't overlap an already-accepted regex span becomes
+        # a new Finding, enriched with CWE ID, NIST OID reference, and IANA
+        # cipher suite key-exchange details.
+
+        def _make_db_finding(name: str, meta: dict, evidence_hint: str, source_tag: str) -> Finding:
+            qs = meta.get("quantum_status", "VULNERABLE")
+            sev = meta.get("severity", "HIGH")
+            category = meta.get("category", "Cryptographic Algorithm")
+            nist_ref = meta.get("nist_ref", "")
+            cwe = meta.get("cwe", "")
+            kex = meta.get("kex", "")
+            if qs == "VULNERABLE":
+                f_title = f"Quantum-Vulnerable Algorithm Detected: {name}"
+                f_desc = (
+                    f"Evidence in '{filename}' shows use of {name} ({category}). "
+                    f"This algorithm is quantum-vulnerable and broken by Shor's algorithm "
+                    f"on a sufficiently large quantum computer. "
+                    + (f"IANA Key Exchange: {kex}. " if kex and kex not in ("N/A", "") else "")
+                    + (f"NIST Reference: {nist_ref}. " if nist_ref else "")
+                    + (f"CWE: {cwe}." if cwe else "")
+                )
+                f_remed = _get_remediation_vulnerable(name, category)
+            elif qs == "WEAK":
+                f_title = f"Classically Weak / Deprecated Algorithm Detected: {name}"
+                f_desc = (
+                    f"Evidence in '{filename}' shows use of {name} ({category}). "
+                    f"This is a classically weak or deprecated algorithm -- already breakable "
+                    f"with classical computing and should be retired regardless of PQC timeline. "
+                    + (f"NIST Reference: {nist_ref}. " if nist_ref else "")
+                    + (f"CWE: {cwe}." if cwe else "")
+                )
+                f_remed = _REMEDIATION_WEAK
+            else:  # SAFE
+                f_title = f"Quantum-Safe Algorithm Confirmed: {name}"
+                f_desc = (
+                    f"Evidence in '{filename}' shows use of {name} ({category}). "
+                    f"This algorithm is quantum-resistant (NIST-selected PQC). "
+                    + (f"NIST Reference: {nist_ref}." if nist_ref else "")
+                )
+                f_remed = _REMEDIATION_SAFE
+
+            db_finding = Finding(
+                title=f_title,
+                severity=sev,
+                target=filename,
+                description=f_desc,
+                remediation=f_remed,
+                evidence=evidence_hint,
+                plugin_id=f"PQC-db-{source_tag}-{name[:20].replace(' ', '_')}",
+                source_tool="PQC-Scan",
+            )
+            db_finding.quantum_status = qs
+            db_finding.asset_name = filename
+            db_finding.asset_category = _classify_asset_category("", filename, content[:500])
+            oem_product, _, oem_status = _match_oem_readiness(content, filename)
+            db_finding.oem_product = oem_product
+            db_finding.oem_readiness_status = oem_status
+            return db_finding
+
+        # -- OID scan ---------------------------------------------------------
+        for oid_str, meta in scan_oids_in_text(content):
+            name = meta["name"]
+            # Skip if already covered by a regex rule match (avoids double-reporting)
+            oid_already_covered = any(
+                name.split()[0].upper() in (f.title or "").upper()
+                for f in actionable_findings + info_findings
+            )
+            if oid_already_covered:
+                continue
+            hint = f"OID detected in text: {oid_str} = {name}"
+            db_f = _make_db_finding(name, meta, hint, f"oid")
+            if db_f.severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+                actionable_findings.append(db_f)
+            else:
+                info_findings.append(db_f)
+
+        # -- IANA cipher suite hex scan ---------------------------------------
+        for hex_code, meta in scan_iana_hex_in_text(content):
+            suite_name = meta["name"]
+            kex = meta.get("kex", "")
+            # Only flag if not already reported
+            suite_already_covered = any(
+                meta.get("kex", "").split("-")[0].upper() in (f.title or "").upper()
+                for f in actionable_findings + info_findings
+            )
+            if suite_already_covered:
+                continue
+            hint = f"IANA cipher suite hex 0x{hex_code} = {suite_name} (KEX: {kex})"
+            db_f = _make_db_finding(suite_name, meta, hint, f"iana")
+            if db_f.severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+                actionable_findings.append(db_f)
+            else:
+                info_findings.append(db_f)
+
+        # -- liboqs / OQS algorithm keyword scan ------------------------------
+        for kw, meta in scan_liboqs_in_text(content):
+            algo_name = meta["name"]
+            qs = meta.get("quantum_status", "SAFE")
+            # Skip if already covered by ALGORITHM_RULES regex (e.g. kyber / dilithium)
+            already_covered = any(
+                kw.lower() in (f.title or "").lower()
+                for f in actionable_findings + info_findings
+            )
+            if already_covered:
+                continue
+            hint = f"liboqs/OQS algorithm keyword detected: {kw} = {algo_name}"
+            db_f = _make_db_finding(algo_name, meta, hint, f"oqs")
+            if db_f.severity in ("CRITICAL", "HIGH", "MEDIUM", "LOW"):
+                actionable_findings.append(db_f)
+            else:
+                info_findings.append(db_f)
 
         if not actionable_findings and not info_findings:
             return [], []
