@@ -95,6 +95,11 @@ class StartAuditRequest(BaseModel):
     selected_sls: List[int]
     model_choice: str
     audit_mode: str = "Deep"
+    # Live sidebar framework sent by the client at run-start time.
+    # Allows the backend to sync the session's stored framework before routing,
+    # so sessions created under one framework (e.g. ISO 27001 default) that the
+    # user later switched to VAPT/PQC don't get misrouted by the governance guardrail.
+    current_framework: Optional[str] = None
     custom_evidence: Optional[dict] = None
     custom_documents: Optional[dict] = None
     username: Optional[str] = None
@@ -1013,6 +1018,28 @@ def api_start_audit(req: StartAuditRequest, request: Request):
             report = get_or_create_audit_report(db, req.session_id, username=req.username or auth_user.get("username"))
             _assert_session_access(db, report, auth_user)
             report_id = report.id
+
+            # ── Sync live sidebar framework into the DB record ─────────────────
+            # The session was created with whatever framework was in the modal at
+            # creation time (defaulted to ISO 27001). If the user later changed
+            # the sidebar dropdown, the DB still holds the old value. Sync it now
+            # so the governance guardrail uses the correct framework for routing.
+            # Only overwrite for the major named frameworks -- ignore empty/unknown.
+            _live_fw = (req.current_framework or "").strip()
+            _KNOWN_FW_PREFIXES = ("ISO", "SOC", "VAPT", "PQC", "DPDP", "BCMS", "XBOM", "X-BOM", "NIST", "ALL")
+            if _live_fw and any(_live_fw.upper().startswith(p) for p in _KNOWN_FW_PREFIXES):
+                if (report.framework or "").strip() != _live_fw:
+                    print(
+                        f"[START AUDIT] Syncing framework: '{report.framework}' -> '{_live_fw}' "
+                        f"for session {req.session_id}",
+                        flush=True,
+                    )
+                    report.framework = _live_fw
+                    try:
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+
             report_framework = report.framework or ""
 
             # ── STALE CHECKPOINT CLEANUP ───────────────────────────────────────

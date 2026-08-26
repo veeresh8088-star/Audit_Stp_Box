@@ -996,7 +996,14 @@ function openNewSessionModal() {
     const companyEl = document.getElementById("new-session-company");
     const modal = document.getElementById("new-session-modal");
     const input = document.getElementById("new-session-title-input");
-    if (frameworkEl) frameworkEl.value = "ISO 27001";
+    // Pre-fill the modal framework from the CURRENT sidebar selection instead
+    // of always resetting to ISO 27001. This ensures a session created while
+    // VAPT or PQC is selected in the sidebar actually stores the right framework
+    // in the DB — without this, the DB had ISO 27001 for every session, causing
+    // the governance guardrail to coerce Fast Parser -> Deep even for VAPT/PQC.
+    const sidebarFw = document.getElementById("framework-select");
+    const defaultFw = (sidebarFw && sidebarFw.value) ? sidebarFw.value : "ISO 27001";
+    if (frameworkEl) frameworkEl.value = defaultFw;
     if (companyEl) companyEl.value = "";
     _autoFillSessionTitle();
     if (modal) {
@@ -1038,7 +1045,15 @@ async function startNewAuditSession(skipPrompt = false, customTitle = null) {
         // Build smart default title from modal fields if available
         const frameworkEl = document.getElementById("new-session-framework");
         const companyEl = document.getElementById("new-session-company");
-        const framework = (frameworkEl && frameworkEl.value) ? frameworkEl.value : "ISO 27001";
+        // Primary source: modal #new-session-framework (already pre-filled from
+        // the sidebar by openNewSessionModal()). Fallback: current sidebar value.
+        // This ensures the stored DB framework always matches what the user sees.
+        const sidebarFwEl = document.getElementById("framework-select");
+        const framework = (frameworkEl && frameworkEl.value)
+            ? frameworkEl.value
+            : (sidebarFwEl && sidebarFwEl.value)
+                ? sidebarFwEl.value
+                : "ISO 27001";
         const company = (companyEl && companyEl.value.trim()) ? ` — ${companyEl.value.trim()}` : "";
         const defaultTitle = `${framework}${company} — ${todayStr}`;
         let finalTitle = customTitle || defaultTitle;
@@ -2506,6 +2521,12 @@ async function triggerAuditAnalysis() {
 
     const frameworkSelect = document.getElementById("framework-select");
     const isVaptFramework = frameworkSelect ? frameworkSelect.value.toUpperCase().includes("VAPT") : false;
+    // Capture the live sidebar framework value to send with the audit/start request.
+    // This lets the backend sync the session's stored framework before routing,
+    // so switching from ISO 27001 -> VAPT in the sidebar after session creation
+    // doesn't leave the DB with a stale ISO 27001 framework that triggers the
+    // governance guardrail and coerces Fast Parser -> Deep wrongly.
+    const currentFramework = (frameworkSelect && frameworkSelect.value) ? frameworkSelect.value : "";
     const modelEl = document.getElementById("llm-model-select");
     const model = modelEl ? modelEl.value : "Gemma 4 (e4b)";
     // Previously read from document.querySelector("input[name='audit-mode']:checked"),
@@ -2524,6 +2545,7 @@ async function triggerAuditAnalysis() {
                 selected_sls: selectedSls,
                 model_choice: model,
                 audit_mode: mode,
+                current_framework: currentFramework,
                 custom_evidence: customEvidenceMappings,
                 custom_documents: customControlDocuments,
                 username: currentUser ? currentUser.username : null
