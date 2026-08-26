@@ -82,6 +82,12 @@ _PQC_BINARY_EXTENSIONS = (
     ".docx", ".doc",                           # Microsoft Word
     ".png", ".jpg", ".jpeg",                   # Raster images (OCR)
     ".webp", ".bmp", ".tiff", ".tif",          # Additional image formats
+    # ── Binary certificate / key / keystore formats ─────────────────────────
+    ".cer", ".crt", ".der",                    # DER / PEM X.509 certificates
+    ".key",                                    # PEM private keys (RSA/EC/Ed25519)
+    ".p12", ".pfx",                            # PKCS#12 keystores
+    ".jks",                                    # Java KeyStore
+    ".pub",                                    # SSH public key files
 )
 
 
@@ -143,7 +149,176 @@ def pqc_extract_text(filename: str, raw_bytes: bytes) -> str:
         except Exception:
             return ""
 
+    # ── X.509 Certificates: DER / PEM (.cer / .crt / .der) ──────────────────────
+    if ext in (".cer", ".crt", ".der"):
+        try:
+            from cryptography import x509 as _x509
+            from cryptography.hazmat.primitives.asymmetric import (
+                rsa as _rsa, ec as _ec,
+                ed25519 as _ed25519, ed448 as _ed448,
+            )
+            from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey as _DSAKey
+
+            def _cert_to_text(cert):
+                subject  = cert.subject.rfc4514_string()
+                issuer   = cert.issuer.rfc4514_string()
+                sig_oid  = cert.signature_algorithm_oid.dotted_string
+                sig_hash = (cert.signature_hash_algorithm.name
+                            if cert.signature_hash_algorithm else "unknown")
+                try:
+                    nb = cert.not_valid_before_utc
+                    na = cert.not_valid_after_utc
+                except AttributeError:
+                    nb = cert.not_valid_before
+                    na = cert.not_valid_after
+                pub = cert.public_key()
+                if isinstance(pub, _rsa.RSAPublicKey):
+                    key_info = f"RSA key_size={pub.key_size}"
+                elif isinstance(pub, _ec.EllipticCurvePublicKey):
+                    key_info = f"ECDSA elliptic_curve={pub.curve.name}"
+                elif isinstance(pub, _ed25519.Ed25519PublicKey):
+                    key_info = "Ed25519 elliptic curve"
+                elif isinstance(pub, _ed448.Ed448PublicKey):
+                    key_info = "Ed448 elliptic curve"
+                elif isinstance(pub, _DSAKey):
+                    key_info = f"DSA key_size={pub.key_size}"
+                else:
+                    key_info = "unknown_algorithm"
+                return (
+                    f"X.509 Certificate\nSubject: {subject}\nIssuer: {issuer}\n"
+                    f"Signature Algorithm OID: {sig_oid}\nSignature Hash: {sig_hash}\n"
+                    f"Public Key: {key_info}\n"
+                    f"Valid From: {nb}\nValid Until: {na}\n"
+                    f"ssl certificate tls algorithm encryption key exchange\n"
+                )
+
+            lines_out = []
+            try:
+                for cert in _x509.load_pem_x509_certificates(raw_bytes):
+                    lines_out.append(_cert_to_text(cert))
+            except Exception:
+                pass
+            if not lines_out:
+                try:
+                    lines_out.append(_cert_to_text(_x509.load_pem_x509_certificate(raw_bytes)))
+                except Exception:
+                    pass
+            if not lines_out:
+                try:
+                    lines_out.append(_cert_to_text(_x509.load_der_x509_certificate(raw_bytes)))
+                except Exception:
+                    pass
+            if lines_out:
+                return "\n".join(lines_out)
+        except Exception:
+            pass
+        return ""
+
+    # ── PEM Private Keys (.key) ───────────────────────────────────────────────────
+    if ext == ".key":
+        try:
+            text = raw_bytes.decode("utf-8", errors="ignore")
+            if "-----BEGIN" in text:
+                if "RSA" in text:
+                    return f"RSA private key ssl tls algorithm encryption\n{text[:2000]}"
+                if "EC PRIVATE" in text:
+                    return f"ECDSA elliptic curve private key ssl tls algorithm encryption\n{text[:2000]}"
+                if "ED25519" in text.upper():
+                    return "Ed25519 elliptic curve private key ssl tls algorithm encryption"
+                if "DSA" in text:
+                    return f"DSA private key ssl tls algorithm encryption\n{text[:2000]}"
+                return f"private key ssl tls algorithm encryption\n{text[:2000]}"
+            from cryptography.hazmat.primitives.serialization import load_der_private_key
+            from cryptography.hazmat.primitives.asymmetric import rsa as _rsa, ec as _ec
+            key = load_der_private_key(raw_bytes, password=None)
+            if isinstance(key, _rsa.RSAPrivateKey):
+                return f"RSA private key key_size={key.key_size} ssl tls algorithm encryption"
+            if isinstance(key, _ec.EllipticCurvePrivateKey):
+                return f"ECDSA elliptic curve private key curve={key.curve.name} ssl tls algorithm encryption"
+            return "private key ssl tls algorithm encryption"
+        except Exception:
+            pass
+        return ""
+
+    # ── PKCS#12 Keystores (.p12 / .pfx) ─────────────────────────────────────────
+    if ext in (".p12", ".pfx"):
+        try:
+            from cryptography.hazmat.primitives.serialization import pkcs12 as _pkcs12
+            from cryptography.hazmat.primitives.asymmetric import rsa as _rsa, ec as _ec
+            lines_out = ["PKCS12 keystore ssl tls certificate key exchange algorithm encryption"]
+            for pwd in (None, b"", b"changeit", b"password"):
+                try:
+                    _, cert, chain = _pkcs12.load_key_and_certificates(raw_bytes, pwd)
+                    if cert:
+                        sig_oid = cert.signature_algorithm_oid.dotted_string
+                        pub = cert.public_key()
+                        if isinstance(pub, _rsa.RSAPublicKey):
+                            lines_out.append(f"RSA key_size={pub.key_size} signature_algorithm_oid={sig_oid}")
+                        elif isinstance(pub, _ec.EllipticCurvePublicKey):
+                            lines_out.append(f"ECDSA elliptic_curve={pub.curve.name} signature_algorithm_oid={sig_oid}")
+                        else:
+                            lines_out.append(f"algorithm signature_algorithm_oid={sig_oid}")
+                    if chain:
+                        for c in chain:
+                            oid = c.signature_algorithm_oid.dotted_string
+                            lines_out.append(f"chain certificate signature_algorithm_oid={oid}")
+                    break
+                except Exception:
+                    continue
+            return "\n".join(lines_out)
+        except Exception:
+            pass
+        return "PKCS12 keystore ssl tls certificate algorithm encryption"
+
+    # ── Java KeyStore (.jks) ──────────────────────────────────────────────────────
+    if ext == ".jks":
+        try:
+            if raw_bytes[:4] == b'\xfe\xed\xfe\xed':
+                text_layer = raw_bytes.decode("latin-1", errors="ignore")
+                hints = []
+                if "RSA" in text_layer: hints.append("RSA")
+                if "EC"  in text_layer: hints.append("ECDSA elliptic curve")
+                if "DSA" in text_layer: hints.append("DSA")
+                if "AES" in text_layer: hints.append("AES")
+                if not hints:           hints.append("algorithm")
+                return (
+                    "Java KeyStore JKS keystore ssl tls algorithm encryption key exchange\n"
+                    + " ".join(hints) + "\n"
+                )
+        except Exception:
+            pass
+        return "Java KeyStore JKS keystore ssl tls algorithm encryption"
+
+    # ── SSH Public Key Files (.pub) ───────────────────────────────────────────────
+    if ext == ".pub":
+        try:
+            text = raw_bytes.decode("utf-8", errors="ignore").strip()
+            _SSH_TYPE_MAP = {
+                "ssh-rsa":                    "RSA ssh algorithm key exchange",
+                "rsa-sha2-256":               "RSA ssh algorithm key exchange",
+                "rsa-sha2-512":               "RSA ssh algorithm key exchange",
+                "ssh-dss":                    "DSA ssh algorithm key exchange",
+                "ecdsa-sha2-nistp256":        "ECDSA elliptic curve secp256r1 ssh algorithm",
+                "ecdsa-sha2-nistp384":        "ECDSA elliptic curve secp384r1 ssh algorithm",
+                "ecdsa-sha2-nistp521":        "ECDSA elliptic curve secp521r1 ssh algorithm",
+                "ssh-ed25519":                "Ed25519 elliptic curve ssh algorithm",
+                "ssh-ed448":                  "Ed448 elliptic curve ssh algorithm",
+                "sk-ssh-ed25519@openssh.com": "Ed25519 elliptic curve fido2 ssh algorithm",
+                "sk-ecdsa-sha2-nistp256@openssh.com": "ECDSA elliptic curve fido2 ssh algorithm",
+            }
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                key_type = line.split()[0].lower()
+                algo_desc = _SSH_TYPE_MAP.get(key_type, f"{key_type} ssh algorithm key exchange")
+                return f"SSH public key {algo_desc}\ntls ssl cipher encryption\n"
+        except Exception:
+            pass
+        return "SSH public key ssl tls algorithm"
+
     return ""
+
 
 def _count_pqc_signals(sample_lower: str) -> int:
     return sum(1 for kw in _PQC_KEYWORDS if kw in sample_lower)
@@ -1234,6 +1409,9 @@ class PQCParser(BaseParser):
                     flush=True,
                 )
                 return [], []
+            elif content and content.strip().startswith("-----BEGIN"):
+                # PEM content passed as text -- re-extract to get structured algorithm text
+                raw_bytes = content.encode("utf-8", errors="ignore")
             else:
                 # content is already extracted text (bg_worker did it upstream)
                 pass
