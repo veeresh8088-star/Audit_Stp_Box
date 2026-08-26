@@ -21,12 +21,36 @@ UPLOAD_SETTINGS = {
     "max_files_per_upload":   (30, 1, 200),
     "max_zip_uncompressed_mb": (500, 10, 5000),
     "max_zip_ratio":          (100, 5, 1000),
+    "gpu_acceleration_enabled": (1, 0, 1),
 }
 
 _cache = {}
 _cache_ts = {}
 _cache_lock = threading.Lock()
 _CACHE_TTL_SECONDS = 30
+
+
+def is_gpu_enabled() -> bool:
+    """Returns True if GPU acceleration is enabled by the admin in system settings."""
+    try:
+        return get_setting("gpu_acceleration_enabled") == 1
+    except Exception:
+        return True
+
+
+def get_effective_device() -> str:
+    """
+    Returns 'cuda' if GPU acceleration is enabled in settings AND PyTorch CUDA is physically available.
+    Safely falls back to 'cpu' if GPU is disabled OR if CUDA hardware/drivers are missing.
+    """
+    if is_gpu_enabled():
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "cuda"
+        except Exception as e:
+            print(f"[GPU SETTINGS] Failed CUDA availability check, using CPU: {e}", flush=True)
+    return "cpu"
 
 
 def get_setting(key: str) -> int:

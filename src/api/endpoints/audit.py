@@ -1800,32 +1800,44 @@ def api_commit_session_findings(session_id: str, request: Request, force: bool =
 
 @router.get("/settings/upload-limits")
 def api_get_upload_limit_settings(request: Request):
-    """Returns the current admin-editable upload limits and their allowed
-    min/max bounds. Admin only -- these govern the whole system's upload
-    behavior, not just one auditor's."""
+    """Returns the current admin-editable upload limits and system settings. Admin only."""
     user = _require_auth(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Access denied. Admin only.")
-    from src.core.settings import get_all_upload_settings, UPLOAD_SETTINGS
+    from src.core.settings import get_all_upload_settings, UPLOAD_SETTINGS, get_effective_device
     values = get_all_upload_settings()
+    
+    cuda_available = False
+    gpu_name = "None"
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            gpu_name = torch.cuda.get_device_name(0)
+    except Exception:
+        pass
+
     return {
         "success": True,
         "settings": {
             key: {"value": values[key], "min": bounds[1], "max": bounds[2], "default": bounds[0]}
             for key, bounds in UPLOAD_SETTINGS.items()
+        },
+        "cuda_info": {
+            "cuda_available": cuda_available,
+            "gpu_device_name": gpu_name,
+            "effective_device": get_effective_device()
         }
     }
 
 
 @router.put("/settings/upload-limits")
 def api_update_upload_limit_settings(request: Request, updates: dict):
-    """Updates one or more upload-limit settings. Admin only. Body is a flat
-    {key: new_value} object; unknown keys or out-of-bounds values are rejected
-    with a clear error rather than silently clamped."""
+    """Updates system settings. Admin only."""
     user = _require_auth(request)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Access denied. Admin only.")
-    from src.core.settings import set_setting, get_all_upload_settings, UPLOAD_SETTINGS
+    from src.core.settings import set_setting, get_all_upload_settings, UPLOAD_SETTINGS, get_effective_device
 
     unknown = [k for k in updates if k not in UPLOAD_SETTINGS]
     if unknown:
@@ -1839,10 +1851,29 @@ def api_update_upload_limit_settings(request: Request, updates: dict):
 
     log_system_event(
         "SETTINGS_UPDATED", "INFO",
-        f"Upload limit settings updated: {updates}",
+        f"System settings updated: {updates}",
         actor=user.get("username")
     )
-    return {"success": True, "settings": get_all_upload_settings()}
+    
+    cuda_available = False
+    gpu_name = "None"
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+        if cuda_available:
+            gpu_name = torch.cuda.get_device_name(0)
+    except Exception:
+        pass
+
+    return {
+        "success": True,
+        "settings": get_all_upload_settings(),
+        "cuda_info": {
+            "cuda_available": cuda_available,
+            "gpu_device_name": gpu_name,
+            "effective_device": get_effective_device()
+        }
+    }
 
 
 @router.get("/admin-logs")

@@ -5494,6 +5494,7 @@ const UPLOAD_SETTING_LABELS = {
     max_files_per_upload: "Max files per upload",
     max_zip_uncompressed_mb: "Max ZIP decompressed size (MB)",
     max_zip_ratio: "Max ZIP compression ratio (X:1)",
+    gpu_acceleration_enabled: "GPU Acceleration (NVIDIA CUDA)",
 };
 
 async function loadUploadSettings() {
@@ -5503,14 +5504,47 @@ async function loadUploadSettings() {
         const res = await authFetch(`${API_BASE}/audit/settings/upload-limits`);
         const data = await res.json();
         if (!data.success) return;
-        grid.innerHTML = Object.entries(data.settings).map(([key, s]) => `
-            <div>
-                <label style="display:block; font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-bottom:4px;">${escapeHtml(UPLOAD_SETTING_LABELS[key] || key)}</label>
-                <input type="number" id="setting-${escapeHtml(key)}" value="${s.value}" min="${s.min}" max="${s.max}"
-                    style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(15,23,42,0.4); color:var(--text-main); font-size:0.84rem;">
-                <span style="font-size:0.68rem; color:var(--text-muted);">Range: ${s.min}-${s.max}</span>
-            </div>
-        `).join("");
+
+        const cudaInfo = data.cuda_info || {};
+        const isCuda = cudaInfo.cuda_available;
+        const gpuName = cudaInfo.gpu_device_name || "None";
+        const effDev = cudaInfo.effective_device || "cpu";
+
+        grid.innerHTML = Object.entries(data.settings).map(([key, s]) => {
+            if (key === "gpu_acceleration_enabled") {
+                const isChecked = s.value === 1;
+                let badgeHtml = "";
+                if (isChecked && isCuda) {
+                    badgeHtml = `<span style="display:inline-block; margin-top:4px; padding:2px 8px; border-radius:12px; background:rgba(16,185,129,0.2); color:#10b981; font-size:0.7rem; font-weight:600;">🟢 Active: ${escapeHtml(gpuName)}</span>`;
+                } else if (isChecked && !isCuda) {
+                    badgeHtml = `<span style="display:inline-block; margin-top:4px; padding:2px 8px; border-radius:12px; background:rgba(245,158,11,0.2); color:#f59e0b; font-size:0.7rem; font-weight:600;">⚠️ Fallback Mode: GPU ON, but no CUDA card detected (Running on CPU)</span>`;
+                } else {
+                    badgeHtml = `<span style="display:inline-block; margin-top:4px; padding:2px 8px; border-radius:12px; background:rgba(148,163,184,0.2); color:#94a3b8; font-size:0.7rem; font-weight:600;">⚪ Disabled: Running on CPU Mode</span>`;
+                }
+
+                return `
+                    <div style="grid-column: span 2; background:rgba(15,23,42,0.6); padding:12px 14px; border-radius:10px; border:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-between;">
+                        <div>
+                            <label style="display:block; font-size:0.84rem; color:var(--text-main); font-weight:600; margin-bottom:2px;">⚡ GPU Acceleration (NVIDIA CUDA)</label>
+                            <span style="font-size:0.72rem; color:var(--text-muted);">Accelerates RAG vector embeddings, reranking, and local LLM inference.</span>
+                            <div>${badgeHtml}</div>
+                        </div>
+                        <div>
+                            <input type="checkbox" id="setting-gpu_acceleration_enabled" ${isChecked ? "checked" : ""} style="width:20px; height:20px; cursor:pointer; accent-color:#00509d;">
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div>
+                    <label style="display:block; font-size:0.74rem; color:var(--text-muted); font-weight:600; margin-bottom:4px;">${escapeHtml(UPLOAD_SETTING_LABELS[key] || key)}</label>
+                    <input type="number" id="setting-${escapeHtml(key)}" value="${s.value}" min="${s.min}" max="${s.max}"
+                        style="width:100%; padding:8px 10px; border-radius:8px; border:1px solid var(--border-color); background:rgba(15,23,42,0.4); color:var(--text-main); font-size:0.84rem;">
+                    <span style="font-size:0.68rem; color:var(--text-muted);">Range: ${s.min}-${s.max}</span>
+                </div>
+            `;
+        }).join("");
     } catch (err) {
         console.error("Error loading upload settings:", err);
     }
@@ -5521,7 +5555,13 @@ async function saveUploadSettings() {
     const updates = {};
     for (const key of Object.keys(UPLOAD_SETTING_LABELS)) {
         const el = document.getElementById(`setting-${key}`);
-        if (el) updates[key] = parseInt(el.value, 10);
+        if (el) {
+            if (el.type === "checkbox") {
+                updates[key] = el.checked ? 1 : 0;
+            } else {
+                updates[key] = parseInt(el.value, 10);
+            }
+        }
     }
     if (statusEl) { statusEl.textContent = "Saving..."; statusEl.style.color = "var(--text-muted)"; }
     try {
@@ -5533,7 +5573,8 @@ async function saveUploadSettings() {
         const data = await res.json();
         if (!res.ok) throw new Error(formatApiError(data.detail, "Failed to save settings."));
         if (statusEl) { statusEl.textContent = "✅ Saved — applies immediately, no restart needed."; statusEl.style.color = "#10b981"; }
-        showToast("Upload limit settings saved.", "info");
+        showToast("System & GPU settings saved.", "info");
+        await loadUploadSettings();
     } catch (err) {
         if (statusEl) { statusEl.textContent = `❌ ${err.message}`; statusEl.style.color = "var(--error)"; }
     }
