@@ -3898,13 +3898,82 @@ function formatStructuredPoc(pocText) {
 
     // Auto-structure Nessus / Burp key-value outputs cleanly with bullet points
     clean = clean
-        .replace(/([^\n])\s*(Path\s*:)/gi, "$1\n• Installation Path           :")
-        .replace(/([^\n])\s*(Installed version\s*:)/gi, "$1\n• Installed Version           :")
-        .replace(/([^\n])\s*(Security End of Life\s*:)/gi, "$1\n• Security End-of-Life Date   :")
-        .replace(/([^\n])\s*(Time since Security End of Life \(Est\.\)\s*:)/gi, "$1\n• Time Since EoL (Estimated)  :");
+        .replace(/([^\n])\s*(Path\s*:)/gi, "$1\n\u2022 Installation Path           :")
+        .replace(/([^\n])\s*(Installed version\s*:)/gi, "$1\n\u2022 Installed Version           :")
+        .replace(/([^\n])\s*(Security End of Life\s*:)/gi, "$1\n\u2022 Security End-of-Life Date   :")
+        .replace(/([^\n])\s*(Time since Security End of Life \(Est\.\)\s*:)/gi, "$1\n\u2022 Time Since EoL (Estimated)  :");
 
     return clean.trim();
 }
+
+/**
+ * formatRemediationSteps(text, color)
+ * Splits numbered-step remediation text ("1. Do X. 2. Do Y.") into a
+ * structured HTML ordered list so each action point is clearly visible.
+ * Falls back to a plain <p> for single-sentence / no-number text.
+ * @param {string} text   - Raw remediation / mitigation string
+ * @param {string} color  - CSS color for step number badges (e.g. '#3b82f6')
+ * @returns {string}      - HTML string safe to inject into innerHTML
+ */
+function formatRemediationSteps(text, color) {
+    if (!text || typeof text !== "string") return "";
+    const safe = text.trim();
+    if (!safe) return "";
+
+    // Detect if text has numbered steps: looks for " 1. ", " 2. " etc.
+    // Use a regex that matches a number+period boundary anywhere in the string.
+    const hasSteps = /(?:^|[.!?]\s+|:\s*)\d{1,2}\.\s+[A-Z]/m.test(safe)
+                  || /^\d{1,2}\.\s+/m.test(safe);
+
+    if (!hasSteps) {
+        // No numbered structure — render as plain paragraph
+        return `<p style="margin:0; font-size:0.86rem; color:${escapeHtml(color)}; line-height:1.6;">${escapeHtml(safe)}</p>`;
+    }
+
+    // Split on numbered-step boundaries: "1. ", "2. ", "3. " etc.
+    // The regex keeps the delimiter as a lookahead so we don't lose the first word.
+    // Strategy: insert a delimiter before each "<number>." that follows a sentence end
+    // or appears at the start, then split.
+    const delim = "\x00STEP\x00";
+    let marked = safe
+        // "IMMEDIATE ACTIONS:" and similar colons before step 1 — keep as label
+        .replace(/([.!?])\s+(\d{1,2})\.\s+/g, `$1 ${delim}$2. `)
+        .replace(/^(\d{1,2})\.\s+/, `${delim}$1. `);
+
+    const parts = marked.split(delim).map(p => p.trim()).filter(Boolean);
+
+    if (parts.length <= 1) {
+        // Splitting produced only 1 chunk — fall back to plain paragraph
+        return `<p style="margin:0; font-size:0.86rem; color:${escapeHtml(color)}; line-height:1.6;">${escapeHtml(safe)}</p>`;
+    }
+
+    // First chunk may be a preamble (e.g. "RSA is broken by...IMMEDIATE ACTIONS:")
+    // Detect by checking if it starts with a digit (step) or not (preamble)
+    let preamble = "";
+    let steps = parts;
+    if (!/^\d/.test(parts[0])) {
+        preamble = parts[0];
+        steps = parts.slice(1);
+    }
+
+    const listItems = steps.map(step => {
+        // Extract leading number: "1. Do this" → num=1, body="Do this"
+        const m = step.match(/^(\d{1,2})\.\s*(.*)$/s);
+        if (!m) return `<li style="margin-bottom:6px; line-height:1.55; font-size:0.86rem;">${escapeHtml(step)}</li>`;
+        const num = m[1];
+        const body = m[2].trim();
+        return `<li style="margin-bottom:8px; line-height:1.55;">
+            <span style="display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:50%; background:${escapeHtml(color)}22; color:${escapeHtml(color)}; font-size:0.72rem; font-weight:800; border:1px solid ${escapeHtml(color)}66; margin-right:8px; flex-shrink:0; vertical-align:middle;">${escapeHtml(num)}</span>
+            <span style="font-size:0.86rem; color:${escapeHtml(color)}; vertical-align:middle;">${escapeHtml(body)}</span>
+        </li>`;
+    }).join("");
+
+    return `
+        ${preamble ? `<p style="margin:0 0 8px 0; font-size:0.85rem; color:${escapeHtml(color)}; line-height:1.5; font-style:italic;">${escapeHtml(preamble)}</p>` : ""}
+        <ol style="margin:0; padding-left:0; list-style:none;">${listItems}</ol>
+    `;
+}
+
 
 function _isOcrNoiseText(str) {
     if (!str || typeof str !== "string") return false;
@@ -4839,16 +4908,16 @@ function renderFindingsList() {
                             <label style="font-weight:700; font-size:0.78rem; color:#3b82f6; text-transform:uppercase; letter-spacing:0.5px;">🔧 Recommended Remediation & Action</label>
                             <button type="button" onclick="navigator.clipboard.writeText('${safeRemedForClick}'); showToastBanner('Remediation script copied to clipboard!');" style="padding:2px 8px; font-size:0.72rem; border-radius:4px; border:1px solid rgba(59,130,246,0.4); background:rgba(59,130,246,0.1); color:#3b82f6; font-weight:700; cursor:pointer;">📋 Copy Fix Command</button>
                         </div>
-                        <p style="margin:0; font-size:0.86rem; color:#2563eb; line-height:1.5;">${escapeHtml(_remed)}</p>
+                        <div style="margin:0;">${formatRemediationSteps(_remed, '#2563eb')}</div>
                     </div>
 
                     ${(_remedActionable && _remedActionable !== _remed) ? `
                     <div class="finding-detail-row" style="margin-bottom: 12px;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                             <label style="font-weight:700; font-size:0.78rem; color:#10b981; text-transform:uppercase; letter-spacing:0.5px;">👨‍💻 Developer Actionable Mitigation Steps</label>
                             <button type="button" onclick="navigator.clipboard.writeText('${escapeHtml(_remedActionable).replace(/'/g, "\\'")}'); showToastBanner('Mitigation steps copied to clipboard!');" style="padding:2px 8px; font-size:0.72rem; border-radius:4px; border:1px solid rgba(16,185,129,0.4); background:rgba(16,185,129,0.1); color:#10b981; font-weight:700; cursor:pointer;">📋 Copy Steps</button>
                         </div>
-                        <p style="margin:0; font-size:0.86rem; color:#059669; line-height:1.5;">${escapeHtml(_remedActionable)}</p>
+                        <div style="margin:0;">${formatRemediationSteps(_remedActionable, '#059669')}</div>
                     </div>` : ""}
 
                     <div class="finding-actions" style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; padding-top:10px; border-top:1px solid rgba(148,163,184,0.15);">
