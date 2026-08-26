@@ -4578,22 +4578,34 @@ function renderFindingsList() {
         const findingJsonStr = escapeHtml(JSON.stringify(f));
         const safeCtrlId = escapeHtml(f.control_id || '');
 
-        // ── BUG FIX: Prevent "5.15 Access Control Access Control" duplication ──
-        // control_id is already "5.15 Access Control" (ID + name combined).
-        // control_name is "Access Control (5.15)" (name + ID in parentheses).
-        // Using control_name causes the name to appear TWICE in the header.
-        // Fix: always derive displayHeaderTitle from control_id which is canonical.
-        let displayHeaderTitle = safeCtrlId || escapeHtml(f.control_name || f.title || 'ISO Control');
-        // Strip trailing duplicate paren-ID suffix e.g. "5.15 Access Control (5.15)"
-        displayHeaderTitle = displayHeaderTitle.replace(/\s*\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)\s*$/, '').trim();
-        // Strip any trailing " — question text" (Excel mode appends checklist question after " — ")
-        // but keep it if control_id alone is just a number like "5.15".
-        if (displayHeaderTitle.includes(' — ')) {
-            const parts = displayHeaderTitle.split(' — ');
-            // If first part already contains the control name, use the full string (don't truncate)
-            displayHeaderTitle = parts[0].trim();
+        // ── Canonical displayHeaderTitle with FULL control name / title ──
+        const ctrlIdStr = (f.control_id || '').trim();
+        const ctrlNameStr = (f.control_name || '').trim();
+        const titleStr = (f.title || f.finding_title || '').trim();
+
+        let displayHeaderTitle = "";
+        if (ctrlIdStr) {
+            // Check if ctrlIdStr is already a full title (e.g. "5.15 Access Control")
+            const hasFullTextInId = ctrlIdStr.length > 8 && /\s+[A-Za-z]/.test(ctrlIdStr);
+            if (hasFullTextInId) {
+                displayHeaderTitle = ctrlIdStr;
+            } else {
+                // Short ID code like "PQC-2", "PQC-10", "VAPT-01", "5.15"
+                const descText = (ctrlNameStr && ctrlNameStr !== ctrlIdStr && !ctrlIdStr.toLowerCase().includes(ctrlNameStr.toLowerCase())) ? ctrlNameStr
+                               : (titleStr && titleStr !== ctrlIdStr && !ctrlIdStr.toLowerCase().includes(titleStr.toLowerCase())) ? titleStr
+                               : "";
+                displayHeaderTitle = descText ? `${ctrlIdStr} — ${descText}` : ctrlIdStr;
+            }
+        } else if (ctrlNameStr) {
+            displayHeaderTitle = ctrlNameStr;
+        } else if (titleStr) {
+            displayHeaderTitle = titleStr;
+        } else {
+            displayHeaderTitle = "Audit Control";
         }
-        // Final safety: strip duplicate adjacent words e.g. "Access Control Access Control"
+
+        // Cleanups
+        displayHeaderTitle = displayHeaderTitle.replace(/\s*\(\s*\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\s*\)\s*$/, '').trim();
         displayHeaderTitle = displayHeaderTitle.replace(/(\b[\w ]{5,}?)\s+\1/gi, '$1').trim();
 
         const safeDoc = escapeHtml(singleDoc);
